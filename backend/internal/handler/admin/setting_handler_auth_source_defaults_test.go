@@ -206,6 +206,83 @@ func TestSettingHandler_UpdateSettings_PreservesOmittedAuthSourceDefaults(t *tes
 	require.Equal(t, true, data["force_email_on_third_party_signup"])
 }
 
+func TestSettingHandler_UpdateSettings_RejectsEmailVerificationWithoutSMTP(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{
+		values: map[string]string{
+			service.SettingKeyRegistrationEnabled: "true",
+			service.SettingKeyEmailVerifyEnabled:  "false",
+			service.SettingKeyPromoCodeEnabled:    "true",
+		},
+	}
+	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil)
+
+	body := map[string]any{
+		"registration_enabled": true,
+		"email_verify_enabled": true,
+		"promo_code_enabled":   true,
+	}
+	rawBody, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, "false", repo.values[service.SettingKeyEmailVerifyEnabled])
+	require.Contains(t, rec.Body.String(), "Cannot enable email verification")
+}
+
+func TestSettingHandler_UpdateSettings_AllowsEmailVerificationWithSavedSMTPPassword(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{
+		values: map[string]string{
+			service.SettingKeyRegistrationEnabled: "true",
+			service.SettingKeyEmailVerifyEnabled:  "false",
+			service.SettingKeyPromoCodeEnabled:    "true",
+			service.SettingKeySMTPHost:            "smtp.example.com",
+			service.SettingKeySMTPPort:            "587",
+			service.SettingKeySMTPUsername:        "smtp-user",
+			service.SettingKeySMTPPassword:        "saved-password",
+			service.SettingKeySMTPFrom:            "no-reply@example.com",
+			service.SettingKeySMTPFromName:        "AI Gateway",
+			service.SettingKeySMTPUseTLS:          "false",
+		},
+	}
+	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil)
+
+	body := map[string]any{
+		"registration_enabled": true,
+		"email_verify_enabled": true,
+		"promo_code_enabled":   true,
+		"smtp_host":            "smtp.example.com",
+		"smtp_port":            587,
+		"smtp_username":        "smtp-user",
+		"smtp_from_email":      "no-reply@example.com",
+		"smtp_from_name":       "AI Gateway",
+		"smtp_use_tls":         false,
+	}
+	rawBody, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "true", repo.values[service.SettingKeyEmailVerifyEnabled])
+	require.Equal(t, "saved-password", repo.values[service.SettingKeySMTPPassword])
+}
+
 func TestSettingHandler_UpdateSettings_PersistsPaymentVisibleMethodsAndAdvancedScheduler(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &settingHandlerRepoStub{

@@ -577,6 +577,21 @@ type UpdateSettingsRequest struct {
 	OpenAIFastPolicySettings *dto.OpenAIFastPolicySettings `json:"openai_fast_policy_settings,omitempty"`
 }
 
+func smtpReadyForEmailVerification(req UpdateSettingsRequest, previous *service.SystemSettings) bool {
+	passwordConfigured := strings.TrimSpace(req.SMTPPassword) != ""
+	if previous != nil {
+		passwordConfigured = passwordConfigured ||
+			strings.TrimSpace(previous.SMTPPassword) != "" ||
+			previous.SMTPPasswordConfigured
+	}
+
+	return strings.TrimSpace(req.SMTPHost) != "" &&
+		req.SMTPPort > 0 &&
+		strings.TrimSpace(req.SMTPUsername) != "" &&
+		passwordConfigured &&
+		strings.TrimSpace(req.SMTPFrom) != ""
+}
+
 // UpdateSettings 更新系统设置
 // PUT /api/v1/admin/settings
 func (h *SettingHandler) UpdateSettings(c *gin.Context) {
@@ -671,6 +686,10 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		req.SMTPFrom = previousSettings.SMTPFrom
 		req.SMTPFromName = previousSettings.SMTPFromName
 		req.SMTPUseTLS = previousSettings.SMTPUseTLS
+	}
+	if req.EmailVerifyEnabled && !smtpReadyForEmailVerification(req, previousSettings) {
+		response.BadRequest(c, "Cannot enable email verification: SMTP host, port, username, password, and from email must be configured first")
+		return
 	}
 
 	// Turnstile 参数验证
