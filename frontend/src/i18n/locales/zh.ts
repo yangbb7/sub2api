@@ -463,7 +463,7 @@ export default {
     invitationCodeInvalid: '邀请码无效或已被使用',
     invitationCodeValidating: '正在验证邀请码...',
     invitationCodeInvalidCannotRegister: '邀请码无效，请检查后重试',
-    affiliateReferralApplied: '已带入邀请返利码：{code}',
+    affiliateReferralApplied: '已通过邀请链接加入，邀请码：{code}',
     oauthOrContinue: '或使用邮箱密码继续',
     linuxdo: {
       signIn: '使用 Linux.do 登录',

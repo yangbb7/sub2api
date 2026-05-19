@@ -34,7 +34,7 @@ vi.mock('vue-i18n', async () => {
     useI18n: () => ({
       t: (key: string, params?: Record<string, string | number>) => {
         if (key === 'auth.affiliateReferralApplied') {
-          return `affiliate:${params?.code ?? ''}`
+          return `Joined from an invite link. Invite code: ${params?.code ?? ''}`
         }
         return key
       },
@@ -121,7 +121,7 @@ describe('RegisterView affiliate referrals', () => {
     const wrapper = mountRegister()
     await flushPromises()
 
-    expect(wrapper.text()).toContain('affiliate:AFF123')
+    expect(wrapper.text()).toContain('Joined from an invite link. Invite code: AFF123')
 
     await wrapper.get('#email').setValue('new@example.com')
     await wrapper.get('#password').setValue('secret-123')

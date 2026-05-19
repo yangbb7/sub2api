@@ -464,7 +464,7 @@ export default {
     invitationCodeInvalid: 'Invalid or used invitation code',
     invitationCodeValidating: 'Validating invitation code...',
     invitationCodeInvalidCannotRegister: 'Invalid invitation code. Please check and try again',
-    affiliateReferralApplied: 'Affiliate invite code applied: {code}',
+    affiliateReferralApplied: 'Joined from an invite link. Invite code: {code}',
     oauthOrContinue: 'or continue with email',
     linuxdo: {
       signIn: 'Continue with Linux.do',
