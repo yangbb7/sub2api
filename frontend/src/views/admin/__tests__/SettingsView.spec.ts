@@ -748,6 +748,30 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(wrapper.text()).toContain("admin.settings.testEmail.title");
     expect(wrapper.text()).toContain("admin.settings.emailTabDisabledTitle");
   });
+
+  it("disables email verification until SMTP settings are ready", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      email_verify_enabled: false,
+      smtp_host: "",
+      smtp_port: 587,
+      smtp_username: "",
+      smtp_password_configured: false,
+      smtp_from_email: "",
+    });
+
+    const wrapper = mountView();
+
+    await flushPromises();
+    await openSecurityTab(wrapper);
+
+    const emailVerificationToggle = wrapper.get(
+      '[data-testid="email-verification-toggle"]',
+    );
+    expect(emailVerificationToggle.attributes("disabled")).toBeDefined();
+    expect(wrapper.text()).toContain("SMTP");
+    expect(wrapper.text()).toContain("admin.settings.tabs.email");
+  });
 });
 
 describe("admin SettingsView wechat connect controls", () => {

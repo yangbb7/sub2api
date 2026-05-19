@@ -1392,8 +1392,18 @@
                   <p class="text-sm text-gray-500 dark:text-gray-400">
                     {{ t("admin.settings.registration.emailVerificationHint") }}
                   </p>
+                  <p
+                    v-if="!form.email_verify_enabled && !smtpReadyForEmailVerification"
+                    class="mt-1 text-xs text-amber-600 dark:text-amber-400"
+                  >
+                    {{ smtpReadinessMessage }}
+                  </p>
                 </div>
-                <Toggle v-model="form.email_verify_enabled" />
+                <Toggle
+                  v-model="form.email_verify_enabled"
+                  data-testid="email-verification-toggle"
+                  :disabled="!form.email_verify_enabled && !smtpReadyForEmailVerification"
+                />
               </div>
 
               <!-- Email Suffix Whitelist -->
@@ -6227,6 +6237,44 @@ const testEmailAddress = ref("");
 const registrationEmailSuffixWhitelistTags = ref<string[]>([]);
 const registrationEmailSuffixWhitelistDraft = ref("");
 const tablePageSizeOptionsInput = ref("10, 20, 50, 100");
+const smtpRequiredFields = computed(() => [
+  {
+    ready: form.smtp_host.trim() !== "",
+    label: localText("SMTP 主机", "SMTP host"),
+  },
+  {
+    ready: Number(form.smtp_port) > 0,
+    label: localText("SMTP 端口", "SMTP port"),
+  },
+  {
+    ready: form.smtp_username.trim() !== "",
+    label: localText("SMTP 用户名", "SMTP username"),
+  },
+  {
+    ready:
+      form.smtp_password.trim() !== "" || form.smtp_password_configured === true,
+    label: localText("SMTP 密码", "SMTP password"),
+  },
+  {
+    ready: form.smtp_from_email.trim() !== "",
+    label: localText("发件人邮箱", "from email"),
+  },
+]);
+const smtpMissingFields = computed(() =>
+  smtpRequiredFields.value.filter((field) => !field.ready),
+);
+const smtpReadyForEmailVerification = computed(
+  () => smtpMissingFields.value.length === 0,
+);
+const smtpReadinessMessage = computed(() => {
+  if (smtpReadyForEmailVerification.value) {
+    return "";
+  }
+  return localText(
+    `先到邮件设置补全：${smtpMissingFields.value.map((field) => field.label).join("、")}。`,
+    `Complete SMTP setup first: ${smtpMissingFields.value.map((field) => field.label).join(", ")}.`,
+  );
+});
 
 // Admin API Key 状态
 const adminApiKeyLoading = ref(true);
