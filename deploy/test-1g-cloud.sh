@@ -46,10 +46,16 @@ rm -f "${tmp_env}"
 SSH_PASS=secret_ssh_password \
 CF_API_TOKEN=secret_cloudflare_token \
 DOMAIN=api.example.net \
+JP_SSH_TARGET=dhy@203.0.113.20 \
+JP_TARGET_IP=203.0.113.20 \
+HK_SSH_TARGET=dhy@203.0.113.21 \
+HK_TARGET_IP=203.0.113.21 \
 ENV_FILE="${tmp_env}" \
   "${DEPLOY_DIR}/init-huana-1g-env.sh" >/dev/null
-if ! grep -q '^JP_SSH_TARGET=dhy@142\.248\.136\.7$' "${tmp_env}" ||
-  ! grep -q '^HK_SSH_TARGET=dhy@172\.81\.100\.2$' "${tmp_env}" ||
+if ! grep -q '^JP_SSH_TARGET=dhy@203\.0\.113\.20$' "${tmp_env}" ||
+  ! grep -q '^JP_TARGET_IP=203\.0\.113\.20$' "${tmp_env}" ||
+  ! grep -q '^HK_SSH_TARGET=dhy@203\.0\.113\.21$' "${tmp_env}" ||
+  ! grep -q '^HK_TARGET_IP=203\.0\.113\.21$' "${tmp_env}" ||
   ! grep -q '^DOMAIN=api\.example\.net$' "${tmp_env}" ||
   grep -q 'secret_ssh_password\|secret_cloudflare_token' "${tmp_env}"; then
   echo "Huana env initializer wrote incorrect or unsafe content" >&2
@@ -68,7 +74,12 @@ rm -f "${tmp_env}"
 echo "Checking 1G deploy readiness gate..."
 tmp_env="$(mktemp)"
 rm -f "${tmp_env}"
-DOMAIN=api.example.net ENV_FILE="${tmp_env}" "${DEPLOY_DIR}/init-huana-1g-env.sh" >/dev/null
+DOMAIN=api.example.net \
+JP_SSH_TARGET=dhy@203.0.113.20 \
+JP_TARGET_IP=203.0.113.20 \
+HK_SSH_TARGET=dhy@203.0.113.21 \
+HK_TARGET_IP=203.0.113.21 \
+ENV_FILE="${tmp_env}" "${DEPLOY_DIR}/init-huana-1g-env.sh" >/dev/null
 SSH_PASS=secret_ssh_password CF_API_TOKEN=secret_cloudflare_token ENV_FILE="${tmp_env}" \
   "${DEPLOY_DIR}/ready-1g.sh" >/dev/null
 if SSH_PASS=secret_ssh_password ENV_FILE="${tmp_env}" "${DEPLOY_DIR}/ready-1g.sh" >/dev/null 2>&1; then
