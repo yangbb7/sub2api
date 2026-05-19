@@ -43,6 +43,10 @@ coverage/
 .env
 .env.*
 !.env.example
+deploy/.env
+deploy/.env.*
+deploy/deploy-1g.env.local
+deploy/*report*.json
 
 # Local config
 config.yaml

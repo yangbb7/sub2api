@@ -19,6 +19,12 @@ const (
 	RunModeSimple   = "simple"
 )
 
+const (
+	DefaultServerPort         = 18080
+	DefaultRuntimeName        = "gateway"
+	DefaultDashboardKeyPrefix = "gateway:"
+)
+
 // 使用量记录队列溢出策略
 const (
 	UsageRecordOverflowPolicyDrop   = "drop"
@@ -1255,6 +1261,7 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	// 4. Config subdirectory
 	viper.AddConfigPath("./config")
 	// 5. System config directory
+	viper.AddConfigPath("/etc/gateway")
 	viper.AddConfigPath("/etc/sub2api")
 
 	// 环境变量支持
@@ -1403,7 +1410,7 @@ func setDefaults() {
 
 	// Server
 	viper.SetDefault("server.host", "0.0.0.0")
-	viper.SetDefault("server.port", 8080)
+	viper.SetDefault("server.port", DefaultServerPort)
 	viper.SetDefault("server.mode", "release")
 	viper.SetDefault("server.frontend_url", "")
 	viper.SetDefault("server.read_header_timeout", 30) // 30秒读取请求头
@@ -1421,7 +1428,7 @@ func setDefaults() {
 	// Log
 	viper.SetDefault("log.level", "info")
 	viper.SetDefault("log.format", "console")
-	viper.SetDefault("log.service_name", "sub2api")
+	viper.SetDefault("log.service_name", DefaultRuntimeName)
 	viper.SetDefault("log.env", "production")
 	viper.SetDefault("log.caller", true)
 	viper.SetDefault("log.stacktrace_level", "error")
@@ -1541,7 +1548,7 @@ func setDefaults() {
 	viper.SetDefault("database.port", 5432)
 	viper.SetDefault("database.user", "postgres")
 	viper.SetDefault("database.password", "postgres")
-	viper.SetDefault("database.dbname", "sub2api")
+	viper.SetDefault("database.dbname", DefaultRuntimeName)
 	viper.SetDefault("database.sslmode", "prefer")
 	viper.SetDefault("database.max_open_conns", 256)
 	viper.SetDefault("database.max_idle_conns", 128)
@@ -1624,7 +1631,7 @@ func setDefaults() {
 
 	// Dashboard cache
 	viper.SetDefault("dashboard_cache.enabled", true)
-	viper.SetDefault("dashboard_cache.key_prefix", "sub2api:")
+	viper.SetDefault("dashboard_cache.key_prefix", DefaultDashboardKeyPrefix)
 	viper.SetDefault("dashboard_cache.stats_fresh_ttl_seconds", 15)
 	viper.SetDefault("dashboard_cache.stats_ttl_seconds", 30)
 	viper.SetDefault("dashboard_cache.stats_refresh_timeout_seconds", 30)
@@ -2666,13 +2673,14 @@ func GetServerAddress() string {
 	v.SetConfigType("yaml")
 	v.AddConfigPath(".")
 	v.AddConfigPath("./config")
+	v.AddConfigPath("/etc/gateway")
 	v.AddConfigPath("/etc/sub2api")
 
 	// Support SERVER_HOST and SERVER_PORT environment variables
 	v.AutomaticEnv()
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.SetDefault("server.host", "0.0.0.0")
-	v.SetDefault("server.port", 8080)
+	v.SetDefault("server.port", DefaultServerPort)
 
 	// Try to read config file (ignore errors if not found)
 	_ = v.ReadInConfig()

@@ -1,11 +1,12 @@
 # 修改为你的域名
-api.sub2api.com {
+api.gateway.com {
         # =========================================================================
 	# 静态资源长期缓存（高优先级，放在最前面）
 	# 带 hash 的文件可以永久缓存，浏览器和 CDN 都会缓存
 	# =========================================================================
 	@static {
 		path /assets/*
+		path /gateway-logo.svg
 		path /logo.png
 		path /favicon.ico
 	}
@@ -30,7 +31,7 @@ api.sub2api.com {
 	# =========================================================================
 	# 反向代理配置
 	# =========================================================================
-	reverse_proxy localhost:8080 {
+	reverse_proxy localhost:18080 {
 		# 健康检查
 		health_uri /health
 		health_interval 30s
@@ -95,7 +96,7 @@ api.sub2api.com {
 	# 日志配置
 	# =========================================================================
 	log {
-		output file /var/log/caddy/sub2api.log {
+		output file /var/log/caddy/gateway.log {
 			roll_size 50mb
 			roll_keep 10
 			roll_keep_for 720h

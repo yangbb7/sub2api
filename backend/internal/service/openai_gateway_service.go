@@ -3665,7 +3665,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	}
 
 	// Detect SSE responses from upstream and convert to JSON.
-	// Some upstreams (e.g. other sub2api instances) may return SSE even when
+	// Some upstreams (e.g. other gateway instances) may return SSE even when
 	// stream=false was requested. Without this conversion the client would
 	// receive raw SSE text or a terminal event with empty output.
 	if isEventStreamResponse(resp.Header) {
@@ -4671,7 +4671,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	}
 
 	// Detect SSE responses for ALL account types via Content-Type header.
-	// Some OpenAI-compatible upstreams (including other sub2api instances)
+	// Some OpenAI-compatible upstreams (including other gateway instances)
 	// may return SSE even when stream=false was requested.
 	if isEventStreamResponse(resp.Header) {
 		return s.handleSSEToJSON(resp, c, body, originalModel, mappedModel)

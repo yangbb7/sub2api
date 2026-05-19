@@ -1,14 +1,20 @@
 <template>
   <div
-    class="flex min-h-screen items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100 p-4 dark:from-dark-900 dark:to-dark-800"
+    class="flex min-h-screen items-center justify-center bg-gray-50 p-4 text-gray-900 dark:bg-dark-950 dark:text-gray-100"
   >
     <div class="w-full max-w-2xl">
       <!-- Logo & Title -->
       <div class="mb-8 text-center">
         <div
-          class="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-500 to-primary-600 shadow-lg"
+          class="mb-4 inline-flex h-16 w-16 items-center justify-center overflow-hidden rounded-lg bg-white ring-1 ring-gray-200 dark:bg-dark-900 dark:ring-dark-700"
         >
-          <Icon name="cog" size="xl" class="text-white" />
+          <img
+            :src="DEFAULT_LOGO_URL"
+            alt="AI Gateway logo"
+            width="64"
+            height="64"
+            class="h-full w-full object-contain"
+          />
         </div>
         <h1 class="text-3xl font-bold text-gray-900 dark:text-white">{{ t('setup.title') }}</h1>
         <p class="mt-2 text-gray-500 dark:text-dark-400">{{ t('setup.description') }}</p>
@@ -21,7 +27,7 @@
             <div class="flex items-center">
               <div
                 :class="[
-                  'flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold transition-all',
+                  'flex h-10 w-10 items-center justify-center rounded-lg text-sm font-semibold transition-colors',
                   currentStep > index
                     ? 'bg-primary-500 text-white'
                     : currentStep === index
@@ -58,7 +64,7 @@
       </div>
 
       <!-- Step Content -->
-      <div class="rounded-2xl bg-white p-8 shadow-xl dark:bg-dark-800">
+      <div class="rounded-lg border border-gray-200 bg-white p-8 shadow-sm dark:border-dark-800 dark:bg-dark-900">
         <!-- Step 1: Database -->
         <div v-if="currentStep === 0" class="space-y-6">
           <div class="mb-6 text-center">
@@ -131,7 +137,7 @@
                 v-model="formData.database.dbname"
                 type="text"
                 class="input"
-                placeholder="sub2api"
+                placeholder="gateway"
               />
             </div>
             <div>
@@ -496,6 +502,7 @@ import { testDatabase, testRedis, install, type InstallRequest } from '@/api/set
 import Select from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { DEFAULT_LOGO_URL } from '@/constants/branding'
 
 const { t } = useI18n()
 
@@ -535,7 +542,7 @@ const formData = reactive<InstallRequest>({
     port: 5432,
     user: 'postgres',
     password: '',
-    dbname: 'sub2api',
+    dbname: 'gateway',
     sslmode: 'disable'
   },
   redis: {

@@ -110,11 +110,16 @@ backend/data/
 # ===================
 backend/config.yaml
 deploy/config.yaml
+deploy/deploy-1g.env.local
 backend/.installed
 
 # ===================
 # 其他
 # ===================
+.playwright-mcp/
+.preview-data/
+gateway-dashboard-*.png
+gateway-preview-*.png
 tests
 CLAUDE.md
 .claude

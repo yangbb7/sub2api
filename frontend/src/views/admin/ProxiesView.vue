@@ -1027,7 +1027,7 @@ const createForm = reactive({
   name: '',
   protocol: 'http' as ProxyProtocol,
   host: '',
-  port: 8080,
+  port: 18080,
   username: '',
   password: ''
 })
@@ -1036,7 +1036,7 @@ const editForm = reactive({
   name: '',
   protocol: 'http' as ProxyProtocol,
   host: '',
-  port: 8080,
+  port: 18080,
   username: '',
   password: '',
   status: 'active' as 'active' | 'inactive'
@@ -1139,7 +1139,7 @@ const closeCreateModal = () => {
   createForm.name = ''
   createForm.protocol = 'http'
   createForm.host = ''
-  createForm.port = 8080
+  createForm.port = 18080
   createForm.username = ''
   createForm.password = ''
   createPasswordVisible.value = false
@@ -1725,7 +1725,7 @@ const handleExportData = async () => {
           }
     )
     const timestamp = formatExportTimestamp()
-    const filename = `sub2api-proxy-${timestamp}.json`
+    const filename = `gateway-proxy-${timestamp}.json`
     const blob = new Blob([JSON.stringify(dataPayload, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')

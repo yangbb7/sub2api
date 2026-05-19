@@ -3,8 +3,14 @@
     <header class="border-b border-gray-200 bg-white/95 dark:border-dark-800 dark:bg-dark-900/95">
       <div class="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
         <RouterLink to="/home" class="flex min-w-0 items-center gap-3">
-          <span class="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-gray-200 dark:bg-dark-800 dark:ring-dark-700">
-            <img :src="siteLogo || '/logo.png'" alt="Logo" class="h-full w-full object-contain" />
+          <span class="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white ring-1 ring-gray-200 dark:bg-dark-800 dark:ring-dark-700">
+            <img
+              :src="siteLogo || DEFAULT_LOGO_URL"
+              :alt="`${siteName} logo`"
+              width="40"
+              height="40"
+              class="h-full w-full object-contain"
+            />
           </span>
           <span class="truncate text-base font-semibold text-gray-950 dark:text-white">
             {{ siteName }}
@@ -14,7 +20,7 @@
           to="/login"
           class="inline-flex flex-shrink-0 items-center justify-center rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-primary-600/20 transition hover:bg-primary-700"
         >
-          登录
+          {{ t('common.login') }}
         </RouterLink>
       </div>
     </header>
@@ -86,16 +92,19 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import Icon from '@/components/icons/Icon.vue'
 import { getPublicSettings } from '@/api/auth'
 import { sanitizeUrl } from '@/utils/url'
 import type { LoginAgreementDocument, PublicSettings } from '@/types'
+import { DEFAULT_LOGO_URL } from '@/constants/branding'
 
 type LegalDocumentIcon = 'document' | 'shield' | 'globe' | 'cog'
 
 const route = useRoute()
+const { t } = useI18n()
 const settings = ref<PublicSettings | null>(null)
 const loading = ref(true)
 const loadError = ref(false)
@@ -107,7 +116,7 @@ marked.setOptions({
 
 const documentId = computed(() => String(route.params.documentId || ''))
 const documents = computed(() => settings.value?.login_agreement_documents ?? [])
-const siteName = computed(() => settings.value?.site_name || 'Sub2API')
+const siteName = computed(() => settings.value?.site_name || 'AI Gateway')
 const siteLogo = computed(() => sanitizeUrl(settings.value?.site_logo || '', {
   allowRelative: true,
   allowDataUrl: true,

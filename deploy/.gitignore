@@ -1,11 +1,14 @@
 # =============================================================================
-# Sub2API Deploy Directory - Git Ignore
+# AI Gateway Deploy Directory - Git Ignore
 # =============================================================================
 
 # Data directories (generated at runtime when using docker-compose.local.yml)
 data/
 postgres_data/
 redis_data/
+caddy_data/
+caddy_config/
+logs/
 
 # Environment configuration (contains sensitive information)
 .env
@@ -13,6 +16,7 @@ redis_data/
 # Backup files
 *.backup
 *.bak
+*.tar.gz
 
 # Temporary files
 *.tmp

@@ -1,30 +1,20 @@
 <template>
   <div
-    class="relative flex min-h-screen items-center justify-center overflow-hidden bg-gray-50 px-4 dark:bg-dark-950"
+    class="flex min-h-screen items-center justify-center bg-gray-50 px-4 text-gray-900 dark:bg-dark-950 dark:text-gray-100"
   >
-    <!-- Background Decoration -->
-    <div class="pointer-events-none absolute inset-0 overflow-hidden">
-      <div
-        class="absolute -right-40 -top-40 h-80 w-80 rounded-full bg-primary-400/10 blur-3xl"
-      ></div>
-      <div
-        class="absolute -bottom-40 -left-40 h-80 w-80 rounded-full bg-primary-500/10 blur-3xl"
-      ></div>
-    </div>
-
-    <div class="relative z-10 w-full max-w-md text-center">
+    <div class="w-full max-w-md rounded-lg border border-gray-200 bg-white p-8 text-center shadow-sm dark:border-dark-800 dark:bg-dark-900">
       <!-- 404 Display -->
       <div class="mb-8">
         <div class="relative inline-block">
-          <span class="text-[12rem] font-bold leading-none text-gray-100 dark:text-dark-800"
+          <span class="text-[8rem] font-semibold leading-none text-gray-100 dark:text-dark-800"
             >404</span
           >
           <div class="absolute inset-0 flex items-center justify-center">
             <div
-              class="flex h-24 w-24 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-500 to-primary-600 shadow-lg shadow-primary-500/30"
+              class="flex h-16 w-16 items-center justify-center rounded-lg bg-primary-50 text-primary-700 ring-1 ring-primary-100 dark:bg-primary-500/10 dark:text-primary-300 dark:ring-primary-500/20"
             >
               <svg
-                class="h-12 w-12 text-white"
+                class="h-8 w-8"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -47,7 +37,7 @@
           {{ t('errors.pageNotFound') }}
         </h1>
         <p class="text-gray-500 dark:text-dark-400">
-          The page you are looking for doesn't exist or has been moved.
+          {{ t('errors.pageNotFoundDescription') }}
         </p>
       </div>
 
@@ -55,24 +45,13 @@
       <div class="flex flex-col justify-center gap-3 sm:flex-row">
         <button @click="goBack" class="btn btn-secondary">
           <Icon name="arrowLeft" size="md" class="mr-2" />
-          Go Back
+          {{ t('common.back') }}
         </button>
         <router-link to="/dashboard" class="btn btn-primary">
           <Icon name="home" size="md" class="mr-2" />
-          Go to Dashboard
+          {{ t('home.dashboard') }}
         </router-link>
       </div>
-
-      <!-- Help Link -->
-      <p class="mt-8 text-sm text-gray-400 dark:text-dark-500">
-        Need help?
-        <a
-          href="#"
-          class="text-primary-600 transition-colors hover:text-primary-500 dark:text-primary-400 dark:hover:text-primary-300"
-        >
-          Contact support
-        </a>
-      </p>
     </div>
   </div>
 </template>

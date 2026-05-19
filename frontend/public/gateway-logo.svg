@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="AI Gateway">
+  <defs>
+    <linearGradient id="gateway-bg" x1="12" y1="12" x2="116" y2="116" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0f766e"/>
+      <stop offset="0.52" stop-color="#0ea5e9"/>
+      <stop offset="1" stop-color="#2563eb"/>
+    </linearGradient>
+    <linearGradient id="gateway-core" x1="39" y1="38" x2="89" y2="90" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ecfeff"/>
+      <stop offset="1" stop-color="#bae6fd"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="30" fill="#07111f"/>
+  <path d="M64 12 111 39v50l-47 27-47-27V39L64 12Z" fill="url(#gateway-bg)"/>
+  <path d="M64 29 96 47v34L64 99 32 81V47l32-18Z" fill="#07111f" opacity=".88"/>
+  <path d="M64 39 86 52v24L64 89 42 76V52l22-13Z" fill="url(#gateway-core)"/>
+  <path d="M51 64h26M64 51v26" fill="none" stroke="#07111f" stroke-width="8" stroke-linecap="round"/>
+</svg>

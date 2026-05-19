@@ -1,16 +1,16 @@
-# Sub2API Docker Image
+# AI Gateway Docker Image
 
-Sub2API is an AI API Gateway Platform for distributing and managing AI product subscription API quotas.
+AI Gateway is an AI API Gateway Platform for distributing and managing AI product subscription API quotas.
 
 ## Quick Start
 
 ```bash
 docker run -d \
-  --name sub2api \
-  -p 8080:8080 \
-  -e DATABASE_URL="postgres://user:pass@host:5432/sub2api" \
+  --name gateway \
+  -p 18080:18080 \
+  -e DATABASE_URL="postgres://user:pass@host:5432/gateway" \
   -e REDIS_URL="redis://host:6379" \
-  weishaw/sub2api:latest
+  ghcr.io/yangbb7/gateway:latest
 ```
 
 ## Docker Compose
@@ -19,12 +19,12 @@ docker run -d \
 version: '3.8'
 
 services:
-  sub2api:
-    image: weishaw/sub2api:latest
+  gateway:
+    image: ghcr.io/yangbb7/gateway:latest
     ports:
-      - "8080:8080"
+      - "18080:18080"
     environment:
-      - DATABASE_URL=postgres://postgres:postgres@db:5432/sub2api?sslmode=disable
+      - DATABASE_URL=postgres://postgres:postgres@db:5432/gateway?sslmode=disable
       - REDIS_URL=redis://redis:6379
     depends_on:
       - db
@@ -35,7 +35,7 @@ services:
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=sub2api
+      - POSTGRES_DB=gateway
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
@@ -55,7 +55,7 @@ volumes:
 |----------|-------------|----------|---------|
 | `DATABASE_URL` | PostgreSQL connection string | Yes | - |
 | `REDIS_URL` | Redis connection string | Yes | - |
-| `PORT` | Server port | No | `8080` |
+| `PORT` | Server port | No | `18080` |
 | `GIN_MODE` | Gin framework mode (`debug`/`release`) | No | `release` |
 
 ## Supported Architectures
@@ -72,5 +72,5 @@ volumes:
 
 ## Links
 
-- [GitHub Repository](https://github.com/weishaw/sub2api)
-- [Documentation](https://github.com/weishaw/sub2api#readme)
+- [GitHub Repository](https://github.com/yangbb7/sub2api)
+- [Documentation](https://github.com/yangbb7/sub2api#readme)

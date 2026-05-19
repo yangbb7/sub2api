@@ -18,9 +18,9 @@ func TestResolveLogFilePath_Default(t *testing.T) {
 }
 
 func TestResolveLogFilePath_WithDataDir(t *testing.T) {
-	t.Setenv("DATA_DIR", "/tmp/sub2api-data")
+	t.Setenv("DATA_DIR", "/tmp/gateway-data")
 	got := resolveLogFilePath("")
-	want := filepath.Join("/tmp/sub2api-data", "logs", "sub2api.log")
+	want := filepath.Join("/tmp/gateway-data", "logs", "gateway.log")
 	if got != want {
 		t.Fatalf("resolveLogFilePath() = %q, want %q", got, want)
 	}
@@ -68,6 +68,9 @@ func TestNormalizedOptions_InvalidFallback(t *testing.T) {
 	if out.Output.FilePath != DefaultContainerLogPath {
 		t.Fatalf("normalized file path = %q", out.Output.FilePath)
 	}
+	if out.ServiceName != "gateway" {
+		t.Fatalf("normalized service name = %q, want gateway", out.ServiceName)
+	}
 	if out.Rotation.MaxSizeMB != 100 {
 		t.Fatalf("normalized max_size_mb = %d", out.Rotation.MaxSizeMB)
 	}
@@ -86,7 +89,7 @@ func TestBuildFileCore_InvalidPathFallback(t *testing.T) {
 	t.Setenv("DATA_DIR", "")
 	opts := bootstrapOptions()
 	opts.Output.ToFile = true
-	opts.Output.FilePath = filepath.Join(os.DevNull, "logs", "sub2api.log")
+	opts.Output.FilePath = filepath.Join(os.DevNull, "logs", "gateway.log")
 	encoderCfg := zapcore.EncoderConfig{
 		TimeKey:     "time",
 		LevelKey:    "level",

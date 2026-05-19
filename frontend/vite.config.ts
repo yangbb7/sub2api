@@ -25,8 +25,8 @@ function injectPublicSettings(backendUrl: string): Plugin {
               return html.replace('</head>', `${script}\n</head>`)
             }
           }
-        } catch (e) {
-          console.warn('[vite] 无法获取公开配置，将回退到 API 调用:', (e as Error).message)
+        } catch {
+          // Frontend-only dev sessions should fall back quietly when the backend is offline.
         }
         return html
       }
@@ -34,20 +34,24 @@ function injectPublicSettings(backendUrl: string): Plugin {
   }
 }
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ command, mode }) => {
   // 加载环境变量
   const env = loadEnv(mode, process.cwd(), '')
-  const backendUrl = env.VITE_DEV_PROXY_TARGET || 'http://localhost:8080'
-  const devPort = Number(env.VITE_DEV_PORT || 3000)
+  const backendUrl = env.VITE_DEV_PROXY_TARGET || 'http://localhost:18080'
+  const devPort = Number(env.VITE_DEV_PORT || 13000)
+  const disableChecker =
+    command === 'build' ||
+    env.VITE_DISABLE_CHECKER === 'true' ||
+    process.env.VITE_DISABLE_CHECKER === 'true'
+  const plugins: Plugin[] = [vue()]
+
+  if (!disableChecker) {
+    plugins.push(checker({ vueTsc: true }))
+  }
+  plugins.push(injectPublicSettings(backendUrl))
 
   return {
-    plugins: [
-      vue(),
-      checker({
-        vueTsc: true
-      }),
-      injectPublicSettings(backendUrl)
-    ],
+    plugins,
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),

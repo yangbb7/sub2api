@@ -66,7 +66,7 @@ describe("admin settings auth source defaults helpers", () => {
 
   it("appends auth source defaults back onto update payload", () => {
     const payload: UpdateSettingsRequest = {
-      site_name: "Sub2API",
+      site_name: "AI Gateway",
     };
 
     appendAuthSourceDefaultsToUpdateRequest(payload, {
@@ -98,10 +98,24 @@ describe("admin settings auth source defaults helpers", () => {
         grant_on_signup: false,
         grant_on_first_bind: false,
       },
+      github: {
+        balance: 3,
+        concurrency: 7,
+        subscriptions: [],
+        grant_on_signup: true,
+        grant_on_first_bind: false,
+      },
+      google: {
+        balance: 5,
+        concurrency: 8,
+        subscriptions: [],
+        grant_on_signup: false,
+        grant_on_first_bind: true,
+      },
     });
 
     expect(payload).toMatchObject({
-      site_name: "Sub2API",
+      site_name: "AI Gateway",
       auth_source_default_email_balance: 1.25,
       auth_source_default_email_concurrency: 2,
       auth_source_default_email_subscriptions: [
@@ -126,6 +140,16 @@ describe("admin settings auth source defaults helpers", () => {
       auth_source_default_wechat_subscriptions: [],
       auth_source_default_wechat_grant_on_signup: false,
       auth_source_default_wechat_grant_on_first_bind: false,
+      auth_source_default_github_balance: 3,
+      auth_source_default_github_concurrency: 7,
+      auth_source_default_github_subscriptions: [],
+      auth_source_default_github_grant_on_signup: true,
+      auth_source_default_github_grant_on_first_bind: false,
+      auth_source_default_google_balance: 5,
+      auth_source_default_google_concurrency: 8,
+      auth_source_default_google_subscriptions: [],
+      auth_source_default_google_grant_on_signup: false,
+      auth_source_default_google_grant_on_first_bind: true,
     });
   });
 });

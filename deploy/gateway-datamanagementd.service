@@ -1,0 +1,22 @@
+[Unit]
+Description=AI Gateway Data Management Daemon
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=gateway
+Group=gateway
+WorkingDirectory=/opt/gateway
+ExecStart=/opt/gateway/datamanagementd \
+  -socket-path /tmp/gateway-datamanagement.sock \
+  -sqlite-path /var/lib/gateway/datamanagement/datamanagementd.db \
+  -version 1.0.0
+Restart=always
+RestartSec=5s
+LimitNOFILE=100000
+NoNewPrivileges=true
+PrivateTmp=false
+
+[Install]
+WantedBy=multi-user.target

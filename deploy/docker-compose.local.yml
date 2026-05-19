@@ -1,5 +1,5 @@
 # =============================================================================
-# Sub2API Docker Compose - Local Directory Version
+# AI Gateway Docker Compose - Local Directory Version
 # =============================================================================
 # This configuration uses local directories for data storage instead of named
 # volumes, making it easy to migrate the entire deployment by simply copying
@@ -9,30 +9,30 @@
 #   1. Copy .env.example to .env and configure
 #   2. mkdir -p data postgres_data redis_data
 #   3. docker-compose -f docker-compose.local.yml up -d
-#   4. Check logs: docker-compose -f docker-compose.local.yml logs -f sub2api
-#   5. Access: http://localhost:8080
+#   4. Check logs: docker-compose -f docker-compose.local.yml logs -f gateway
+#   5. Access: http://localhost:18080
 #
 # Migration to New Server:
 #   1. docker-compose -f docker-compose.local.yml down
-#   2. tar czf sub2api-deploy.tar.gz deploy/
+#   2. tar czf gateway-deploy.tar.gz deploy/
 #   3. Transfer to new server and extract
 #   4. docker-compose -f docker-compose.local.yml up -d
 # =============================================================================
 
 services:
   # ===========================================================================
-  # Sub2API Application
+  # AI Gateway Application
   # ===========================================================================
-  sub2api:
-    image: weishaw/sub2api:latest
-    container_name: sub2api
+  gateway:
+    image: ${GATEWAY_IMAGE:-ghcr.io/yangbb7/gateway:latest}
+    container_name: gateway
     restart: unless-stopped
     ulimits:
       nofile:
         soft: 100000
         hard: 100000
     ports:
-      - "${BIND_HOST:-0.0.0.0}:${SERVER_PORT:-8080}:8080"
+      - "${BIND_HOST:-0.0.0.0}:${SERVER_PORT:-18080}:18080"
     volumes:
       # Local directory mapping for easy migration
       - ./data:/app/data
@@ -49,7 +49,7 @@ services:
       # Server Configuration
       # =======================================================================
       - SERVER_HOST=0.0.0.0
-      - SERVER_PORT=8080
+      - SERVER_PORT=18080
       - SERVER_MODE=${SERVER_MODE:-release}
       - RUN_MODE=${RUN_MODE:-standard}
 
@@ -58,9 +58,9 @@ services:
       # =======================================================================
       - DATABASE_HOST=postgres
       - DATABASE_PORT=5432
-      - DATABASE_USER=${POSTGRES_USER:-sub2api}
+      - DATABASE_USER=${POSTGRES_USER:-gateway}
       - DATABASE_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      - DATABASE_DBNAME=${POSTGRES_DB:-sub2api}
+      - DATABASE_DBNAME=${POSTGRES_DB:-gateway}
       - DATABASE_SSLMODE=disable
       - DATABASE_MAX_OPEN_CONNS=${DATABASE_MAX_OPEN_CONNS:-50}
       - DATABASE_MAX_IDLE_CONNS=${DATABASE_MAX_IDLE_CONNS:-10}
@@ -81,7 +81,7 @@ services:
       # =======================================================================
       # Admin Account (auto-created on first run)
       # =======================================================================
-      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@sub2api.local}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@gateway.local}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
 
       # =======================================================================
@@ -164,9 +164,9 @@ services:
       redis:
         condition: service_healthy
     networks:
-      - sub2api-network
+      - gateway-network
     healthcheck:
-      test: ["CMD", "wget", "-q", "-T", "5", "-O", "/dev/null", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-q", "-T", "5", "-O", "/dev/null", "http://localhost:18080/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -177,7 +177,7 @@ services:
   # ===========================================================================
   postgres:
     image: postgres:18-alpine
-    container_name: sub2api-postgres
+    container_name: gateway-postgres
     restart: unless-stopped
     ulimits:
       nofile:
@@ -187,15 +187,15 @@ services:
       # Local directory mapping for easy migration
       - ./postgres_data:/var/lib/postgresql/data
     environment:
-      - POSTGRES_USER=${POSTGRES_USER:-sub2api}
+      - POSTGRES_USER=${POSTGRES_USER:-gateway}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      - POSTGRES_DB=${POSTGRES_DB:-sub2api}
+      - POSTGRES_DB=${POSTGRES_DB:-gateway}
       - PGDATA=/var/lib/postgresql/data
       - TZ=${TZ:-Asia/Shanghai}
     networks:
-      - sub2api-network
+      - gateway-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sub2api} -d ${POSTGRES_DB:-sub2api}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gateway} -d ${POSTGRES_DB:-gateway}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -208,7 +208,7 @@ services:
   # ===========================================================================
   redis:
     image: redis:8-alpine
-    container_name: sub2api-redis
+    container_name: gateway-redis
     restart: unless-stopped
     ulimits:
       nofile:
@@ -229,7 +229,7 @@ services:
       # REDISCLI_AUTH is used by redis-cli for authentication (safer than -a flag)
       - REDISCLI_AUTH=${REDIS_PASSWORD:-}
     networks:
-      - sub2api-network
+      - gateway-network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -241,5 +241,5 @@ services:
 # Networks
 # =============================================================================
 networks:
-  sub2api-network:
+  gateway-network:
     driver: bridge

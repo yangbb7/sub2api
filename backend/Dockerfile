@@ -18,7 +18,7 @@ COPY . .
 RUN go build -o main ./cmd/server/
 
 # 暴露端口
-EXPOSE 8080
+EXPOSE 18080
 
 # 运行应用
 CMD ["./main"]

@@ -7,6 +7,7 @@ import { resolveDocumentTitle } from '@/router/title'
 import AnnouncementPopup from '@/components/common/AnnouncementPopup.vue'
 import { useAppStore, useAuthStore, useSubscriptionStore, useAnnouncementStore } from '@/stores'
 import { getSetupStatus } from '@/api/setup'
+import { DEFAULT_LOGO_URL } from '@/constants/branding'
 
 const router = useRouter()
 const route = useRoute()
@@ -14,6 +15,10 @@ const appStore = useAppStore()
 const authStore = useAuthStore()
 const subscriptionStore = useSubscriptionStore()
 const announcementStore = useAnnouncementStore()
+
+function refreshDocumentTitle() {
+  document.title = resolveDocumentTitle(route.meta.title, appStore.siteName, route.meta.titleKey as string)
+}
 
 /**
  * Update favicon dynamically
@@ -27,7 +32,12 @@ function updateFavicon(logoUrl: string) {
     link.rel = 'icon'
     document.head.appendChild(link)
   }
-  link.type = logoUrl.endsWith('.svg') ? 'image/svg+xml' : 'image/x-icon'
+  const cleanUrl = logoUrl.split('?')[0]?.toLowerCase() || ''
+  link.type = cleanUrl.endsWith('.svg')
+    ? 'image/svg+xml'
+    : cleanUrl.endsWith('.ico')
+      ? 'image/x-icon'
+      : 'image/png'
   link.href = logoUrl
 }
 
@@ -35,9 +45,7 @@ function updateFavicon(logoUrl: string) {
 watch(
   () => appStore.siteLogo,
   (newLogo) => {
-    if (newLogo) {
-      updateFavicon(newLogo)
-    }
+    updateFavicon(newLogo || DEFAULT_LOGO_URL)
   },
   { immediate: true }
 )
@@ -47,6 +55,10 @@ function onVisibilityChange() {
   if (document.visibilityState === 'visible' && authStore.isAuthenticated) {
     announcementStore.fetchAnnouncements()
   }
+}
+
+function onLocaleChanged() {
+  refreshDocumentTitle()
 }
 
 watch(
@@ -89,9 +101,12 @@ router.afterEach(() => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', onVisibilityChange)
+  window.removeEventListener('gateway:locale-changed', onLocaleChanged)
 })
 
 onMounted(async () => {
+  window.addEventListener('gateway:locale-changed', onLocaleChanged)
+
   // Check if setup is needed
   try {
     const status = await getSetupStatus()
@@ -107,7 +122,7 @@ onMounted(async () => {
   await appStore.fetchPublicSettings()
 
   // Re-resolve document title now that siteName is available
-  document.title = resolveDocumentTitle(route.meta.title, appStore.siteName, route.meta.titleKey as string)
+  refreshDocumentTitle()
 })
 </script>
 
