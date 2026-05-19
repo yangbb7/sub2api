@@ -116,7 +116,7 @@ export const FeatureFlags = {
   }),
   affiliate: defineFlag({
     key: 'affiliate_enabled',
-    mode: 'opt-in',
+    mode: 'opt-out',
     label: 'Affiliate',
   }),
 } as const

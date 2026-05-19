@@ -135,6 +135,18 @@
           </transition>
         </div>
 
+        <div
+          v-if="formData.aff_code"
+          class="rounded-lg border border-primary-200 bg-primary-50 px-3 py-2 text-sm text-primary-800 dark:border-primary-900/40 dark:bg-primary-900/20 dark:text-primary-200"
+        >
+          <div class="flex items-center gap-2">
+            <Icon name="users" size="sm" class="text-primary-600 dark:text-primary-300" />
+            <span>
+              {{ t('auth.affiliateReferralApplied', { code: formData.aff_code }) }}
+            </span>
+          </div>
+        </div>
+
         <!-- Promo Code Input (Optional) -->
         <div v-if="promoCodeEnabled">
           <label for="promo_code" class="input-label">

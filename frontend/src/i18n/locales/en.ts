@@ -464,6 +464,7 @@ export default {
     invitationCodeInvalid: 'Invalid or used invitation code',
     invitationCodeValidating: 'Validating invitation code...',
     invitationCodeInvalidCannotRegister: 'Invalid invitation code. Please check and try again',
+    affiliateReferralApplied: 'Affiliate invite code applied: {code}',
     oauthOrContinue: 'or continue with email',
     linuxdo: {
       signIn: 'Continue with Linux.do',
@@ -1122,6 +1123,16 @@ export default {
     passwordTooShort: 'Password must be at least 8 characters long',
     passwordChangeSuccess: 'Password changed successfully',
     passwordChangeFailed: 'Failed to change password',
+    affiliate: {
+      title: 'Affiliate Rebates',
+      description: 'View your invite link, rebate quota, and invite records.',
+      invitedUsers: 'Invited Users',
+      availableQuota: 'Available Quota',
+      rebateRate: 'Rebate Rate',
+      copyLink: 'Copy Invite Link',
+      linkCopied: 'Invite link copied',
+      viewRecords: 'View Records'
+    },
     // TOTP 2FA
     totp: {
       title: 'Two-Factor Authentication (2FA)',

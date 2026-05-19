@@ -463,6 +463,7 @@ export default {
     invitationCodeInvalid: '邀请码无效或已被使用',
     invitationCodeValidating: '正在验证邀请码...',
     invitationCodeInvalidCannotRegister: '邀请码无效，请检查后重试',
+    affiliateReferralApplied: '已带入邀请返利码：{code}',
     oauthOrContinue: '或使用邮箱密码继续',
     linuxdo: {
       signIn: '使用 Linux.do 登录',
@@ -1126,6 +1127,16 @@ export default {
     passwordTooShort: '密码至少需要 8 个字符',
     passwordChangeSuccess: '密码修改成功',
     passwordChangeFailed: '密码修改失败',
+    affiliate: {
+      title: '邀请返利',
+      description: '查看你的邀请链接、返利额度和邀请记录。',
+      invitedUsers: '邀请人数',
+      availableQuota: '可转额度',
+      rebateRate: '返利比例',
+      copyLink: '复制邀请链接',
+      linkCopied: '邀请链接已复制',
+      viewRecords: '查看返佣记录'
+    },
     // TOTP 2FA
     totp: {
       title: '双因素认证 (2FA)',

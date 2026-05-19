@@ -5,10 +5,12 @@ import ProfileView from '@/views/user/ProfileView.vue'
 const {
   fetchPublicSettingsMock,
   refreshUserMock,
+  getAffiliateDetailMock,
   authState
 } = vi.hoisted(() => ({
   fetchPublicSettingsMock: vi.fn(),
   refreshUserMock: vi.fn(),
+  getAffiliateDetailMock: vi.fn(),
   authState: {
     user: null as Record<string, unknown> | null,
     refreshUser: vi.fn()
@@ -25,8 +27,21 @@ vi.mock('@/stores/app', () => ({
   })
 }))
 
+vi.mock('@/api/user', () => ({
+  default: {
+    getAffiliateDetail: (...args: any[]) => getAffiliateDetailMock(...args)
+  }
+}))
+
 vi.mock('@/utils/format', () => ({
-  formatDate: () => 'April 2026'
+  formatDate: () => 'April 2026',
+  formatCurrency: (value: number) => `$${value.toFixed(2)}`
+}))
+
+vi.mock('@/composables/useClipboard', () => ({
+  useClipboard: () => ({
+    copyToClipboard: vi.fn()
+  })
 }))
 
 vi.mock('vue-i18n', async (importOriginal) => {
@@ -43,7 +58,19 @@ describe('ProfileView', () => {
   beforeEach(() => {
     refreshUserMock.mockReset()
     fetchPublicSettingsMock.mockReset()
+    getAffiliateDetailMock.mockReset()
     refreshUserMock.mockResolvedValue(undefined)
+    getAffiliateDetailMock.mockResolvedValue({
+      user_id: 1,
+      aff_code: 'AFF123',
+      inviter_id: null,
+      aff_count: 2,
+      aff_quota: 12.5,
+      aff_frozen_quota: 0,
+      aff_history_quota: 18,
+      effective_rebate_rate_percent: 20,
+      invitees: []
+    })
     authState.refreshUser = refreshUserMock
     authState.user = {
       id: 1,
@@ -69,7 +96,8 @@ describe('ProfileView', () => {
       wechat_oauth_open_enabled: true,
       wechat_oauth_mp_enabled: false,
       oidc_oauth_enabled: true,
-      oidc_oauth_provider_name: 'OIDC'
+      oidc_oauth_provider_name: 'OIDC',
+      affiliate_enabled: true
     })
   })
 
@@ -83,6 +111,7 @@ describe('ProfileView', () => {
           ProfileBalanceNotifyCard: { template: '<div data-testid="profile-balance-notify-card" />' },
           ProfilePasswordForm: { template: '<div data-testid="profile-password-form" />' },
           ProfileTotpCard: { template: '<div data-testid="profile-totp-card" />' },
+          RouterLink: { props: ['to'], template: '<a :href="to"><slot /></a>' },
           Icon: true
         }
       }
@@ -95,5 +124,28 @@ describe('ProfileView', () => {
     expect(wrapper.get('[data-testid="profile-shell"]').html()).toContain('profile-info-card')
     expect(wrapper.get('[data-testid="profile-shell"]').html()).toContain('profile-password-form')
     expect(wrapper.get('[data-testid="profile-shell"]').html()).toContain('profile-totp-card')
+  })
+
+  it('renders affiliate summary and records entry when affiliate is enabled', async () => {
+    const wrapper = mount(ProfileView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          ProfileInfoCard: { template: '<div data-testid="profile-info-card" />' },
+          ProfileBalanceNotifyCard: true,
+          ProfilePasswordForm: true,
+          ProfileTotpCard: true,
+          RouterLink: { props: ['to'], template: '<a :href="to"><slot /></a>' },
+          Icon: true
+        }
+      }
+    })
+
+    await flushPromises()
+
+    expect(getAffiliateDetailMock).toHaveBeenCalled()
+    expect(wrapper.get('[data-testid="profile-affiliate-card"]').text()).toContain('AFF123')
+    expect(wrapper.get('[data-testid="profile-affiliate-card"]').text()).toContain('$12.50')
+    expect(wrapper.get('a[href="/affiliate"]').exists()).toBe(true)
   })
 })

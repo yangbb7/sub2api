@@ -203,8 +203,8 @@ var (
 )
 
 const (
-	defaultSiteName             = "AI Gateway"
-	defaultSiteSubtitle         = "AI API Gateway Platform"
+	defaultSiteName              = "AI Gateway"
+	defaultSiteSubtitle          = "AI API Gateway Platform"
 	defaultAuthSourceBalance     = 0
 	defaultAuthSourceConcurrency = 5
 	defaultWeChatConnectMode     = "open"
@@ -745,7 +745,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 
 		AvailableChannelsEnabled: settings[SettingKeyAvailableChannelsEnabled] == "true",
 
-		AffiliateEnabled: settings[SettingKeyAffiliateEnabled] == "true",
+		AffiliateEnabled: isEnabledByDefaultSetting(settings, SettingKeyAffiliateEnabled, AffiliateEnabledDefault),
 
 		RiskControlEnabled: settings[SettingKeyRiskControlEnabled] == "true",
 	}, nil
@@ -2044,7 +2044,7 @@ func (s *SettingService) GetCustomMenuItemsRaw(ctx context.Context) string {
 func (s *SettingService) IsAffiliateEnabled(ctx context.Context) bool {
 	value, err := s.settingRepo.GetValue(ctx, SettingKeyAffiliateEnabled)
 	if err != nil {
-		return false // 默认关闭
+		return AffiliateEnabledDefault
 	}
 	return value == "true"
 }
@@ -2446,8 +2446,9 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		// Available channels feature (default disabled; opt-in)
 		SettingKeyAvailableChannelsEnabled: "false",
 
-		// Affiliate (邀请返利) feature (default disabled; opt-in)
-		SettingKeyAffiliateEnabled: "false",
+		// Affiliate (邀请返利) feature. Users should see and use their invite link by default;
+		// admins can still explicitly disable it from settings.
+		SettingKeyAffiliateEnabled: "true",
 
 		// 风控中心功能（默认关闭，显式启用）
 		SettingKeyRiskControlEnabled: "false",
@@ -2815,8 +2816,8 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	// Available channels feature (default: disabled; strict true)
 	result.AvailableChannelsEnabled = settings[SettingKeyAvailableChannelsEnabled] == "true"
 
-	// Affiliate (邀请返利) feature (default: disabled; strict true)
-	result.AffiliateEnabled = settings[SettingKeyAffiliateEnabled] == "true"
+	// Affiliate (邀请返利) feature (default: enabled; explicit false disables)
+	result.AffiliateEnabled = isEnabledByDefaultSetting(settings, SettingKeyAffiliateEnabled, AffiliateEnabledDefault)
 
 	// 风控中心功能（默认关闭，严格 true 才启用）
 	result.RiskControlEnabled = settings[SettingKeyRiskControlEnabled] == "true"
@@ -2896,6 +2897,14 @@ func isFalseSettingValue(value string) bool {
 	default:
 		return false
 	}
+}
+
+func isEnabledByDefaultSetting(settings map[string]string, key string, defaultValue bool) bool {
+	value, ok := settings[key]
+	if !ok || strings.TrimSpace(value) == "" {
+		return defaultValue
+	}
+	return !isFalseSettingValue(value)
 }
 
 func normalizeVisibleMethodSettingSource(method, source string, enabled bool) (string, error) {

@@ -6563,7 +6563,7 @@ const form = reactive<SettingsForm>({
   // Available Channels feature switch
   available_channels_enabled: false,
   // Affiliate (邀请返利) feature switch
-  affiliate_enabled: false,
+  affiliate_enabled: true,
 });
 
 const authSourceDefaults = reactive<AuthSourceDefaultsState>(
