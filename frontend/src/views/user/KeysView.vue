@@ -924,7 +924,7 @@
     <UseKeyModal
       :show="showUseKeyModal"
       :api-key="selectedKey?.key || ''"
-      :base-url="publicSettings?.api_base_url || ''"
+      :base-url="gatewayBaseUrl"
       :platform="selectedKey?.group?.platform || null"
       :allow-messages-dispatch="selectedKey?.group?.allow_messages_dispatch || false"
       @close="closeUseKeyModal"
@@ -1153,6 +1153,11 @@ const dropdownRef = ref<HTMLElement | null>(null)
 const dropdownPosition = ref<{ top?: number; bottom?: number; left: number } | null>(null)
 const groupButtonRefs = ref<Map<number, HTMLElement>>(new Map())
 let abortController: AbortController | null = null
+
+const gatewayBaseUrl = computed(() => {
+  const configured = publicSettings.value?.api_base_url?.trim()
+  return configured || window.location.origin
+})
 
 // Get the currently selected key for group change
 const selectedKeyForGroup = computed(() => {
