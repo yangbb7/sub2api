@@ -33,6 +33,7 @@ load_env_file() {
     PLATFORM GATEWAY_IMAGE ADMIN_EMAIL ADMIN_PASSWORD PROXIED SKIP_DNS BUILD_STRATEGY REMOTE_SUDO SUDO_PASSWORD \
     ROLLBACK_ON_FAILURE CF_API_TOKEN CF_ZONE_ID TTL TZ ACME_EMAIL UPDATE_PROXY_URL SSH_CONNECT_TIMEOUT \
     SWAP_SIZE MIN_FREE_KB MIN_DOCKER_FREE_KB DOCKER_INSTALL_METHOD BUILD_NODE_OPTIONS BUILD_GOMAXPROCS \
+    LOCAL_BUILD_GOMAXPROCS LOCAL_BUILD_GOMEMLIMIT LOCAL_BUILD_GCFLAGS \
     POSTGRES_PASSWORD JWT_SECRET TOTP_ENCRYPTION_KEY REDIS_PASSWORD
   do
     if [ "${!name+x}" = x ]; then
@@ -70,9 +71,12 @@ TARGET_IP="${TARGET_IP:-}"
 REMOTE_DIR="${REMOTE_DIR:-/opt/gateway}"
 PLATFORM="${PLATFORM:-linux/amd64}"
 IMAGE_NAME="${GATEWAY_IMAGE:-gateway:cloud}"
-BUILD_STRATEGY="${BUILD_STRATEGY:-remote}"
+BUILD_STRATEGY="${BUILD_STRATEGY:-local-binary}"
 BUILD_NODE_OPTIONS="${BUILD_NODE_OPTIONS:---max-old-space-size=384}"
 BUILD_GOMAXPROCS="${BUILD_GOMAXPROCS:-1}"
+LOCAL_BUILD_GOMAXPROCS="${LOCAL_BUILD_GOMAXPROCS:-4}"
+LOCAL_BUILD_GOMEMLIMIT="${LOCAL_BUILD_GOMEMLIMIT:-4GiB}"
+LOCAL_BUILD_GCFLAGS="${LOCAL_BUILD_GCFLAGS:-}"
 SWAP_SIZE="${SWAP_SIZE:-2G}"
 MIN_FREE_KB="${MIN_FREE_KB:-3145728}"
 MIN_DOCKER_FREE_KB="${MIN_DOCKER_FREE_KB:-4194304}"
@@ -125,9 +129,10 @@ validate_remote_sudo() {
 }
 
 validate_build_strategy() {
-  if [ "${BUILD_STRATEGY}" != remote ]; then
-    fail "BUILD_STRATEGY=${BUILD_STRATEGY} is not supported by 1G cloud deployment; this profile always builds on the remote VPS"
-  fi
+  case "${BUILD_STRATEGY}" in
+    local-binary|remote) ;;
+    *) fail "BUILD_STRATEGY must be local-binary or remote" ;;
+  esac
 }
 
 validate_docker_install_method() {
@@ -368,6 +373,7 @@ validate_swap_size "${SWAP_SIZE}"
 validate_positive_kb MIN_FREE_KB "${MIN_FREE_KB}"
 validate_positive_kb MIN_DOCKER_FREE_KB "${MIN_DOCKER_FREE_KB}"
 validate_positive_int BUILD_GOMAXPROCS "${BUILD_GOMAXPROCS}"
+validate_positive_int LOCAL_BUILD_GOMAXPROCS "${LOCAL_BUILD_GOMAXPROCS}"
 
 if [ "${AUTO_TARGET_UNAVAILABLE}" != true ] && [ -z "${SSH_TARGET}" ]; then
   fail "SSH_TARGET is required"
@@ -409,6 +415,15 @@ validate_env_token POSTGRES_PASSWORD "${POSTGRES_PASSWORD:-}"
 validate_env_token JWT_SECRET "${JWT_SECRET:-}"
 validate_env_token TOTP_ENCRYPTION_KEY "${TOTP_ENCRYPTION_KEY:-}"
 validate_env_token REDIS_PASSWORD "${REDIS_PASSWORD:-}"
+validate_env_token LOCAL_BUILD_GOMEMLIMIT "${LOCAL_BUILD_GOMEMLIMIT}"
+validate_env_token LOCAL_BUILD_GCFLAGS "${LOCAL_BUILD_GCFLAGS}"
+
+if [ "${BUILD_STRATEGY}" = local-binary ]; then
+  case "${PLATFORM}" in
+    linux/amd64|linux/arm64) ;;
+    *) fail "BUILD_STRATEGY=local-binary supports PLATFORM=linux/amd64 or linux/arm64" ;;
+  esac
+fi
 
 if [ "${SKIP_DNS}" != true ] && [ -z "${CF_API_TOKEN:-}" ]; then
   fail "CF_API_TOKEN is required unless SKIP_DNS=true"
@@ -432,11 +447,20 @@ need curl
 need gzip
 need tar
 need openssl
+if [ "${BUILD_STRATEGY}" = local-binary ]; then
+  need git
+  need go
+  need pnpm
+fi
 if [ "${SKIP_DNS}" != true ]; then
   need python3
 fi
 
-ok "cloud-only remote build selected; local Docker is not required"
+if [ "${BUILD_STRATEGY}" = local-binary ]; then
+  ok "local binary build selected; remote Docker only assembles the runtime image"
+else
+  warn "remote source build selected; 1G VPS builds may be slow for large Go packages"
+fi
 warn "1G compose and Caddyfile are validated on the remote Docker host during deploy"
 
 if [ -n "${ENV_FILE}" ]; then

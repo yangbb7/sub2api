@@ -251,6 +251,22 @@ if ! grep -Fq 'RUN test -f ./internal/web/dist/index.html' "${DEPLOY_DIR}/Docker
   echo "deploy/Dockerfile.prebuilt must require prebuilt embedded frontend assets" >&2
   exit 1
 fi
+if ! grep -Fq 'COPY build/gateway /app/gateway' "${DEPLOY_DIR}/Dockerfile.binary"; then
+  echo "deploy/Dockerfile.binary must copy the locally built gateway binary" >&2
+  exit 1
+fi
+if ! grep -Fq 'BUILD_STRATEGY="${BUILD_STRATEGY:-local-binary}"' "${DEPLOY_DIR}/deploy-1g.sh"; then
+  echo "deploy-1g.sh must default 1G deployments to local binary builds" >&2
+  exit 1
+fi
+if ! grep -Fq 'local-binary|remote' "${DEPLOY_DIR}/deploy-1g.sh"; then
+  echo "deploy-1g.sh must validate local-binary and remote build strategies" >&2
+  exit 1
+fi
+if ! grep -Fq 'GOOS="${target_goos}" GOARCH="${target_goarch}"' "${DEPLOY_DIR}/deploy-1g.sh"; then
+  echo "deploy-1g.sh must cross-compile the gateway binary for the selected platform" >&2
+  exit 1
+fi
 if ! grep -Fq 'COPY --from=frontend-builder /app/backend/internal/web/dist ./internal/web/dist' "${DEPLOY_DIR}/Dockerfile"; then
   echo "deploy/Dockerfile must copy the Vite output from frontend-builder into backend/internal/web/dist" >&2
   exit 1
@@ -418,6 +434,7 @@ git -C "${ROOT_DIR}" archive --format=tar "$(git -C "${ROOT_DIR}" write-tree)" |
 tar -tzf "${archive}" | awk '
   $0 == "deploy/Dockerfile" { dockerfile = 1 }
   $0 == "deploy/Dockerfile.prebuilt" { prebuilt = 1 }
+  $0 == "deploy/Dockerfile.binary" { binary = 1 }
   $0 == "frontend/package.json" { frontend = 1 }
   $0 == "frontend/pnpm-lock.yaml" { lockfile = 1 }
   $0 == "backend/go.mod" { backend = 1 }
@@ -429,7 +446,7 @@ tar -tzf "${archive}" | awk '
   $0 ~ /^deploy\/.*report.*\.json$/ { bad_report = 1 }
   $0 ~ /^frontend\/node_modules\// { bad_node_modules = 1 }
   END {
-    if (!dockerfile || !prebuilt || !frontend || !lockfile || !backend || !vite_ts || bad_vite_js || bad_env || bad_report || bad_node_modules) {
+    if (!dockerfile || !prebuilt || !binary || !frontend || !lockfile || !backend || !vite_ts || bad_vite_js || bad_env || bad_report || bad_node_modules) {
       print "source archive is missing required files or includes excluded files" > "/dev/stderr"
       exit 1
     }

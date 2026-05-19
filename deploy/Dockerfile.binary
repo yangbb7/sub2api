@@ -1,0 +1,39 @@
+# =============================================================================
+# AI Gateway Dockerfile - local binary profile
+# =============================================================================
+# This profile expects build/gateway to be a linux binary produced before the
+# source archive is uploaded. It keeps 1G remote builds to a small runtime image.
+
+ARG ALPINE_IMAGE=alpine:3.20
+
+FROM ${ALPINE_IMAGE}
+
+LABEL description="AI Gateway Platform"
+
+RUN apk add --no-cache \
+    ca-certificates \
+    tzdata \
+    curl \
+    su-exec \
+    && rm -rf /var/cache/apk/*
+
+RUN addgroup -g 1000 gateway && \
+    adduser -u 1000 -G gateway -s /bin/sh -D gateway
+
+WORKDIR /app
+
+COPY build/gateway /app/gateway
+RUN chmod +x /app/gateway
+
+RUN mkdir -p /app/data && chown -R gateway:gateway /app
+
+COPY deploy/docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
+
+EXPOSE 18080
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD wget -q -T 5 -O /dev/null http://localhost:${SERVER_PORT:-18080}/health || exit 1
+
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+CMD ["/app/gateway"]

@@ -30,9 +30,10 @@ load_env_file() {
     SSH_TARGET SSH_PORT SSH_KEY SSH_PASSWORD SSH_PASS DOMAIN TARGET_IP REMOTE_DIR \
     JP_SSH_TARGET JP_SSH_PORT JP_SSH_KEY JP_SSH_PASSWORD JP_SSH_PASS JP_TARGET_IP \
     HK_SSH_TARGET HK_SSH_PORT HK_SSH_KEY HK_SSH_PASSWORD HK_SSH_PASS HK_TARGET_IP \
-    PLATFORM GATEWAY_IMAGE ADMIN_EMAIL ADMIN_PASSWORD PROXIED DEPLOY_MODE BUILD_STRATEGY REMOTE_SUDO SUDO_PASSWORD \
+    PLATFORM GATEWAY_IMAGE ADMIN_EMAIL ADMIN_PASSWORD PROXIED DEPLOY_MODE BUILD_STRATEGY REMOTE_DOCKERFILE REMOTE_SUDO SUDO_PASSWORD \
     SKIP_DNS ROLLBACK_ON_FAILURE CF_API_TOKEN CF_ZONE_ID TTL TZ ACME_EMAIL UPDATE_PROXY_URL SSH_CONNECT_TIMEOUT \
     SWAP_SIZE MIN_FREE_KB MIN_DOCKER_FREE_KB DOCKER_INSTALL_METHOD BUILD_NODE_OPTIONS BUILD_GOMAXPROCS PNPM_REGISTRY \
+    LOCAL_BUILD_GOMAXPROCS LOCAL_BUILD_GOMEMLIMIT LOCAL_BUILD_GCFLAGS \
     POSTGRES_PASSWORD JWT_SECRET TOTP_ENCRYPTION_KEY REDIS_PASSWORD
   do
     if [ "${!name+x}" = x ]; then
@@ -70,13 +71,22 @@ TARGET_IP="${TARGET_IP:-}"
 REMOTE_DIR="${REMOTE_DIR:-/opt/gateway}"
 PLATFORM="${PLATFORM:-linux/amd64}"
 IMAGE_NAME="${GATEWAY_IMAGE:-gateway:cloud}"
-BUILD_STRATEGY="${BUILD_STRATEGY:-remote}"
+BUILD_STRATEGY="${BUILD_STRATEGY:-local-binary}"
 BUILD_NODE_OPTIONS="${BUILD_NODE_OPTIONS:---max-old-space-size=1280}"
 BUILD_GOMAXPROCS="${BUILD_GOMAXPROCS:-1}"
 PNPM_REGISTRY="${PNPM_REGISTRY:-https://registry.npmjs.org/}"
+LOCAL_BUILD_GOMAXPROCS="${LOCAL_BUILD_GOMAXPROCS:-4}"
+LOCAL_BUILD_GOMEMLIMIT="${LOCAL_BUILD_GOMEMLIMIT:-4GiB}"
+LOCAL_BUILD_GCFLAGS="${LOCAL_BUILD_GCFLAGS:-}"
 BUILD_COMMIT="${BUILD_COMMIT:-$(git -C "${ROOT_DIR}" rev-parse --short=12 HEAD 2>/dev/null || printf 'archive')}"
 BUILD_DATE="${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
-REMOTE_DOCKERFILE="${REMOTE_DOCKERFILE:-deploy/Dockerfile.prebuilt}"
+if [ -z "${REMOTE_DOCKERFILE:-}" ]; then
+  case "${BUILD_STRATEGY}" in
+    local-binary) REMOTE_DOCKERFILE=deploy/Dockerfile.binary ;;
+    remote) REMOTE_DOCKERFILE=deploy/Dockerfile.prebuilt ;;
+    *) REMOTE_DOCKERFILE=deploy/Dockerfile.binary ;;
+  esac
+fi
 SWAP_SIZE="${SWAP_SIZE:-2G}"
 MIN_FREE_KB="${MIN_FREE_KB:-3145728}"
 MIN_DOCKER_FREE_KB="${MIN_DOCKER_FREE_KB:-4194304}"
@@ -113,10 +123,13 @@ validate_remote_sudo() {
 }
 
 validate_build_strategy() {
-  if [ "${BUILD_STRATEGY}" != remote ]; then
-    echo "BUILD_STRATEGY=${BUILD_STRATEGY} is not supported by 1G cloud deployment; this profile always builds on the remote VPS" >&2
-    exit 1
-  fi
+  case "${BUILD_STRATEGY}" in
+    local-binary|remote) ;;
+    *)
+      echo "BUILD_STRATEGY must be local-binary or remote" >&2
+      exit 1
+      ;;
+  esac
 }
 
 validate_docker_install_method() {
@@ -657,6 +670,19 @@ validate_remote_sudo
 validate_build_strategy
 validate_docker_install_method
 validate_positive_int BUILD_GOMAXPROCS "${BUILD_GOMAXPROCS}"
+validate_positive_int LOCAL_BUILD_GOMAXPROCS "${LOCAL_BUILD_GOMAXPROCS}"
+validate_env_token LOCAL_BUILD_GOMEMLIMIT "${LOCAL_BUILD_GOMEMLIMIT}"
+validate_env_token LOCAL_BUILD_GCFLAGS "${LOCAL_BUILD_GCFLAGS}"
+
+if [ "${BUILD_STRATEGY}" = local-binary ]; then
+  case "${PLATFORM}" in
+    linux/amd64|linux/arm64) ;;
+    *)
+      echo "BUILD_STRATEGY=local-binary supports PLATFORM=linux/amd64 or linux/arm64" >&2
+      exit 1
+      ;;
+  esac
+fi
 
 need() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -715,6 +741,11 @@ case "${DEPLOY_MODE}" in
     need scp
     need tar
     need gzip
+    if [ "${BUILD_STRATEGY}" = local-binary ]; then
+      need git
+      need go
+      need pnpm
+    fi
     ;;
   preflight)
     need ssh
@@ -726,6 +757,11 @@ case "${DEPLOY_MODE}" in
     need gzip
     need tar
     need openssl
+    if [ "${BUILD_STRATEGY}" = local-binary ]; then
+      need git
+      need go
+      need pnpm
+    fi
     if [ "${SKIP_DNS}" = true ] && [ "${PROXIED}" != true ]; then
       need python3
     fi
@@ -908,18 +944,43 @@ collect_remote_diagnostics() {
 }
 
 create_source_archive() {
-  echo "Creating source archive for remote build..."
+  echo "Creating build context for ${BUILD_STRATEGY} image..."
   local archive_dir="${tmp_dir}/source"
+  local target_goos
+  local target_goarch
+  local go_build_args
   rm -rf "${archive_dir}"
   mkdir -p "${archive_dir}"
-  git -C "${ROOT_DIR}" archive --format=tar HEAD | tar -x -C "${archive_dir}"
-  if [ "${REMOTE_DOCKERFILE}" = "deploy/Dockerfile.prebuilt" ]; then
-    echo "Building frontend locally for prebuilt remote image..."
-    (cd "${ROOT_DIR}/frontend" && pnpm exec vite build)
+
+  if [ "${BUILD_STRATEGY}" = local-binary ]; then
+    mkdir -p "${archive_dir}/build" "${archive_dir}/deploy"
+    cp "${DEPLOY_DIR}/Dockerfile.binary" "${archive_dir}/deploy/Dockerfile.binary"
+    cp "${DEPLOY_DIR}/docker-entrypoint.sh" "${archive_dir}/deploy/docker-entrypoint.sh"
+    target_goos="${PLATFORM%%/*}"
+    target_goarch="${PLATFORM#*/}"
+    echo "Building frontend locally for embedded binary..."
+    (cd "${ROOT_DIR}/frontend" && VITE_DISABLE_CHECKER=true pnpm exec vite build --config vite.config.ts)
     test -f "${ROOT_DIR}/backend/internal/web/dist/index.html"
-    rm -rf "${archive_dir}/backend/internal/web/dist"
-    mkdir -p "${archive_dir}/backend/internal/web"
-    cp -R "${ROOT_DIR}/backend/internal/web/dist" "${archive_dir}/backend/internal/web/dist"
+    echo "Building backend binary locally for ${PLATFORM}..."
+    go_build_args=(
+      -tags embed
+      -ldflags "-s -w -X main.Version=docker -X main.Commit=${BUILD_COMMIT} -X main.Date=${BUILD_DATE} -X main.BuildType=release"
+      -o "${archive_dir}/build/gateway"
+    )
+    if [ -n "${LOCAL_BUILD_GCFLAGS}" ]; then
+      go_build_args=(-gcflags "${LOCAL_BUILD_GCFLAGS}" "${go_build_args[@]}")
+    fi
+    (cd "${ROOT_DIR}/backend" && CGO_ENABLED=0 GOOS="${target_goos}" GOARCH="${target_goarch}" GOMAXPROCS="${LOCAL_BUILD_GOMAXPROCS}" GOMEMLIMIT="${LOCAL_BUILD_GOMEMLIMIT}" GOGC=50 go build "${go_build_args[@]}" ./cmd/server)
+  else
+    git -C "${ROOT_DIR}" archive --format=tar HEAD | tar -x -C "${archive_dir}"
+    if [ "${REMOTE_DOCKERFILE}" = "deploy/Dockerfile.prebuilt" ]; then
+      echo "Building frontend locally for prebuilt remote image..."
+      (cd "${ROOT_DIR}/frontend" && VITE_DISABLE_CHECKER=true pnpm exec vite build --config vite.config.ts)
+      test -f "${ROOT_DIR}/backend/internal/web/dist/index.html"
+      rm -rf "${archive_dir}/backend/internal/web/dist"
+      mkdir -p "${archive_dir}/backend/internal/web"
+      cp -R "${ROOT_DIR}/backend/internal/web/dist" "${archive_dir}/backend/internal/web/dist"
+    fi
   fi
   tar -czf "${tmp_dir}/source.tar.gz" -C "${archive_dir}" .
 }

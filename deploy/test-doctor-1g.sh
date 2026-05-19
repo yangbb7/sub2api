@@ -86,12 +86,17 @@ expect_failure "bad rollback boolean" "ROLLBACK_ON_FAILURE must be true or false
   env ROLLBACK_ON_FAILURE=maybe
 expect_failure "bad remote sudo mode" "REMOTE_SUDO must be auto, true, or false" \
   env REMOTE_SUDO=maybe
-expect_failure "local build strategy rejected" "always builds on the remote VPS" \
+expect_success "remote build strategy still supported" env BUILD_STRATEGY=remote
+expect_failure "bad build strategy" "BUILD_STRATEGY must be local-binary or remote" \
   env BUILD_STRATEGY=local
+expect_failure "bad local binary platform" "BUILD_STRATEGY=local-binary supports PLATFORM=linux/amd64 or linux/arm64" \
+  env PLATFORM=linux/s390x
 expect_failure "bad Docker install method" "DOCKER_INSTALL_METHOD must be auto, package, or get-docker" \
   env DOCKER_INSTALL_METHOD=magic
 expect_failure "bad build gomaxprocs" "BUILD_GOMAXPROCS must be a positive integer" \
   env BUILD_GOMAXPROCS=zero
+expect_failure "bad local build gomaxprocs" "LOCAL_BUILD_GOMAXPROCS must be a positive integer" \
+  env LOCAL_BUILD_GOMAXPROCS=zero
 expect_failure "bad proxied ttl" "TTL must be 1 when PROXIED=true" \
   env PROXIED=true TTL=300
 expect_failure "missing Cloudflare token when DNS enabled" "CF_API_TOKEN is required unless SKIP_DNS=true" \
