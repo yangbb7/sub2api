@@ -280,6 +280,14 @@ if ! grep -Fq -- "--build-arg PNPM_REGISTRY='" "${DEPLOY_DIR}/deploy-1g.sh"; the
   echo "deploy-1g.sh must pass PNPM_REGISTRY through to the remote Docker build" >&2
   exit 1
 fi
+if ! grep -Fq -- "--build-arg COMMIT='" "${DEPLOY_DIR}/deploy-1g.sh"; then
+  echo "deploy-1g.sh must pass the local commit through to the remote Docker build" >&2
+  exit 1
+fi
+if ! grep -Fq -- "--build-arg DATE='" "${DEPLOY_DIR}/deploy-1g.sh"; then
+  echo "deploy-1g.sh must pass the local build date through to the remote Docker build" >&2
+  exit 1
+fi
 if ! grep -Fq 'DOCKER_BUILDKIT=0 docker build' "${DEPLOY_DIR}/deploy-1g.sh"; then
   echo "deploy-1g.sh must disable BuildKit for lower-memory sequential remote builds" >&2
   exit 1

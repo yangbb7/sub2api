@@ -74,6 +74,8 @@ BUILD_STRATEGY="${BUILD_STRATEGY:-remote}"
 BUILD_NODE_OPTIONS="${BUILD_NODE_OPTIONS:---max-old-space-size=1280}"
 BUILD_GOMAXPROCS="${BUILD_GOMAXPROCS:-1}"
 PNPM_REGISTRY="${PNPM_REGISTRY:-https://registry.npmjs.org/}"
+BUILD_COMMIT="${BUILD_COMMIT:-$(git -C "${ROOT_DIR}" rev-parse --short=12 HEAD 2>/dev/null || printf 'archive')}"
+BUILD_DATE="${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 SWAP_SIZE="${SWAP_SIZE:-2G}"
 MIN_FREE_KB="${MIN_FREE_KB:-3145728}"
 MIN_DOCKER_FREE_KB="${MIN_DOCKER_FREE_KB:-4194304}"
@@ -937,7 +939,7 @@ create_source_archive() {
 
 remote_build_image() {
   echo "Building ${IMAGE_NAME} on remote host..."
-  run_remote_root "set -eu; echo '--- remote memory before build ---'; free -m || true; rm -rf '${remote_upload_dir}/src'; mkdir -p '${remote_upload_dir}/src'; tar -xzf '${remote_upload_dir}/source.tar.gz' -C '${remote_upload_dir}/src'; cd '${remote_upload_dir}/src'; DOCKER_BUILDKIT=0 docker build --build-arg NODE_OPTIONS='${BUILD_NODE_OPTIONS}' --build-arg BUILD_GOMAXPROCS='${BUILD_GOMAXPROCS}' --build-arg PNPM_REGISTRY='${PNPM_REGISTRY}' -f deploy/Dockerfile -t '${IMAGE_NAME}' .; cd /; rm -rf '${remote_upload_dir}/src' '${remote_upload_dir}/source.tar.gz'; docker image prune -f >/dev/null || true"
+  run_remote_root "set -eu; echo '--- remote memory before build ---'; free -m || true; rm -rf '${remote_upload_dir}/src'; mkdir -p '${remote_upload_dir}/src'; tar -xzf '${remote_upload_dir}/source.tar.gz' -C '${remote_upload_dir}/src'; cd '${remote_upload_dir}/src'; DOCKER_BUILDKIT=0 docker build --build-arg NODE_OPTIONS='${BUILD_NODE_OPTIONS}' --build-arg BUILD_GOMAXPROCS='${BUILD_GOMAXPROCS}' --build-arg PNPM_REGISTRY='${PNPM_REGISTRY}' --build-arg COMMIT='${BUILD_COMMIT}' --build-arg DATE='${BUILD_DATE}' -f deploy/Dockerfile -t '${IMAGE_NAME}' .; cd /; rm -rf '${remote_upload_dir}/src' '${remote_upload_dir}/source.tar.gz'; docker image prune -f >/dev/null || true"
 }
 
 remote_validate_caddyfile() {
