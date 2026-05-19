@@ -33,6 +33,8 @@ const (
 	envOpsWSOriginPolicy   = "OPS_WS_ORIGIN_POLICY"
 	envOpsWSMaxConns       = "OPS_WS_MAX_CONNS"
 	envOpsWSMaxConnsPerIP  = "OPS_WS_MAX_CONNS_PER_IP"
+	opsWSProtocol          = "gateway-admin"
+	opsWSLegacyProtocol    = "sub2api-admin"
 )
 
 const (
@@ -47,9 +49,10 @@ var upgrader = websocket.Upgrader{
 		return isAllowedOpsWSOrigin(r)
 	},
 	// Subprotocol negotiation:
-	// - The frontend passes ["sub2api-admin", "jwt.<token>"].
-	// - We always select "sub2api-admin" so the token is never echoed back in the handshake response.
-	Subprotocols: []string{"sub2api-admin"},
+	// - The frontend passes [opsWSProtocol, "jwt.<token>"].
+	// - The legacy protocol remains accepted so older admin consoles keep working.
+	// - We select a non-token protocol so the JWT is never echoed in the handshake response.
+	Subprotocols: []string{opsWSProtocol, opsWSLegacyProtocol},
 }
 
 const (

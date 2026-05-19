@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	dataType       = "sub2api-data"
+	dataType       = "gateway-data"
 	legacyDataType = "sub2api-bundle"
 	dataVersion    = 1
 	dataPageCap    = 1000

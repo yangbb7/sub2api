@@ -132,6 +132,10 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 		return nil, err
 	}
 
+	if proxyURL == "" {
+		proxyURL = getEnvProxy(req)
+	}
+
 	// 获取或创建对应的客户端，并标记请求占用
 	entry, err := s.acquireClient(proxyURL, accountID, accountConcurrency)
 	if err != nil {
@@ -167,6 +171,10 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, profile *tlsfingerprint.Profile) (*http.Response, error) {
 	if profile == nil {
 		return s.Do(req, proxyURL, accountID, accountConcurrency)
+	}
+
+	if proxyURL == "" {
+		proxyURL = getEnvProxy(req)
 	}
 
 	targetHost := ""
@@ -657,6 +665,16 @@ func buildCacheKey(isolation, proxyKey string, accountID int64) string {
 	default:
 		return fmt.Sprintf("proxy:%s", proxyKey)
 	}
+}
+
+// getEnvProxy 从环境变量获取代理 URL
+// 遵循 Go 标准库 http.ProxyFromEnvironment 的语义
+func getEnvProxy(req *http.Request) string {
+	proxyURL, err := http.ProxyFromEnvironment(req)
+	if err != nil || proxyURL == nil {
+		return ""
+	}
+	return proxyURL.String()
 }
 
 // normalizeProxyURL 标准化代理 URL
