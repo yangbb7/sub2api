@@ -380,13 +380,15 @@ const ensurePathSuffix = (value: string, suffix: string) => {
   return trimmed.endsWith(suffix) ? trimmed : `${trimmed}${suffix}`
 }
 
+const normalizeOpenAIBaseUrl = (value: string) => ensurePathSuffix(stripOpenAIPathVersion(value), '/v1')
+
 // Syntax highlighting helpers
 // Generate file configs based on platform and active tab
 const currentFiles = computed((): FileConfig[] => {
   const baseUrl = props.baseUrl || window.location.origin
   const apiKey = props.apiKey
   const baseRoot = stripOpenAIPathVersion(baseUrl)
-  const apiBase = ensurePathSuffix(baseRoot, '/v1')
+  const apiBase = normalizeOpenAIBaseUrl(baseUrl)
   const antigravityBase = ensurePathSuffix(`${baseRoot}/antigravity`, '/v1')
   const antigravityGeminiBase = ensurePathSuffix(`${baseRoot}/antigravity`, '/v1beta')
   const geminiBase = ensurePathSuffix(baseRoot, '/v1beta')
