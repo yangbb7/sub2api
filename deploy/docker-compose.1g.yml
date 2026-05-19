@@ -1,0 +1,189 @@
+# =============================================================================
+# AI Gateway Docker Compose - 1 vCPU / 1 GB RAM Profile
+# =============================================================================
+# This profile is for small VPS instances. It keeps everything on one machine:
+# Caddy + AI Gateway + PostgreSQL + Redis, with local bind-mounted data dirs.
+#
+# Required .env values:
+#   DOMAIN, POSTGRES_PASSWORD, JWT_SECRET, TOTP_ENCRYPTION_KEY
+# Optional:
+#   ADMIN_EMAIL, ADMIN_PASSWORD, TZ, GATEWAY_IMAGE
+# =============================================================================
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: gateway-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:?DOMAIN is required}
+      - ACME_EMAIL=${ACME_EMAIL:-}
+    volumes:
+      - ./Caddyfile.1g:/etc/caddy/Caddyfile:ro
+      - ./caddy_data:/data
+      - ./caddy_config:/config
+      - ./logs/caddy:/var/log/caddy
+    depends_on:
+      gateway:
+        condition: service_healthy
+    mem_limit: 64m
+    logging: *default-logging
+    networks:
+      - gateway-network
+
+  gateway:
+    image: ${GATEWAY_IMAGE:-gateway:cloud}
+    container_name: gateway
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    ports:
+      - "127.0.0.1:${SERVER_PORT:-18080}:18080"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - AUTO_SETUP=true
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=18080
+      - SERVER_MODE=release
+      - RUN_MODE=${RUN_MODE:-standard}
+      - GOMAXPROCS=${GOMAXPROCS:-1}
+      - GOMEMLIMIT=${GOMEMLIMIT:-192MiB}
+      - DATABASE_HOST=postgres
+      - DATABASE_PORT=5432
+      - DATABASE_USER=${POSTGRES_USER:-gateway}
+      - DATABASE_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      - DATABASE_DBNAME=${POSTGRES_DB:-gateway}
+      - DATABASE_SSLMODE=disable
+      - DATABASE_MAX_OPEN_CONNS=${DATABASE_MAX_OPEN_CONNS:-8}
+      - DATABASE_MAX_IDLE_CONNS=${DATABASE_MAX_IDLE_CONNS:-2}
+      - DATABASE_CONN_MAX_LIFETIME_MINUTES=${DATABASE_CONN_MAX_LIFETIME_MINUTES:-30}
+      - DATABASE_CONN_MAX_IDLE_TIME_MINUTES=${DATABASE_CONN_MAX_IDLE_TIME_MINUTES:-5}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_DB=${REDIS_DB:-0}
+      - REDIS_POOL_SIZE=${REDIS_POOL_SIZE:-16}
+      - REDIS_MIN_IDLE_CONNS=${REDIS_MIN_IDLE_CONNS:-1}
+      - REDIS_ENABLE_TLS=false
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@gateway.local}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
+      - TOTP_ENCRYPTION_KEY=${TOTP_ENCRYPTION_KEY:?TOTP_ENCRYPTION_KEY is required}
+      - JWT_EXPIRE_HOUR=${JWT_EXPIRE_HOUR:-24}
+      - TZ=${TZ:-Asia/Shanghai}
+      - SERVER_MAX_REQUEST_BODY_SIZE=${SERVER_MAX_REQUEST_BODY_SIZE:-104857600}
+      - GATEWAY_MAX_BODY_SIZE=${GATEWAY_MAX_BODY_SIZE:-104857600}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - LOG_FORMAT=${LOG_FORMAT:-json}
+      - LOG_OUTPUT_TO_STDOUT=true
+      - LOG_OUTPUT_TO_FILE=true
+      - LOG_ROTATION_MAX_SIZE_MB=${LOG_ROTATION_MAX_SIZE_MB:-10}
+      - LOG_ROTATION_MAX_BACKUPS=${LOG_ROTATION_MAX_BACKUPS:-3}
+      - LOG_ROTATION_MAX_AGE_DAYS=${LOG_ROTATION_MAX_AGE_DAYS:-7}
+      - SECURITY_URL_ALLOWLIST_ENABLED=${SECURITY_URL_ALLOWLIST_ENABLED:-false}
+      - UPDATE_PROXY_URL=${UPDATE_PROXY_URL:-}
+      - GEMINI_OAUTH_CLIENT_ID=${GEMINI_OAUTH_CLIENT_ID:-}
+      - GEMINI_OAUTH_CLIENT_SECRET=${GEMINI_OAUTH_CLIENT_SECRET:-}
+      - GEMINI_OAUTH_SCOPES=${GEMINI_OAUTH_SCOPES:-}
+      - GEMINI_QUOTA_POLICY=${GEMINI_QUOTA_POLICY:-}
+      - GEMINI_CLI_OAUTH_CLIENT_SECRET=${GEMINI_CLI_OAUTH_CLIENT_SECRET:-}
+      - ANTIGRAVITY_OAUTH_CLIENT_SECRET=${ANTIGRAVITY_OAUTH_CLIENT_SECRET:-}
+      - ANTIGRAVITY_USER_AGENT_VERSION=${ANTIGRAVITY_USER_AGENT_VERSION:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "5", "-O", "/dev/null", "http://localhost:18080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    mem_limit: 256m
+    logging: *default-logging
+    networks:
+      - gateway-network
+
+  postgres:
+    image: postgres:18-alpine
+    container_name: gateway-postgres
+    restart: unless-stopped
+    shm_size: 64m
+    command:
+      - postgres
+      - -c
+      - max_connections=${POSTGRES_MAX_CONNECTIONS:-30}
+      - -c
+      - shared_buffers=${POSTGRES_SHARED_BUFFERS:-48MB}
+      - -c
+      - effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-192MB}
+      - -c
+      - maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-24MB}
+      - -c
+      - work_mem=${POSTGRES_WORK_MEM:-1MB}
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+    environment:
+      - PGDATA=/var/lib/postgresql/data
+      - POSTGRES_USER=${POSTGRES_USER:-gateway}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      - POSTGRES_DB=${POSTGRES_DB:-gateway}
+      - TZ=${TZ:-Asia/Shanghai}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gateway} -d ${POSTGRES_DB:-gateway}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    mem_limit: 256m
+    logging: *default-logging
+    networks:
+      - gateway-network
+
+  redis:
+    image: redis:8-alpine
+    container_name: gateway-redis
+    restart: unless-stopped
+    command: >
+      sh -c 'exec redis-server
+      --save 300 1
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory "$${REDIS_MAXMEMORY:-64mb}"
+      --maxmemory-policy allkeys-lru
+      --maxclients "$${REDIS_MAXCLIENTS:-96}"
+      $${REDIS_PASSWORD:+--requirepass "$${REDIS_PASSWORD}"}'
+    volumes:
+      - ./redis_data:/data
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_MAXMEMORY=${REDIS_MAXMEMORY:-64mb}
+      - REDIS_MAXCLIENTS=${REDIS_MAXCLIENTS:-96}
+    healthcheck:
+      test: ["CMD-SHELL", "if [ -n \"$${REDIS_PASSWORD:-}\" ]; then redis-cli -a \"$${REDIS_PASSWORD}\" ping; else redis-cli ping; fi"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    mem_limit: 128m
+    logging: *default-logging
+    networks:
+      - gateway-network
+
+networks:
+  gateway-network:
+    driver: bridge
