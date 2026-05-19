@@ -278,6 +278,9 @@ func (s *AuthService) SendVerifyCode(ctx context.Context, email string) error {
 	if s.settingService == nil || !s.settingService.IsRegistrationEnabled(ctx) {
 		return ErrRegDisabled
 	}
+	if !s.settingService.IsEmailVerifyEnabled(ctx) {
+		return ErrEmailVerifyRequired
+	}
 
 	if isReservedEmail(email) {
 		return ErrEmailReserved
@@ -296,13 +299,12 @@ func (s *AuthService) SendVerifyCode(ctx context.Context, email string) error {
 		return ErrEmailExists
 	}
 
-	// 发送验证码
-	if s.emailService == nil {
-		return errors.New("email service not configured")
+	if err := s.ensureEmailReady(ctx); err != nil {
+		return err
 	}
 
 	// 获取网站名称
-	siteName := "Sub2API"
+	siteName := defaultSiteName
 	if s.settingService != nil {
 		siteName = s.settingService.GetSiteName(ctx)
 	}
@@ -318,6 +320,9 @@ func (s *AuthService) SendVerifyCodeAsync(ctx context.Context, email string) (*S
 	if s.settingService == nil || !s.settingService.IsRegistrationEnabled(ctx) {
 		logger.LegacyPrintf("service.auth", "%s", "[Auth] Registration is disabled")
 		return nil, ErrRegDisabled
+	}
+	if !s.settingService.IsEmailVerifyEnabled(ctx) {
+		return nil, ErrEmailVerifyRequired
 	}
 
 	if isReservedEmail(email) {
@@ -338,14 +343,17 @@ func (s *AuthService) SendVerifyCodeAsync(ctx context.Context, email string) (*S
 		return nil, ErrEmailExists
 	}
 
-	// 检查邮件队列服务是否配置
+	if err := s.ensureEmailReady(ctx); err != nil {
+		return nil, err
+	}
+
 	if s.emailQueueService == nil {
 		logger.LegacyPrintf("service.auth", "%s", "[Auth] Email queue service not configured")
 		return nil, errors.New("email queue service not configured")
 	}
 
 	// 获取网站名称
-	siteName := "Sub2API"
+	siteName := defaultSiteName
 	if s.settingService != nil {
 		siteName = s.settingService.GetSiteName(ctx)
 	}
@@ -361,6 +369,16 @@ func (s *AuthService) SendVerifyCodeAsync(ctx context.Context, email string) (*S
 	return &SendVerifyCodeResult{
 		Countdown: 60, // 60秒倒计时
 	}, nil
+}
+
+func (s *AuthService) ensureEmailReady(ctx context.Context) error {
+	if s.emailService == nil {
+		return ErrEmailNotConfigured
+	}
+	if _, err := s.emailService.GetSMTPConfig(ctx); err != nil {
+		return err
+	}
+	return nil
 }
 
 // VerifyTurnstileForRegister 在注册场景下验证 Turnstile。
@@ -1215,7 +1233,7 @@ func (s *AuthService) preparePasswordReset(ctx context.Context, email, frontendB
 	}
 
 	// Get site name
-	siteName := "Sub2API"
+	siteName := defaultSiteName
 	if s.settingService != nil {
 		siteName = s.settingService.GetSiteName(ctx)
 	}

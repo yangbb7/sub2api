@@ -309,6 +309,7 @@ func TestAuthService_Register_EmailSuffixNotAllowed(t *testing.T) {
 	repo := &userRepoStub{}
 	service := newAuthService(repo, map[string]string{
 		SettingKeyRegistrationEnabled:              "true",
+		SettingKeyEmailVerifyEnabled:               "true",
 		SettingKeyRegistrationEmailSuffixWhitelist: `["@example.com","@company.com"]`,
 	}, nil)
 
@@ -339,6 +340,7 @@ func TestAuthService_SendVerifyCode_EmailSuffixNotAllowed(t *testing.T) {
 	repo := &userRepoStub{}
 	service := newAuthService(repo, map[string]string{
 		SettingKeyRegistrationEnabled:              "true",
+		SettingKeyEmailVerifyEnabled:               "true",
 		SettingKeyRegistrationEmailSuffixWhitelist: `["@example.com","@company.com"]`,
 	}, nil)
 
@@ -348,6 +350,59 @@ func TestAuthService_SendVerifyCode_EmailSuffixNotAllowed(t *testing.T) {
 	require.Contains(t, appErr.Message, "@example.com")
 	require.Contains(t, appErr.Message, "@company.com")
 	require.Equal(t, "2", appErr.Metadata["allowed_suffix_count"])
+}
+
+func TestAuthService_SendVerifyCode_EmailVerifyDisabled(t *testing.T) {
+	repo := &userRepoStub{}
+	service := newAuthService(repo, map[string]string{
+		SettingKeyRegistrationEnabled: "true",
+		SettingKeyEmailVerifyEnabled:  "false",
+	}, &emailCacheStub{})
+
+	err := service.SendVerifyCode(context.Background(), "user@test.com")
+	require.ErrorIs(t, err, ErrEmailVerifyRequired)
+}
+
+func TestAuthService_SendVerifyCodeAsync_EmailVerifyDisabled(t *testing.T) {
+	repo := &userRepoStub{}
+	service := newAuthService(repo, map[string]string{
+		SettingKeyRegistrationEnabled: "true",
+		SettingKeyEmailVerifyEnabled:  "false",
+	}, &emailCacheStub{})
+
+	result, err := service.SendVerifyCodeAsync(context.Background(), "user@test.com")
+	require.Nil(t, result)
+	require.ErrorIs(t, err, ErrEmailVerifyRequired)
+}
+
+func TestAuthService_SendVerifyCodeAsync_EmailNotConfigured(t *testing.T) {
+	repo := &userRepoStub{}
+	emailService := NewEmailService(&settingRepoStub{values: map[string]string{
+		SettingKeyRegistrationEnabled: "true",
+		SettingKeyEmailVerifyEnabled:  "true",
+	}}, &emailCacheStub{})
+	service := NewAuthService(
+		nil,
+		repo,
+		nil,
+		nil,
+		&config.Config{JWT: config.JWTConfig{Secret: "test-secret", ExpireHour: 1}},
+		NewSettingService(&settingRepoStub{values: map[string]string{
+			SettingKeyRegistrationEnabled: "true",
+			SettingKeyEmailVerifyEnabled:  "true",
+		}}, &config.Config{}),
+		emailService,
+		nil,
+		NewEmailQueueService(emailService, 1),
+		nil,
+		nil,
+		nil,
+	)
+	defer service.emailQueueService.Stop()
+
+	result, err := service.SendVerifyCodeAsync(context.Background(), "user@test.com")
+	require.Nil(t, result)
+	require.ErrorIs(t, err, ErrEmailNotConfigured)
 }
 
 func TestAuthService_Register_CreateError(t *testing.T) {
