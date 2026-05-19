@@ -454,6 +454,16 @@ async function openUsersTab(wrapper: ReturnType<typeof mountView>) {
   await flushPromises();
 }
 
+async function openEmailTab(wrapper: ReturnType<typeof mountView>) {
+  const emailTabButton = wrapper
+    .findAll("button")
+    .find((node) => node.text().includes("admin.settings.tabs.email"));
+
+  expect(emailTabButton).toBeDefined();
+  await emailTabButton?.trigger("click");
+  await flushPromises();
+}
+
 describe("admin SettingsView payment visible method controls", () => {
   beforeEach(() => {
     getSettings.mockReset();
@@ -721,6 +731,22 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(paymentHelpImageUpload).toBeDefined();
     expect(paymentHelpImageUpload?.attributes("data-upload-label")).toBe("上传图片");
     expect(paymentHelpImageUpload?.attributes("data-remove-label")).toBe("移除");
+  });
+
+  it("shows SMTP configuration before email verification is enabled", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      email_verify_enabled: false,
+    });
+
+    const wrapper = mountView();
+
+    await flushPromises();
+    await openEmailTab(wrapper);
+
+    expect(wrapper.text()).toContain("admin.settings.smtp.title");
+    expect(wrapper.text()).toContain("admin.settings.testEmail.title");
+    expect(wrapper.text()).toContain("admin.settings.emailTabDisabledTitle");
   });
 });
 
