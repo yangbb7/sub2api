@@ -1,0 +1,79 @@
+# =============================================================================
+# AI Gateway Dockerfile - prebuilt frontend profile
+# =============================================================================
+# This profile expects backend/internal/web/dist to be built before the source
+# archive is created. It keeps 1G remote builds focused on Go compilation.
+
+ARG GOLANG_IMAGE=golang:1.26.3-alpine
+ARG ALPINE_IMAGE=alpine:3.20
+ARG GOPROXY=https://goproxy.cn,direct
+ARG GOSUMDB=sum.golang.google.cn
+ARG BUILD_GOMAXPROCS=1
+ARG BUILD_GOMEMLIMIT=640MiB
+ARG BUILD_GCFLAGS=all=-l
+
+FROM ${GOLANG_IMAGE} AS backend-builder
+
+ARG VERSION=docker
+ARG COMMIT=docker
+ARG DATE
+ARG GOPROXY
+ARG GOSUMDB
+ARG BUILD_GOMAXPROCS
+ARG BUILD_GOMEMLIMIT
+ARG BUILD_GCFLAGS
+
+ENV GOPROXY=${GOPROXY}
+ENV GOSUMDB=${GOSUMDB}
+ENV GOMAXPROCS=${BUILD_GOMAXPROCS}
+ENV GOMEMLIMIT=${BUILD_GOMEMLIMIT}
+
+RUN apk add --no-cache git ca-certificates tzdata
+
+WORKDIR /app/backend
+
+COPY backend/go.mod backend/go.sum ./
+RUN go mod download
+
+COPY backend/ ./
+
+RUN test -f ./internal/web/dist/index.html
+
+RUN CGO_ENABLED=0 GOOS=linux GOGC=50 go build \
+    -p 1 \
+    -gcflags="${BUILD_GCFLAGS}" \
+    -tags embed \
+    -ldflags="-s -w -X main.Version=${VERSION} -X main.Commit=${COMMIT} -X main.Date=${DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)} -X main.BuildType=release" \
+    -o /app/gateway \
+    ./cmd/server
+
+FROM ${ALPINE_IMAGE}
+
+LABEL description="AI Gateway Platform"
+
+RUN apk add --no-cache \
+    ca-certificates \
+    tzdata \
+    curl \
+    su-exec \
+    && rm -rf /var/cache/apk/*
+
+RUN addgroup -g 1000 gateway && \
+    adduser -u 1000 -G gateway -s /bin/sh -D gateway
+
+WORKDIR /app
+
+COPY --from=backend-builder /app/gateway /app/gateway
+
+RUN mkdir -p /app/data && chown -R gateway:gateway /app
+
+COPY deploy/docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
+
+EXPOSE 18080
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD wget -q -T 5 -O /dev/null http://localhost:${SERVER_PORT:-18080}/health || exit 1
+
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+CMD ["/app/gateway"]

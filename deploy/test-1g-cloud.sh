@@ -247,6 +247,10 @@ if ! grep -Fq "outDir: '../backend/internal/web/dist'" "${ROOT_DIR}/frontend/vit
   echo "frontend/vite.config.ts must build assets into backend/internal/web/dist for embedded backend builds" >&2
   exit 1
 fi
+if ! grep -Fq 'RUN test -f ./internal/web/dist/index.html' "${DEPLOY_DIR}/Dockerfile.prebuilt"; then
+  echo "deploy/Dockerfile.prebuilt must require prebuilt embedded frontend assets" >&2
+  exit 1
+fi
 if ! grep -Fq 'COPY --from=frontend-builder /app/backend/internal/web/dist ./internal/web/dist' "${DEPLOY_DIR}/Dockerfile"; then
   echo "deploy/Dockerfile must copy the Vite output from frontend-builder into backend/internal/web/dist" >&2
   exit 1
@@ -286,6 +290,10 @@ if ! grep -Fq -- "--build-arg COMMIT='" "${DEPLOY_DIR}/deploy-1g.sh"; then
 fi
 if ! grep -Fq -- "--build-arg DATE='" "${DEPLOY_DIR}/deploy-1g.sh"; then
   echo "deploy-1g.sh must pass the local build date through to the remote Docker build" >&2
+  exit 1
+fi
+if ! grep -Fq -- "-f '\${REMOTE_DOCKERFILE}'" "${DEPLOY_DIR}/deploy-1g.sh"; then
+  echo "deploy-1g.sh must support selecting the remote Dockerfile" >&2
   exit 1
 fi
 if ! grep -Fq 'DOCKER_BUILDKIT=0 docker build' "${DEPLOY_DIR}/deploy-1g.sh"; then
@@ -405,10 +413,11 @@ cleanup() {
 trap cleanup EXIT
 
 archive="${tmp_dir}/source.tar.gz"
-git -C "${ROOT_DIR}" archive --format=tar HEAD | gzip -c > "${archive}"
+git -C "${ROOT_DIR}" archive --format=tar "$(git -C "${ROOT_DIR}" write-tree)" | gzip -c > "${archive}"
 
 tar -tzf "${archive}" | awk '
   $0 == "deploy/Dockerfile" { dockerfile = 1 }
+  $0 == "deploy/Dockerfile.prebuilt" { prebuilt = 1 }
   $0 == "frontend/package.json" { frontend = 1 }
   $0 == "frontend/pnpm-lock.yaml" { lockfile = 1 }
   $0 == "backend/go.mod" { backend = 1 }
@@ -420,7 +429,7 @@ tar -tzf "${archive}" | awk '
   $0 ~ /^deploy\/.*report.*\.json$/ { bad_report = 1 }
   $0 ~ /^frontend\/node_modules\// { bad_node_modules = 1 }
   END {
-    if (!dockerfile || !frontend || !lockfile || !backend || !vite_ts || bad_vite_js || bad_env || bad_report || bad_node_modules) {
+    if (!dockerfile || !prebuilt || !frontend || !lockfile || !backend || !vite_ts || bad_vite_js || bad_env || bad_report || bad_node_modules) {
       print "source archive is missing required files or includes excluded files" > "/dev/stderr"
       exit 1
     }

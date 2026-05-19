@@ -76,6 +76,7 @@ BUILD_GOMAXPROCS="${BUILD_GOMAXPROCS:-1}"
 PNPM_REGISTRY="${PNPM_REGISTRY:-https://registry.npmjs.org/}"
 BUILD_COMMIT="${BUILD_COMMIT:-$(git -C "${ROOT_DIR}" rev-parse --short=12 HEAD 2>/dev/null || printf 'archive')}"
 BUILD_DATE="${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+REMOTE_DOCKERFILE="${REMOTE_DOCKERFILE:-deploy/Dockerfile.prebuilt}"
 SWAP_SIZE="${SWAP_SIZE:-2G}"
 MIN_FREE_KB="${MIN_FREE_KB:-3145728}"
 MIN_DOCKER_FREE_KB="${MIN_DOCKER_FREE_KB:-4194304}"
@@ -908,12 +909,24 @@ collect_remote_diagnostics() {
 
 create_source_archive() {
   echo "Creating source archive for remote build..."
-  git -C "${ROOT_DIR}" archive --format=tar HEAD | gzip -c > "${tmp_dir}/source.tar.gz"
+  local archive_dir="${tmp_dir}/source"
+  rm -rf "${archive_dir}"
+  mkdir -p "${archive_dir}"
+  git -C "${ROOT_DIR}" archive --format=tar HEAD | tar -x -C "${archive_dir}"
+  if [ "${REMOTE_DOCKERFILE}" = "deploy/Dockerfile.prebuilt" ]; then
+    echo "Building frontend locally for prebuilt remote image..."
+    (cd "${ROOT_DIR}/frontend" && pnpm exec vite build)
+    test -f "${ROOT_DIR}/backend/internal/web/dist/index.html"
+    rm -rf "${archive_dir}/backend/internal/web/dist"
+    mkdir -p "${archive_dir}/backend/internal/web"
+    cp -R "${ROOT_DIR}/backend/internal/web/dist" "${archive_dir}/backend/internal/web/dist"
+  fi
+  tar -czf "${tmp_dir}/source.tar.gz" -C "${archive_dir}" .
 }
 
 remote_build_image() {
   echo "Building ${IMAGE_NAME} on remote host..."
-  run_remote_root "set -eu; echo '--- remote memory before build ---'; free -m || true; rm -rf '${remote_upload_dir}/src'; mkdir -p '${remote_upload_dir}/src'; tar -xzf '${remote_upload_dir}/source.tar.gz' -C '${remote_upload_dir}/src'; cd '${remote_upload_dir}/src'; DOCKER_BUILDKIT=0 docker build --build-arg NODE_OPTIONS='${BUILD_NODE_OPTIONS}' --build-arg BUILD_GOMAXPROCS='${BUILD_GOMAXPROCS}' --build-arg PNPM_REGISTRY='${PNPM_REGISTRY}' --build-arg COMMIT='${BUILD_COMMIT}' --build-arg DATE='${BUILD_DATE}' -f deploy/Dockerfile -t '${IMAGE_NAME}' .; cd /; rm -rf '${remote_upload_dir}/src' '${remote_upload_dir}/source.tar.gz'; docker image prune -f >/dev/null || true"
+  run_remote_root "set -eu; echo '--- remote memory before build ---'; free -m || true; rm -rf '${remote_upload_dir}/src'; mkdir -p '${remote_upload_dir}/src'; tar -xzf '${remote_upload_dir}/source.tar.gz' -C '${remote_upload_dir}/src'; cd '${remote_upload_dir}/src'; DOCKER_BUILDKIT=0 docker build --build-arg NODE_OPTIONS='${BUILD_NODE_OPTIONS}' --build-arg BUILD_GOMAXPROCS='${BUILD_GOMAXPROCS}' --build-arg PNPM_REGISTRY='${PNPM_REGISTRY}' --build-arg COMMIT='${BUILD_COMMIT}' --build-arg DATE='${BUILD_DATE}' -f '${REMOTE_DOCKERFILE}' -t '${IMAGE_NAME}' .; cd /; rm -rf '${remote_upload_dir}/src' '${remote_upload_dir}/source.tar.gz'; docker image prune -f >/dev/null || true"
 }
 
 remote_validate_caddyfile() {
