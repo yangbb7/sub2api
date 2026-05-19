@@ -943,6 +943,17 @@ collect_remote_diagnostics() {
   }" || true
 }
 
+ensure_clean_git_tree_for_local_binary() {
+  local status_output
+  status_output="$(git -C "${ROOT_DIR}" status --short --untracked-files=normal)"
+  if [ -n "${status_output}" ]; then
+    echo "BUILD_STRATEGY=local-binary requires a clean git worktree so the deployed binary matches HEAD." >&2
+    printf '%s\n' "${status_output}" >&2
+    echo "Commit or remove these changes before deploying." >&2
+    exit 1
+  fi
+}
+
 create_source_archive() {
   echo "Creating build context for ${BUILD_STRATEGY} image..."
   local archive_dir="${tmp_dir}/source"
@@ -953,6 +964,7 @@ create_source_archive() {
   mkdir -p "${archive_dir}"
 
   if [ "${BUILD_STRATEGY}" = local-binary ]; then
+    ensure_clean_git_tree_for_local_binary
     mkdir -p "${archive_dir}/build" "${archive_dir}/deploy"
     cp "${DEPLOY_DIR}/Dockerfile.binary" "${archive_dir}/deploy/Dockerfile.binary"
     cp "${DEPLOY_DIR}/docker-entrypoint.sh" "${archive_dir}/deploy/docker-entrypoint.sh"

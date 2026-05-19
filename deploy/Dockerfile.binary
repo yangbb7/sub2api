@@ -8,7 +8,15 @@ ARG ALPINE_IMAGE=alpine:3.20
 
 FROM ${ALPINE_IMAGE}
 
+ARG NODE_OPTIONS
+ARG BUILD_GOMAXPROCS
+ARG PNPM_REGISTRY
+ARG COMMIT=docker
+ARG DATE
+
 LABEL description="AI Gateway Platform"
+LABEL org.opencontainers.image.revision="${COMMIT}"
+LABEL org.opencontainers.image.created="${DATE}"
 
 RUN apk add --no-cache \
     ca-certificates \

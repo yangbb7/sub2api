@@ -255,8 +255,18 @@ if ! grep -Fq 'COPY build/gateway /app/gateway' "${DEPLOY_DIR}/Dockerfile.binary
   echo "deploy/Dockerfile.binary must copy the locally built gateway binary" >&2
   exit 1
 fi
+if ! grep -Fq 'ARG NODE_OPTIONS' "${DEPLOY_DIR}/Dockerfile.binary" ||
+  ! grep -Fq 'ARG COMMIT=docker' "${DEPLOY_DIR}/Dockerfile.binary" ||
+  ! grep -Fq 'org.opencontainers.image.revision="${COMMIT}"' "${DEPLOY_DIR}/Dockerfile.binary"; then
+  echo "deploy/Dockerfile.binary must consume shared remote build args without warnings" >&2
+  exit 1
+fi
 if ! grep -Fq 'BUILD_STRATEGY="${BUILD_STRATEGY:-local-binary}"' "${DEPLOY_DIR}/deploy-1g.sh"; then
   echo "deploy-1g.sh must default 1G deployments to local binary builds" >&2
+  exit 1
+fi
+if ! grep -Fq 'ensure_clean_git_tree_for_local_binary' "${DEPLOY_DIR}/deploy-1g.sh"; then
+  echo "deploy-1g.sh must require a clean worktree before local binary deployments" >&2
   exit 1
 fi
 if ! grep -Fq 'local-binary|remote' "${DEPLOY_DIR}/deploy-1g.sh"; then
