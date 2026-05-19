@@ -373,26 +373,23 @@ const operator = (value: string) => wrapToken('text-slate-400', value)
 const string = (value: string) => wrapToken('text-amber-200', value)
 const comment = (value: string) => wrapToken('text-slate-500', value)
 
+const stripOpenAIPathVersion = (value: string) => value.replace(/\/v1\/?$/, '').replace(/\/+$/, '')
+
+const ensurePathSuffix = (value: string, suffix: string) => {
+  const trimmed = value.replace(/\/+$/, '')
+  return trimmed.endsWith(suffix) ? trimmed : `${trimmed}${suffix}`
+}
+
 // Syntax highlighting helpers
 // Generate file configs based on platform and active tab
 const currentFiles = computed((): FileConfig[] => {
   const baseUrl = props.baseUrl || window.location.origin
   const apiKey = props.apiKey
-  const baseRoot = baseUrl.replace(/\/v1\/?$/, '').replace(/\/+$/, '')
-  const ensureV1 = (value: string) => {
-    const trimmed = value.replace(/\/+$/, '')
-    return trimmed.endsWith('/v1') ? trimmed : `${trimmed}/v1`
-  }
-  const apiBase = ensureV1(baseRoot)
-  const antigravityBase = ensureV1(`${baseRoot}/antigravity`)
-  const antigravityGeminiBase = (() => {
-    const trimmed = `${baseRoot}/antigravity`.replace(/\/+$/, '')
-    return trimmed.endsWith('/v1beta') ? trimmed : `${trimmed}/v1beta`
-  })()
-  const geminiBase = (() => {
-    const trimmed = baseRoot.replace(/\/+$/, '')
-    return trimmed.endsWith('/v1beta') ? trimmed : `${trimmed}/v1beta`
-  })()
+  const baseRoot = stripOpenAIPathVersion(baseUrl)
+  const apiBase = ensurePathSuffix(baseRoot, '/v1')
+  const antigravityBase = ensurePathSuffix(`${baseRoot}/antigravity`, '/v1')
+  const antigravityGeminiBase = ensurePathSuffix(`${baseRoot}/antigravity`, '/v1beta')
+  const geminiBase = ensurePathSuffix(baseRoot, '/v1beta')
 
   if (activeClientTab.value === 'opencode') {
     switch (props.platform) {

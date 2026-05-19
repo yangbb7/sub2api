@@ -68,6 +68,47 @@ describe('UseKeyModal', () => {
     expect(codeBlock.text()).not.toContain('/v1/v1')
   })
 
+  it('falls back to the current origin with /v1 when API base URL is empty', () => {
+    const originalLocation = window.location
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: {
+        ...originalLocation,
+        origin: 'https://api.braintech.icu'
+      }
+    })
+
+    try {
+      const wrapper = mount(UseKeyModal, {
+        props: {
+          show: true,
+          apiKey: 'sk-test',
+          baseUrl: '',
+          platform: 'openai'
+        },
+        global: {
+          stubs: {
+            BaseDialog: {
+              template: '<div><slot /><slot name="footer" /></div>'
+            },
+            Icon: {
+              template: '<span />'
+            }
+          }
+        }
+      })
+
+      const codeBlock = wrapper.find('pre code')
+      expect(codeBlock.text()).toContain('base_url = "https://api.braintech.icu/v1"')
+      expect(codeBlock.text()).not.toContain('base_url = "https://api.braintech.icu"')
+    } finally {
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: originalLocation
+      })
+    }
+  })
+
   it('renders GPT-5.4 mini entry in OpenCode config', async () => {
     const wrapper = mount(UseKeyModal, {
       props: {
