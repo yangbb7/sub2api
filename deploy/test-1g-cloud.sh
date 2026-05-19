@@ -405,45 +405,22 @@ cleanup() {
 trap cleanup EXIT
 
 archive="${tmp_dir}/source.tar.gz"
-tar -czf "${archive}" \
-  --exclude='./.git' \
-  --exclude='./.github' \
-  --exclude='./.env' \
-  --exclude='./.env.*' \
-  --exclude='./frontend/.env' \
-  --exclude='./frontend/.env.*' \
-  --exclude='./backend/.env' \
-  --exclude='./backend/.env.*' \
-  --exclude='./deploy/.env' \
-  --exclude='./deploy/.env.*' \
-  --exclude='./frontend/node_modules' \
-  --exclude='./frontend/dist' \
-  --exclude='./frontend/.vite' \
-  --exclude='./backend/internal/web/dist' \
-  --exclude='./backend/data' \
-  --exclude='./data' \
-  --exclude='./logs' \
-  --exclude='./postgres_data' \
-  --exclude='./redis_data' \
-  --exclude='./caddy_data' \
-  --exclude='./caddy_config' \
-  --exclude='./deploy/deploy-1g.env.local' \
-  --exclude='./deploy/*report*.json' \
-  --exclude='./deploy/*.tar.gz' \
-  --exclude='./deploy/*.log' \
-  -C "${ROOT_DIR}" .
+git -C "${ROOT_DIR}" archive --format=tar HEAD | gzip -c > "${archive}"
 
 tar -tzf "${archive}" | awk '
-  $0 == "./deploy/Dockerfile" { dockerfile = 1 }
-  $0 == "./frontend/package.json" { frontend = 1 }
-  $0 == "./frontend/pnpm-lock.yaml" { lockfile = 1 }
-  $0 == "./backend/go.mod" { backend = 1 }
-  $0 ~ /^\.\/\.env/ { bad_env = 1 }
-  $0 ~ /^\.\/deploy\/\.env/ { bad_env = 1 }
-  $0 ~ /^\.\/deploy\/.*report.*\.json$/ { bad_report = 1 }
-  $0 ~ /^\.\/frontend\/node_modules\// { bad_node_modules = 1 }
+  $0 == "deploy/Dockerfile" { dockerfile = 1 }
+  $0 == "frontend/package.json" { frontend = 1 }
+  $0 == "frontend/pnpm-lock.yaml" { lockfile = 1 }
+  $0 == "backend/go.mod" { backend = 1 }
+  $0 == "frontend/vite.config.ts" { vite_ts = 1 }
+  $0 == "frontend/vite.config.js" { bad_vite_js = 1 }
+  $0 ~ /^\.env($|\.)/ && $0 !~ /\.example$/ { bad_env = 1 }
+  $0 ~ /^deploy\/\.env($|\.)/ && $0 !~ /\.example$/ { bad_env = 1 }
+  $0 == "deploy/deploy-1g.env.local" { bad_env = 1 }
+  $0 ~ /^deploy\/.*report.*\.json$/ { bad_report = 1 }
+  $0 ~ /^frontend\/node_modules\// { bad_node_modules = 1 }
   END {
-    if (!dockerfile || !frontend || !lockfile || !backend || bad_env || bad_report || bad_node_modules) {
+    if (!dockerfile || !frontend || !lockfile || !backend || !vite_ts || bad_vite_js || bad_env || bad_report || bad_node_modules) {
       print "source archive is missing required files or includes excluded files" > "/dev/stderr"
       exit 1
     }

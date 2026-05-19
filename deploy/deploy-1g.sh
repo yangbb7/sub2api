@@ -908,33 +908,7 @@ collect_remote_diagnostics() {
 
 create_source_archive() {
   echo "Creating source archive for remote build..."
-  tar -czf "${tmp_dir}/source.tar.gz" \
-    --exclude='./.git' \
-    --exclude='./.github' \
-    --exclude='./.env' \
-    --exclude='./.env.*' \
-    --exclude='./frontend/.env' \
-    --exclude='./frontend/.env.*' \
-    --exclude='./backend/.env' \
-    --exclude='./backend/.env.*' \
-    --exclude='./deploy/.env' \
-    --exclude='./deploy/.env.*' \
-    --exclude='./frontend/node_modules' \
-    --exclude='./frontend/dist' \
-    --exclude='./frontend/.vite' \
-    --exclude='./backend/internal/web/dist' \
-    --exclude='./backend/data' \
-    --exclude='./data' \
-    --exclude='./logs' \
-    --exclude='./postgres_data' \
-    --exclude='./redis_data' \
-    --exclude='./caddy_data' \
-    --exclude='./caddy_config' \
-    --exclude='./deploy/deploy-1g.env.local' \
-    --exclude='./deploy/*report*.json' \
-    --exclude='./deploy/*.tar.gz' \
-    --exclude='./deploy/*.log' \
-    -C "${ROOT_DIR}" .
+  git -C "${ROOT_DIR}" archive --format=tar HEAD | gzip -c > "${tmp_dir}/source.tar.gz"
 }
 
 remote_build_image() {
