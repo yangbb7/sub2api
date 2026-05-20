@@ -57,15 +57,6 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
-    path: '/email-verify',
-    name: 'EmailVerify',
-    component: () => import('@/views/auth/EmailVerifyView.vue'),
-    meta: {
-      requiresAuth: false,
-      title: 'Verify Email'
-    }
-  },
-  {
     path: '/auth/callback',
     name: 'OAuthCallback',
     alias: '/auth/oauth/callback',
@@ -677,7 +668,7 @@ const BACKEND_MODE_CALLBACK_PATHS = [
   '/auth/wechat/callback',
   '/auth/wechat/payment/callback',
 ]
-const BACKEND_MODE_PENDING_AUTH_PATHS = ['/register', '/email-verify']
+const BACKEND_MODE_PENDING_AUTH_PATHS = ['/register']
 
 function isBackendModePublicRouteAllowed(path: string, hasPendingAuthSession: boolean): boolean {
   if (BACKEND_MODE_ALLOWED_PATHS.some((allowedPath) => path === allowedPath || path.startsWith(allowedPath))) {

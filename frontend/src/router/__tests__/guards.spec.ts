@@ -86,7 +86,7 @@ function simulateGuard(
         '/auth/wechat/callback',
         '/auth/wechat/payment/callback',
       ]
-      const pendingAuthPaths = ['/register', '/email-verify']
+      const pendingAuthPaths = ['/register']
       const isAllowed =
         allowed.some((path) => toPath === path || toPath.startsWith(path)) ||
         callbackPaths.includes(toPath) ||
@@ -135,7 +135,7 @@ function simulateGuard(
       '/auth/wechat/callback',
       '/auth/wechat/payment/callback',
     ]
-    const pendingAuthPaths = ['/register', '/email-verify']
+    const pendingAuthPaths = ['/register']
     const isAllowed =
       allowed.some((path) => toPath === path || toPath.startsWith(path)) ||
       callbackPaths.includes(toPath) ||
@@ -486,16 +486,5 @@ describe('路由守卫逻辑', () => {
       expect(redirect).toBeNull()
     })
 
-    it('unauthenticated: /email-verify is blocked without a pending auth session', () => {
-      const authState: MockAuthState = {
-        isAuthenticated: false,
-        isAdmin: false,
-        isSimpleMode: false,
-        backendModeEnabled: true,
-        hasPendingAuthSession: false,
-      }
-      const redirect = simulateGuard('/email-verify', { requiresAuth: false }, authState)
-      expect(redirect).toBe('/login')
-    })
   })
 })

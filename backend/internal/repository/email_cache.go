@@ -13,6 +13,7 @@ import (
 
 const (
 	verifyCodeKeyPrefix          = "verify_code:"
+	verifyCodeCooldownKeyPrefix  = "verify_code_cooldown:"
 	notifyVerifyKeyPrefix        = "notify_verify:"
 	passwordResetKeyPrefix       = "password_reset:"
 	passwordResetSentAtKeyPrefix = "password_reset_sent:"
@@ -23,6 +24,10 @@ const (
 // Email is lowercased for case-insensitive consistency.
 func verifyCodeKey(email string) string {
 	return verifyCodeKeyPrefix + strings.ToLower(email)
+}
+
+func verifyCodeCooldownKey(email string) string {
+	return verifyCodeCooldownKeyPrefix + strings.ToLower(email)
 }
 
 // notifyVerifyKey generates the Redis key for notify email verification code.
@@ -75,6 +80,11 @@ func (c *emailCache) SetVerificationCode(ctx context.Context, email string, data
 func (c *emailCache) DeleteVerificationCode(ctx context.Context, email string) error {
 	key := verifyCodeKey(email)
 	return c.rdb.Del(ctx, key).Err()
+}
+
+func (c *emailCache) ReserveVerificationCodeCooldown(ctx context.Context, email string, ttl time.Duration) (bool, error) {
+	key := verifyCodeCooldownKey(email)
+	return c.rdb.SetNX(ctx, key, "1", ttl).Result()
 }
 
 // Password reset token methods

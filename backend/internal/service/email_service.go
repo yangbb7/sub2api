@@ -34,6 +34,7 @@ type EmailCache interface {
 	GetVerificationCode(ctx context.Context, email string) (*VerificationCodeData, error)
 	SetVerificationCode(ctx context.Context, email string, data *VerificationCodeData, ttl time.Duration) error
 	DeleteVerificationCode(ctx context.Context, email string) error
+	ReserveVerificationCodeCooldown(ctx context.Context, email string, ttl time.Duration) (bool, error)
 
 	// Notify email verification code methods
 	GetNotifyVerifyCode(ctx context.Context, email string) (*VerificationCodeData, error)
@@ -302,12 +303,12 @@ func (s *EmailService) GenerateVerifyCode() (string, error) {
 
 // SendVerifyCode 发送验证码邮件
 func (s *EmailService) SendVerifyCode(ctx context.Context, email, siteName string) error {
-	// 检查是否在冷却期内
-	existing, err := s.cache.GetVerificationCode(ctx, email)
-	if err == nil && existing != nil {
-		if time.Since(existing.CreatedAt) < verifyCodeCooldown {
-			return ErrVerifyCodeTooFrequent
-		}
+	reserved, err := s.cache.ReserveVerificationCodeCooldown(ctx, email, verifyCodeCooldown)
+	if err != nil {
+		return fmt.Errorf("reserve verify code cooldown: %w", err)
+	}
+	if !reserved {
+		return ErrVerifyCodeTooFrequent
 	}
 
 	// 生成验证码

@@ -62,8 +62,12 @@ func (s *settingRepoStub) Delete(ctx context.Context, key string) error {
 }
 
 type emailCacheStub struct {
-	data *VerificationCodeData
-	err  error
+	data           *VerificationCodeData
+	err            error
+	cooldownActive bool
+	cooldownErr    error
+	setData        *VerificationCodeData
+	setTTL         time.Duration
 }
 
 type defaultSubscriptionAssignerStub struct {
@@ -131,11 +135,25 @@ func (s *emailCacheStub) GetVerificationCode(ctx context.Context, email string) 
 }
 
 func (s *emailCacheStub) SetVerificationCode(ctx context.Context, email string, data *VerificationCodeData, ttl time.Duration) error {
+	s.setData = data
+	s.setTTL = ttl
+	s.data = data
 	return nil
 }
 
 func (s *emailCacheStub) DeleteVerificationCode(ctx context.Context, email string) error {
 	return nil
+}
+
+func (s *emailCacheStub) ReserveVerificationCodeCooldown(ctx context.Context, email string, ttl time.Duration) (bool, error) {
+	if s.cooldownErr != nil {
+		return false, s.cooldownErr
+	}
+	if s.cooldownActive {
+		return false, nil
+	}
+	s.cooldownActive = true
+	return true, nil
 }
 
 func (s *emailCacheStub) GetNotifyVerifyCode(ctx context.Context, email string) (*VerificationCodeData, error) {
@@ -403,6 +421,26 @@ func TestAuthService_SendVerifyCodeAsync_EmailNotConfigured(t *testing.T) {
 	result, err := service.SendVerifyCodeAsync(context.Background(), "user@test.com")
 	require.Nil(t, result)
 	require.ErrorIs(t, err, ErrEmailNotConfigured)
+}
+
+func TestAuthService_SendVerifyCodeAsync_RejectsDuplicateBeforeQueue(t *testing.T) {
+	repo := &userRepoStub{}
+	cache := &emailCacheStub{
+		cooldownActive: true,
+	}
+	service := newAuthService(repo, map[string]string{
+		SettingKeyRegistrationEnabled: "true",
+		SettingKeyEmailVerifyEnabled:  "true",
+		SettingKeySMTPHost:            "smtp.example.com",
+		SettingKeySMTPPort:            "465",
+		SettingKeySMTPUsername:        "smtp-user",
+		SettingKeySMTPPassword:        "smtp-pass",
+		SettingKeySMTPFrom:            "no-reply@example.com",
+	}, cache)
+
+	result, err := service.SendVerifyCodeAsync(context.Background(), "user@test.com")
+	require.Nil(t, result)
+	require.ErrorIs(t, err, ErrVerifyCodeTooFrequent)
 }
 
 func TestAuthService_Register_CreateError(t *testing.T) {

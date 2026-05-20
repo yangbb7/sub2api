@@ -43,3 +43,8 @@ func TestVerifyCodeKey(t *testing.T) {
 		})
 	}
 }
+
+func TestVerifyCodeCooldownKey(t *testing.T) {
+	require.Equal(t, "verify_code_cooldown:user@example.com", verifyCodeCooldownKey("USER@example.com"))
+	require.Equal(t, "verify_code_cooldown:user+tag@example.com", verifyCodeCooldownKey("user+tag@example.com"))
+}

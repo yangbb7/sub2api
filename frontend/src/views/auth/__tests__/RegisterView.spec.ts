@@ -7,12 +7,14 @@ const {
   registerMock,
   showSuccessMock,
   getPublicSettingsMock,
+  sendVerifyCodeMock,
   routeState,
 } = vi.hoisted(() => ({
   pushMock: vi.fn(),
   registerMock: vi.fn(),
   showSuccessMock: vi.fn(),
   getPublicSettingsMock: vi.fn(),
+  sendVerifyCodeMock: vi.fn(),
   routeState: {
     query: {} as Record<string, unknown>,
   },
@@ -60,6 +62,7 @@ vi.mock('@/api/auth', async () => {
   return {
     ...actual,
     getPublicSettings: (...args: any[]) => getPublicSettingsMock(...args),
+    sendVerifyCode: (...args: any[]) => sendVerifyCodeMock(...args),
     validatePromoCode: vi.fn(),
     validateInvitationCode: vi.fn(),
   }
@@ -75,7 +78,13 @@ const mountRegister = () =>
         WechatOAuthSection: true,
         OidcOAuthSection: true,
         LoginAgreementPrompt: true,
-        TurnstileWidget: true,
+        TurnstileWidget: {
+          name: 'TurnstileWidget',
+          template: '<div />',
+          methods: {
+            reset() {},
+          },
+        },
         Icon: true,
         RouterLink: true,
         transition: false,
@@ -89,10 +98,12 @@ describe('RegisterView affiliate referrals', () => {
     registerMock.mockReset()
     showSuccessMock.mockReset()
     getPublicSettingsMock.mockReset()
+    sendVerifyCodeMock.mockReset()
     routeState.query = {}
     localStorage.clear()
     sessionStorage.clear()
     registerMock.mockResolvedValue({})
+    sendVerifyCodeMock.mockResolvedValue({ message: 'sent', countdown: 60 })
     getPublicSettingsMock.mockResolvedValue({
       registration_enabled: true,
       email_verify_enabled: false,
@@ -175,7 +186,7 @@ describe('RegisterView affiliate referrals', () => {
     })
   })
 
-  it('preserves the invite code when email verification is required', async () => {
+  it('sends and submits the verification code on the registration page', async () => {
     getPublicSettingsMock.mockResolvedValue({
       registration_enabled: true,
       email_verify_enabled: true,
@@ -192,16 +203,73 @@ describe('RegisterView affiliate referrals', () => {
     await flushPromises()
 
     await wrapper.get('#email').setValue('verify@example.com')
+    await wrapper.get('[data-testid="send-verify-code"]').trigger('click')
+    await flushPromises()
+
+    expect(sendVerifyCodeMock).toHaveBeenCalledWith({
+      email: 'verify@example.com',
+      turnstile_token: undefined,
+    })
+    expect((wrapper.get('[data-testid="send-verify-code"]').element as HTMLButtonElement).disabled).toBe(true)
+
     await wrapper.get('#password').setValue('secret-456')
+    await wrapper.get('#verify_code').setValue('246810')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
 
-    expect(registerMock).not.toHaveBeenCalled()
-    expect(pushMock).toHaveBeenCalledWith('/email-verify')
-    expect(JSON.parse(sessionStorage.getItem('register_data') || '{}')).toMatchObject({
+    expect(pushMock).toHaveBeenCalledWith('/dashboard')
+    expect(sessionStorage.length).toBe(0)
+    expect(registerMock).toHaveBeenCalledWith({
       email: 'verify@example.com',
       password: 'secret-456',
+      turnstile_token: undefined,
+      promo_code: undefined,
+      invitation_code: undefined,
+      verify_code: '246810',
       aff_code: 'REF456',
+    })
+  })
+
+  it('does not require a second Turnstile token after sending the registration code', async () => {
+    getPublicSettingsMock.mockResolvedValue({
+      registration_enabled: true,
+      email_verify_enabled: true,
+      promo_code_enabled: false,
+      invitation_code_enabled: false,
+      affiliate_enabled: true,
+      turnstile_enabled: true,
+      turnstile_site_key: 'site-key',
+      site_name: 'AI Gateway',
+      registration_email_suffix_whitelist: [],
+    })
+    const wrapper = mountRegister()
+    await flushPromises()
+
+    await wrapper.get('#email').setValue('turnstile@example.com')
+    wrapper.findComponent({ name: 'TurnstileWidget' }).vm.$emit('verify', 'turnstile-token')
+    await flushPromises()
+
+    await wrapper.get('[data-testid="send-verify-code"]').trigger('click')
+    await flushPromises()
+
+    expect(sendVerifyCodeMock).toHaveBeenCalledWith({
+      email: 'turnstile@example.com',
+      turnstile_token: 'turnstile-token',
+    })
+    expect((wrapper.get('button[type="submit"]').element as HTMLButtonElement).disabled).toBe(false)
+
+    await wrapper.get('#password').setValue('secret-turnstile')
+    await wrapper.get('#verify_code').setValue('135790')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(registerMock).toHaveBeenCalledWith({
+      email: 'turnstile@example.com',
+      password: 'secret-turnstile',
+      turnstile_token: undefined,
+      promo_code: undefined,
+      invitation_code: undefined,
+      verify_code: '135790',
     })
   })
 })
