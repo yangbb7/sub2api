@@ -33,9 +33,6 @@ vi.mock('vue-i18n', async () => {
     ...actual,
     useI18n: () => ({
       t: (key: string, params?: Record<string, string | number>) => {
-        if (key === 'auth.affiliateReferralApplied') {
-          return `Joined from an invite link. Invite code: ${params?.code ?? ''}`
-        }
         return key
       },
       locale: { value: 'zh-CN' },
@@ -101,6 +98,7 @@ describe('RegisterView affiliate referrals', () => {
       email_verify_enabled: false,
       promo_code_enabled: false,
       invitation_code_enabled: false,
+      affiliate_enabled: true,
       turnstile_enabled: false,
       turnstile_site_key: '',
       site_name: 'AI Gateway',
@@ -116,12 +114,13 @@ describe('RegisterView affiliate referrals', () => {
     })
   })
 
-  it('shows the invite code from the link and sends it with registration', async () => {
+  it('prefills the affiliate code field from the link and sends it with registration', async () => {
     routeState.query = { aff: ' AFF123 ' }
     const wrapper = mountRegister()
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Joined from an invite link. Invite code: AFF123')
+    expect((wrapper.get('#aff_code').element as HTMLInputElement).value).toBe('AFF123')
+    expect(wrapper.text()).not.toContain('auth.affiliateReferralApplied')
 
     await wrapper.get('#email').setValue('new@example.com')
     await wrapper.get('#password').setValue('secret-123')
@@ -138,12 +137,51 @@ describe('RegisterView affiliate referrals', () => {
     })
   })
 
+  it('allows registration without an affiliate code', async () => {
+    const wrapper = mountRegister()
+    await flushPromises()
+
+    await wrapper.get('#email').setValue('plain@example.com')
+    await wrapper.get('#password').setValue('secret-plain')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(registerMock).toHaveBeenCalledWith({
+      email: 'plain@example.com',
+      password: 'secret-plain',
+      turnstile_token: undefined,
+      promo_code: undefined,
+      invitation_code: undefined,
+    })
+  })
+
+  it('does not submit a stored affiliate code after the user clears the field', async () => {
+    routeState.query = { aff: 'AFF123' }
+    const wrapper = mountRegister()
+    await flushPromises()
+
+    await wrapper.get('#aff_code').setValue('')
+    await wrapper.get('#email').setValue('clear@example.com')
+    await wrapper.get('#password').setValue('secret-clear')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(registerMock).toHaveBeenCalledWith({
+      email: 'clear@example.com',
+      password: 'secret-clear',
+      turnstile_token: undefined,
+      promo_code: undefined,
+      invitation_code: undefined,
+    })
+  })
+
   it('preserves the invite code when email verification is required', async () => {
     getPublicSettingsMock.mockResolvedValue({
       registration_enabled: true,
       email_verify_enabled: true,
       promo_code_enabled: false,
       invitation_code_enabled: false,
+      affiliate_enabled: true,
       turnstile_enabled: false,
       turnstile_site_key: '',
       site_name: 'AI Gateway',

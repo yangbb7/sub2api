@@ -135,15 +135,25 @@
           </transition>
         </div>
 
-        <div
-          v-if="formData.aff_code"
-          class="rounded-lg border border-primary-200 bg-primary-50 px-3 py-2 text-sm text-primary-800 dark:border-primary-900/40 dark:bg-primary-900/20 dark:text-primary-200"
-        >
-          <div class="flex items-center gap-2">
-            <Icon name="users" size="sm" class="text-primary-600 dark:text-primary-300" />
-            <span>
-              {{ t('auth.affiliateReferralApplied', { code: formData.aff_code }) }}
-            </span>
+        <!-- Affiliate invite code input (optional) -->
+        <div v-if="affiliateCodeFieldVisible">
+          <label for="aff_code" class="input-label">
+            {{ t('auth.affiliateCodeLabel') }}
+            <span class="ml-1 text-xs font-normal text-gray-400 dark:text-dark-500">({{ t('common.optional') }})</span>
+          </label>
+          <div class="relative">
+            <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5">
+              <Icon name="users" size="md" class="text-gray-400 dark:text-dark-500" />
+            </div>
+            <input
+              id="aff_code"
+              v-model="formData.aff_code"
+              type="text"
+              :disabled="registrationActionDisabled"
+              class="input pl-11"
+              :placeholder="t('auth.affiliateCodePlaceholder')"
+              @input="handleAffiliateCodeInput"
+            />
           </div>
         </div>
 
@@ -336,7 +346,6 @@ import {
 } from '@/utils/registrationEmailPolicy'
 import {
   clearAffiliateReferralCode,
-  loadAffiliateReferralCode,
   resolveAffiliateReferralCode
 } from '@/utils/oauthAffiliate'
 import type { LoginAgreementDocument } from '@/types'
@@ -363,6 +372,7 @@ const registrationEnabled = ref<boolean>(true)
 const emailVerifyEnabled = ref<boolean>(false)
 const promoCodeEnabled = ref<boolean>(true)
 const invitationCodeEnabled = ref<boolean>(false)
+const affiliateEnabled = ref<boolean>(true)
 const turnstileEnabled = ref<boolean>(false)
 const turnstileSiteKey = ref<string>('')
 const siteName = ref<string>('AI Gateway')
@@ -442,6 +452,10 @@ const agreementGateActive = computed(
   () => loginAgreementEnabled.value && !agreementAccepted.value
 )
 
+const affiliateCodeFieldVisible = computed(
+  () => affiliateEnabled.value || Boolean(formData.aff_code.trim())
+)
+
 const registrationActionDisabled = computed(
   () => isLoading.value || !settingsLoaded.value || agreementGateActive.value
 )
@@ -471,6 +485,7 @@ onMounted(async () => {
     emailVerifyEnabled.value = settings.email_verify_enabled
     promoCodeEnabled.value = settings.promo_code_enabled
     invitationCodeEnabled.value = settings.invitation_code_enabled
+    affiliateEnabled.value = settings.affiliate_enabled !== false
     turnstileEnabled.value = settings.turnstile_enabled
     turnstileSiteKey.value = settings.turnstile_site_key || ''
     siteName.value = settings.site_name || 'AI Gateway'
@@ -583,6 +598,12 @@ function rejectLoginAgreement(): void {
 }
 
 // ==================== Promo Code Validation ====================
+
+function handleAffiliateCodeInput(): void {
+  if (!formData.aff_code.trim()) {
+    clearAffiliateReferralCode()
+  }
+}
 
 function handlePromoCodeInput(): void {
   const code = formData.promo_code.trim()
@@ -865,10 +886,7 @@ async function handleRegister(): Promise<void> {
   isLoading.value = true
 
   try {
-    const affCode = formData.aff_code.trim() || loadAffiliateReferralCode()
-    if (affCode) {
-      formData.aff_code = affCode
-    }
+    const affCode = formData.aff_code.trim()
 
     // If email verification is enabled, redirect to verification page
     if (emailVerifyEnabled.value) {
