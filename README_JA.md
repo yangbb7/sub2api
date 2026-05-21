@@ -1,4 +1,4 @@
-# AI Gateway
+# Sub2API
 
 <div align="center">
 
@@ -8,23 +8,31 @@
 [![Redis](https://img.shields.io/badge/Redis-7+-DC382D.svg)](https://redis.io/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
 
+<a href="https://trendshift.io/repositories/21823" target="_blank"><img src="https://trendshift.io/api/badge/repositories/21823" alt="Wei-Shaw%2Fsub2api | Trendshift" width="250" height="55"/></a>
+
 **サブスクリプションクォータ配分のための AI API ゲートウェイプラットフォーム**
 
 [English](README.md) | [中文](README_CN.md) | 日本語
 
 </div>
 
-> **AI Gateway が現在公式サービスドメインとして認識しているのは `pincc.ai` です。サードパーティのデプロイでは別のドメインが使われる場合があります。ログインや API キー入力の前に提供元を確認してください。**
+> **Sub2API が公式に使用しているドメインは `sub2api.org` と `pincc.ai` のみです。Sub2API の名称を使用している他のウェブサイトは、サードパーティによるデプロイやサービスであり、本プロジェクトとは一切関係がありません。ご利用の際はご自身で確認・判断をお願いします。**
 
 ---
 
 ## デモ
 
-このリポジトリには共有公開デモアカウントは含まれていません。セルフホスト環境では初期設定時に独自の管理者アカウントを作成します。
+Sub2API をオンラインでお試しください: **[https://demo.sub2api.org/](https://demo.sub2api.org/)**
+
+デモ用認証情報（共有デモ環境です。セルフホスト環境では**自動作成されません**）:
+
+| メールアドレス | パスワード |
+|-------|----------|
+| admin@sub2api.org | admin123 |
 
 ## 概要
 
-AI Gateway は、AI 製品のサブスクリプションから API クォータを配分・管理するために設計された AI API ゲートウェイプラットフォームです。ユーザーはプラットフォームが生成した API キーを通じて上流の AI サービスにアクセスでき、プラットフォームは認証、課金、負荷分散、リクエスト転送を処理します。
+Sub2API は、AI 製品のサブスクリプションから API クォータを配分・管理するために設計された AI API ゲートウェイプラットフォームです。ユーザーはプラットフォームが生成した API キーを通じて上流の AI サービスにアクセスでき、プラットフォームは認証、課金、負荷分散、リクエスト転送を処理します。
 
 ## 機能
 
@@ -45,16 +53,11 @@ AI Gateway は、AI 製品のサブスクリプションから API クォータ�
 <table>
 <tr>
 <td width="180" align="center" valign="middle"><a href="https://shop.pincc.ai/"><img src="assets/partners/logos/pincc-logo.png" alt="pincc" width="150"></a></td>
-<td valign="middle"><b><a href="https://shop.pincc.ai/">PinCC</a></b> は AI Gateway 上に構築された公式リレーサービスで、Claude Code、Codex、Gemini などの人気モデルへの安定したアクセスを提供します。デプロイやメンテナンスは不要で、すぐにご利用いただけます。</td>
+<td valign="middle"><b><a href="https://shop.pincc.ai/">PinCC</a></b> は Sub2API 上に構築された公式リレーサービスで、Claude Code、Codex、Gemini などの人気モデルへの安定したアクセスを提供します。デプロイやメンテナンスは不要で、すぐにご利用いただけます。</td>
 </tr>
 <tr>
-<td width="180"><a href="https://www.packyapi.com/register?aff=gateway"><img src="assets/partners/logos/packycode.png" alt="PackyCode" width="150"></a></td>
-<td>PackyCode のご支援に感謝します！PackyCode は Claude Code、Codex、Gemini などのリレーサービスを提供する信頼性の高い API 中継プラットフォームです。本ソフト利用者向けに特別割引があります：<a href="https://www.packyapi.com/register?aff=gateway">このリンク</a>で登録し、チャージ時に「gateway」クーポンを入力すると 10% オフになります。</td>
-</tr>
-
-<tr>
-<td width="180"><a href="https://poixe.com/i/gateway"><img src="assets/partners/logos/poixe.png" alt="PoixeAi" width="150"></a></td>
-<td>Poixe AI のご支援に感謝します！Poixe AI は信頼性の高い LLM API サービスを提供しています。プラットフォームの API エンドポイントを活用して、AI 搭載プロダクトをシームレスに構築できます。また、ベンダーとして AI API リソースをプラットフォームに提供し、収益を得ることも可能です。専用の <a href="https://poixe.com/i/gateway">gateway</a> 紹介リンクから登録すると、初回チャージ時に $5 USD のボーナスがもらえます。</td>
+<td width="180"><a href="https://www.packyapi.com/register?aff=sub2api"><img src="assets/partners/logos/packycode.png" alt="PackyCode" width="150"></a></td>
+<td>PackyCode のご支援に感謝します！PackyCode は Claude Code、Codex、Gemini などのリレーサービスを提供する信頼性の高い API 中継プラットフォームです。本ソフト利用者向けに特別割引があります：<a href="https://www.packyapi.com/register?aff=sub2api">このリンク</a>で登録し、チャージ時に「sub2api」クーポンを入力すると 10% オフになります。</td>
 </tr>
 
 <tr>
@@ -63,8 +66,18 @@ AI Gateway は、AI 製品のサブスクリプションから API クォータ�
 </tr>
 
 <tr>
-<td width="180"><a href="https://code.silkapi.com/register?aff=GATEWAY"><img src="assets/partners/logos/silkapi.png" alt="silkapi" width="150"></a></td>
-<td>SilkAPI のご支援に感謝します！<a href="https://code.silkapi.com/register?aff=GATEWAY">SilkAPI</a> は AI Gateway をベースに構築された中継サービスで、高速かつ安定した Codex API 中継の提供に特化しています。</td>
+<td width="180"><a href="https://aigocode.com/invite/SUB2API"><img src="assets/partners/logos/aigocode.png" alt="AIGoCode" width="150"></a></td>
+<td>AIGoCode のご支援に感謝します！AIGoCode は Claude Code、Codex、最新の Gemini モデルを統合したオールインワンプラットフォームで、安定的かつ効率的でコストパフォーマンスに優れた AI コーディングサービスを提供します。柔軟なサブスクリプションプラン、アカウント停止リスクゼロ、VPN 不要の直接アクセス、超高速レスポンスが特長です。AIGoCode は sub2api ユーザー向けに特別特典を用意しています：<a href="https://aigocode.com/invite/SUB2API">こちらのリンク</a>から登録すると、初回チャージ時に 10% のボーナスクレジットを追加プレゼント！</td>
+</tr>
+
+<tr>
+<td width="180"><a href="https://apikey.fun/register?aff=SUB2API"><img src="assets/partners/logos/apikey-fun.png" alt="APIKEY.FUN" width="150"></a></td>
+<td>APIKEY.FUN のご支援に感謝します！<a href="https://apikey.fun/register?aff=SUB2API">APIKEY.FUN</a> は sub2api オープンソースプロジェクトのコアコントリビューターの一つであり、オープンで安定した、コストパフォーマンスに優れた AI API アクセスサービスの提供に取り組んでいます。プラットフォームは Claude、OpenAI、Gemini など人気モデルの API 中継サービスをサポートし、価格は公式料金のわずか 7% から。専用リンク <a href="https://apikey.fun/register?aff=SUB2API">APIKEY</a> から登録すると、すべてのチャージで永久 5% 割引をご利用いただけます。</td>
+</tr>
+
+<tr>
+<td width="180"><a href="https://code.silkapi.com/register?aff=SUB2API"><img src="assets/partners/logos/silkapi.png" alt="silkapi" width="150"></a></td>
+<td>SilkAPI のご支援に感謝します！<a href="https://code.silkapi.com/register?aff=SUB2API">SilkAPI</a> は Sub2API をベースに構築された中継サービスで、高速かつ安定した Codex API 中継の提供に特化しています。</td>
 </tr>
 
 <tr>
@@ -74,12 +87,7 @@ AI Gateway は、AI 製品のサブスクリプションから API クォータ�
 
 <tr>
 <td width="180"><a href="https://www.aicodemirror.com/register?invitecode=KMVZQM"><img src="assets/partners/logos/AICodeMirror.jpg" alt="AICodeMirror" width="150"></a></td>
-<td>AICodeMirror のご支援に感謝します！AICodeMirror は Claude Code / Codex / Gemini CLI の公式高安定性リレーサービスを提供しており、エンタープライズグレードの同時実行、迅速な請求書発行、24時間年中無休の専属テクニカルサポートを備えています。Claude Code / Codex / Gemini の公式チャネルを定価の 38% / 2% / 9% で利用可能、チャージ時にはさらに追加割引！AICodeMirror は gateway ユーザー向けに特別特典を提供中：<a href="https://www.aicodemirror.com/register?invitecode=KMVZQM">こちらのリンク</a>から登録すると、初回チャージが 20% オフ、法人のお客様は最大 25% オフ！</td>
-</tr>
-
-<tr>
-<td width="180"><a href="https://aigocode.com/invite/GATEWAY"><img src="assets/partners/logos/aigocode.png" alt="AIGoCode" width="150"></a></td>
-<td>AIGoCode のご支援に感謝します！AIGoCode は Claude Code、Codex、最新の Gemini モデルを統合したオールインワンプラットフォームで、安定的かつ効率的でコストパフォーマンスに優れた AI コーディングサービスを提供します。柔軟なサブスクリプションプラン、アカウント停止リスクゼロ、VPN 不要の直接アクセス、超高速レスポンスが特長です。AIGoCode は gateway ユーザー向けに特別特典を用意しています：<a href="https://aigocode.com/invite/GATEWAY">こちらのリンク</a>から登録すると、初回チャージ時に 10% のボーナスクレジットを追加プレゼント！</td>
+<td>AICodeMirror のご支援に感謝します！AICodeMirror は Claude Code / Codex / Gemini CLI の公式高安定性リレーサービスを提供しており、エンタープライズグレードの同時実行、迅速な請求書発行、24時間年中無休の専属テクニカルサポートを備えています。Claude Code / Codex / Gemini の公式チャネルを定価の 38% / 2% / 9% で利用可能、チャージ時にはさらに追加割引！AICodeMirror は sub2api ユーザー向けに特別特典を提供中：<a href="https://www.aicodemirror.com/register?invitecode=KMVZQM">こちらのリンク</a>から登録すると、初回チャージが 20% オフ、法人のお客様は最大 25% オフ！</td>
 </tr>
 
 <tr>
@@ -99,16 +107,22 @@ AI Gateway は、AI 製品のサブスクリプションから API クォータ�
 <a href="https://pateway.ai/?ch=1tsfr51">こちらのリンク</a>から登録すると、$3 のトライアルクレジットがもらえます。チャージは最大40%オフ、友達紹介で双方にボーナス付与 — 紹介報酬は最大 $150。</td>
 </tr>
 
+<tr>
+<td width="180"><a href="https://api.pptoken.org/register?promo=SUB2API"><img src="assets/partners/logos/pptoken.png" alt="pptoken" width="150"></a></td>
+<td>PPToken.org のご支援に感謝します！<a href="https://api.pptoken.org/register?promo=SUB2API">PPToken.org</a> は GPT シリーズモデルの API 中継サービスを専門としており、Codex、Claude Code、OpenAI 互換クライアント、Gemini CLI などのツール接続をサポートしています。チャージは 1:1（1元＝1ドル分のクレジット）、GPT モデルは最低 0.16 倍のレート倍率で、総合コストは公式価格の約 2.2% 、最速ファーストトークンは約1秒 — 開発者が低コスト・高速レスポンスで GPT モデル機能にアクセスするのに最適です。テクニカルサポート：24時間365日リアルな人間が対応（ボットではありません）、グループ内で @技術 すれば 10 分以内に返信。スポンサー特典：先着 200 名のユーザーが<a href="https://api.pptoken.org/register?promo=SUB2API">専用登録リンク</a>から登録し、プロモコード `SUB2API` を入力すると、Codex / Claude Code の無料トライアルクレジットを獲得できます — 最低利用額なし、カード登録不要。
+</td>
+</tr>
+
 </table>
 
 ## エコシステム
 
-AI Gateway を拡張・統合するコミュニティプロジェクト:
+Sub2API を拡張・統合するコミュニティプロジェクト:
 
 | プロジェクト | 説明 | 機能 |
 |---------|-------------|----------|
-| Built-in Payment | セルフサービス決済システム | 決済機能は AI Gateway に統合されています。別途デプロイは不要です。[決済設定ガイド](docs/PAYMENT.md)をご参照ください |
-| [gateway-mobile](https://github.com/ckken/gateway-mobile) | モバイル管理コンソール | ユーザー管理、アカウント管理、監視ダッシュボード、マルチバックエンド切り替えが可能なクロスプラットフォームアプリ（iOS/Android/Web）。Expo + React Native で構築 |
+| ~~[Sub2ApiPay](https://github.com/touwaeriol/sub2apipay)~~ | ~~セルフサービス決済システム~~ | **内蔵済み** — 決済機能は Sub2API に統合されました。別途デプロイは不要です。[決済設定ガイド](docs/PAYMENT.md)をご参照ください |
+| [sub2api-mobile](https://github.com/ckken/sub2api-mobile) | モバイル管理コンソール | ユーザー管理、アカウント管理、監視ダッシュボード、マルチバックエンド切り替えが可能なクロスプラットフォームアプリ（iOS/Android/Web）。Expo + React Native で構築 |
 
 ## 技術スタック
 
@@ -123,7 +137,7 @@ AI Gateway を拡張・統合するコミュニティプロジェクト:
 
 ## Nginx リバースプロキシに関する注意
 
-AI Gateway（または CRS）を Nginx でリバースプロキシし、Codex CLI と組み合わせて使用する場合、Nginx の `http` ブロックに以下の設定を追加してください:
+Sub2API（または CRS）を Nginx でリバースプロキシし、Codex CLI と組み合わせて使用する場合、Nginx の `http` ブロックに以下の設定を追加してください:
 
 ```nginx
 underscores_in_headers on;
@@ -149,13 +163,13 @@ GitHub Releases からビルド済みバイナリをダウンロードするワ�
 #### インストール手順
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/yangbb7/sub2api/main/deploy/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install.sh | sudo bash
 ```
 
 スクリプトは以下を実行します:
 1. システムアーキテクチャの検出
 2. 最新リリースのダウンロード
-3. バイナリを `/opt/gateway` にインストール
+3. バイナリを `/opt/sub2api` にインストール
 4. systemd サービスの作成
 5. システムユーザーと権限の設定
 
@@ -163,13 +177,13 @@ curl -sSL https://raw.githubusercontent.com/yangbb7/sub2api/main/deploy/install.
 
 ```bash
 # 1. サービスを起動
-sudo systemctl start gateway
+sudo systemctl start sub2api
 
 # 2. 起動時の自動起動を有効化
-sudo systemctl enable gateway
+sudo systemctl enable sub2api
 
 # 3. ブラウザでセットアップウィザードを開く
-# http://YOUR_SERVER_IP:18080
+# http://YOUR_SERVER_IP:8080
 ```
 
 セットアップウィザードでは以下の設定を行います:
@@ -190,16 +204,16 @@ Web インターフェースでは以下が可能です:
 
 ```bash
 # ステータスを確認
-sudo systemctl status gateway
+sudo systemctl status sub2api
 
 # ログを表示
-sudo journalctl -u gateway -f
+sudo journalctl -u sub2api -f
 
 # サービスを再起動
-sudo systemctl restart gateway
+sudo systemctl restart sub2api
 
 # アンインストール
-curl -sSL https://raw.githubusercontent.com/yangbb7/sub2api/main/deploy/install.sh | sudo bash -s -- uninstall -y
+curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install.sh | sudo bash -s -- uninstall -y
 ```
 
 ---
@@ -219,16 +233,16 @@ PostgreSQL と Redis のコンテナを含む Docker Compose でデプロイし�
 
 ```bash
 # デプロイ用ディレクトリを作成
-mkdir -p gateway-deploy && cd gateway-deploy
+mkdir -p sub2api-deploy && cd sub2api-deploy
 
 # デプロイ準備スクリプトをダウンロードして実行
-curl -sSL https://raw.githubusercontent.com/yangbb7/sub2api/main/deploy/docker-deploy.sh | bash
+curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/docker-deploy.sh | bash
 
 # サービスを起動
 docker compose up -d
 
 # ログを表示
-docker compose logs -f gateway
+docker compose logs -f sub2api
 ```
 
 **スクリプトの動作内容:**
@@ -244,7 +258,7 @@ docker compose logs -f gateway
 
 ```bash
 # 1. リポジトリをクローン
-git clone git@github.com:yangbb7/sub2api.git
+git clone https://github.com/Wei-Shaw/sub2api.git
 cd sub2api/deploy
 
 # 2. 環境設定ファイルをコピー
@@ -271,7 +285,7 @@ ADMIN_EMAIL=admin@example.com
 ADMIN_PASSWORD=your_admin_password
 
 # オプション: カスタムポート
-SERVER_PORT=18080
+SERVER_PORT=8080
 ```
 
 **セキュアなシークレットの生成方法:**
@@ -301,7 +315,7 @@ docker compose up -d
 docker compose -f docker-compose.local.yml ps
 
 # 7. ログを表示
-docker compose -f docker-compose.local.yml logs -f gateway
+docker compose -f docker-compose.local.yml logs -f sub2api
 ```
 
 #### デプロイバージョン
@@ -315,11 +329,11 @@ docker compose -f docker-compose.local.yml logs -f gateway
 
 #### アクセス
 
-ブラウザで `http://YOUR_SERVER_IP:18080` を開いてください。
+ブラウザで `http://YOUR_SERVER_IP:8080` を開いてください。
 
 管理者パスワードが自動生成された場合は、ログで確認できます:
 ```bash
-docker compose -f docker-compose.local.yml logs gateway | grep "admin password"
+docker compose -f docker-compose.local.yml logs sub2api | grep "admin password"
 ```
 
 #### アップグレード
@@ -338,14 +352,14 @@ docker compose -f docker-compose.local.yml up -d
 # 移行元サーバーにて
 docker compose -f docker-compose.local.yml down
 cd ..
-tar czf gateway-complete.tar.gz gateway-deploy/
+tar czf sub2api-complete.tar.gz sub2api-deploy/
 
 # 新しいサーバーに転送
-scp gateway-complete.tar.gz user@new-server:/path/
+scp sub2api-complete.tar.gz user@new-server:/path/
 
 # 移行先サーバーにて
-tar xzf gateway-complete.tar.gz
-cd gateway-deploy/
+tar xzf sub2api-complete.tar.gz
+cd sub2api-deploy/
 docker compose -f docker-compose.local.yml up -d
 ```
 
@@ -383,7 +397,7 @@ rm -rf data/ postgres_data/ redis_data/
 
 ```bash
 # 1. リポジトリをクローン
-git clone git@github.com:yangbb7/sub2api.git
+git clone https://github.com/Wei-Shaw/sub2api.git
 cd sub2api
 
 # 2. pnpm をインストール（未インストールの場合）
@@ -397,7 +411,7 @@ pnpm run build
 
 # 4. フロントエンドを組み込んだバックエンドをビルド
 cd ../backend
-go build -tags embed -o gateway ./cmd/server
+go build -tags embed -o sub2api ./cmd/server
 
 # 5. 設定ファイルを作成
 cp ../deploy/config.example.yaml ./config.yaml
@@ -413,7 +427,7 @@ nano config.yaml
 ```yaml
 server:
   host: "0.0.0.0"
-  port: 18080
+  port: 8080
   mode: "release"
 
 database:
@@ -421,7 +435,7 @@ database:
   port: 5432
   user: "postgres"
   password: "your_password"
-  dbname: "gateway"
+  dbname: "sub2api"
 
 redis:
   host: "localhost"
@@ -500,7 +514,7 @@ URL バリデーションまたはレスポンスヘッダーフィルタリン�
 
 ```bash
 # 6. アプリケーションを実行
-./gateway
+./sub2api
 ```
 
 #### 開発モード
@@ -539,7 +553,7 @@ go generate ./cmd/server
 
 ## Antigravity サポート
 
-AI Gateway は [Antigravity](https://antigravity.so/) アカウントをサポートしています。認証後、Claude および Gemini モデル用の専用エンドポイントが利用可能になります。
+Sub2API は [Antigravity](https://antigravity.so/) アカウントをサポートしています。認証後、Claude および Gemini モデル用の専用エンドポイントが利用可能になります。
 
 ### 専用エンドポイント
 
@@ -551,7 +565,7 @@ AI Gateway は [Antigravity](https://antigravity.so/) アカウントをサポ�
 ### Claude Code の設定
 
 ```bash
-export ANTHROPIC_BASE_URL="http://localhost:18080/antigravity"
+export ANTHROPIC_BASE_URL="http://localhost:8080/antigravity"
 export ANTHROPIC_AUTH_TOKEN="sk-xxx"
 ```
 
@@ -572,7 +586,7 @@ Claude Code では、Plan Mode を自動的に終了できません。（通常�
 ## プロジェクト構成
 
 ```
-gateway/
+sub2api/
 ├── backend/                  # Go バックエンドサービス
 │   ├── cmd/server/           # アプリケーションエントリ
 │   ├── internal/             # 内部モジュール
@@ -609,11 +623,11 @@ gateway/
 
 ## スター履歴
 
-<a href="https://star-history.com/#yangbb7/sub2api&Date">
+<a href="https://star-history.com/#Wei-Shaw/sub2api&Date">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=yangbb7/sub2api&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=yangbb7/sub2api&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=yangbb7/sub2api&type=Date" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Wei-Shaw/sub2api&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Wei-Shaw/sub2api&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Wei-Shaw/sub2api&type=Date" />
  </picture>
 </a>
 

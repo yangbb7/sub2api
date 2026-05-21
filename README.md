@@ -1,4 +1,4 @@
-# AI Gateway
+# Sub2API
 
 <div align="center">
 
@@ -8,23 +8,31 @@
 [![Redis](https://img.shields.io/badge/Redis-7+-DC382D.svg)](https://redis.io/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
 
+<a href="https://trendshift.io/repositories/21823" target="_blank"><img src="https://trendshift.io/api/badge/repositories/21823" alt="Wei-Shaw%2Fsub2api | Trendshift" width="250" height="55"/></a>
+
 **AI API Gateway Platform for Subscription Quota Distribution**
 
 English | [中文](README_CN.md) | [日本語](README_JA.md)
 
 </div>
 
-> **AI Gateway currently recognizes `pincc.ai` as an official service domain. Third-party deployments may use different domains; verify the provider before signing in or entering API keys.**
+> **Sub2API officially uses only the domains `sub2api.org` and `pincc.ai`. Other websites using the Sub2API name may be third-party deployments or services and are not affiliated with this project. Please verify and exercise your own judgment.**
 
 ---
 
 ## Demo
 
-This repository does not ship a shared public demo account. Self-hosted installs create their own admin account during setup.
+Try Sub2API online: **[https://demo.sub2api.org/](https://demo.sub2api.org/)**
+
+Demo credentials (shared demo environment; **not** created automatically for self-hosted installs):
+
+| Email | Password |
+|-------|----------|
+| admin@sub2api.org | admin123 |
 
 ## Overview
 
-AI Gateway is an AI API gateway platform designed to distribute and manage API quotas from AI product subscriptions. Users can access upstream AI services through platform-generated API Keys, while the platform handles authentication, billing, load balancing, and request forwarding.
+Sub2API is an AI API gateway platform designed to distribute and manage API quotas from AI product subscriptions. Users can access upstream AI services through platform-generated API Keys, while the platform handles authentication, billing, load balancing, and request forwarding.
 
 ## Features
 
@@ -45,17 +53,12 @@ AI Gateway is an AI API gateway platform designed to distribute and manage API q
 <table>
 <tr>
 <td width="180" align="center" valign="middle"><a href="https://shop.pincc.ai/"><img src="assets/partners/logos/pincc-logo.png" alt="pincc" width="150"></a></td>
-<td valign="middle"><b><a href="https://shop.pincc.ai/">PinCC</a></b> is the official relay service built on AI Gateway, offering stable access to Claude Code, Codex, Gemini and other popular models — ready to use, no deployment or maintenance required.</td>
+<td valign="middle"><b><a href="https://shop.pincc.ai/">PinCC</a></b> is the official relay service built on Sub2API, offering stable access to Claude Code, Codex, Gemini and other popular models — ready to use, no deployment or maintenance required.</td>
 </tr>
 
 <tr>
-<td width="180"><a href="https://www.packyapi.com/register?aff=gateway"><img src="assets/partners/logos/packycode.png" alt="PackyCode" width="150"></a></td>
-<td>Thanks to PackyCode for sponsoring this project! PackyCode is a reliable and efficient API relay service provider, offering relay services for Claude Code, Codex, Gemini, and more. PackyCode provides special discounts for our software users: register using <a href="https://www.packyapi.com/register?aff=gateway">this link</a> and enter the "gateway" promo code during first recharge to get 10% off.</td>
-</tr>
-
-<tr>
-<td width="180"><a href="https://poixe.com/i/gateway"><img src="assets/partners/logos/poixe.png" alt="PoixeAi" width="150"></a></td>
-<td>Thanks to Poixe Ai for sponsoring this project! Poixe AI provides reliable LLM API services. You can leverage the platform's API endpoints to seamlessly build AI-powered products. Additionally, you can become a vendor by providing AI API resources to the platform and earn revenue. Register through the exclusive <a href="https://poixe.com/i/gateway">gateway</a> referral link and receive a bonus of $5 USD on your first top-up.</td>
+<td width="180"><a href="https://www.packyapi.com/register?aff=sub2api"><img src="assets/partners/logos/packycode.png" alt="PackyCode" width="150"></a></td>
+<td>Thanks to PackyCode for sponsoring this project! PackyCode is a reliable and efficient API relay service provider, offering relay services for Claude Code, Codex, Gemini, and more. PackyCode provides special discounts for our software users: register using <a href="https://www.packyapi.com/register?aff=sub2api">this link</a> and enter the "sub2api" promo code during first recharge to get 10% off.</td>
 </tr>
 
 <tr>
@@ -64,8 +67,18 @@ AI Gateway is an AI API gateway platform designed to distribute and manage API q
 </tr>
 
 <tr>
-<td width="180"><a href="https://code.silkapi.com/register?aff=GATEWAY"><img src="assets/partners/logos/silkapi.png" alt="silkapi" width="150"></a></td>
-<td>Thanks to SilkAPI for sponsoring this project! <a href="https://code.silkapi.com/register?aff=GATEWAY">SilkAPI</a> is a relay service built on AI Gateway, specializing in providing high-speed and stable Codex API relay.</td>
+<td width="180"><a href="https://aigocode.com/invite/SUB2API"><img src="assets/partners/logos/aigocode.png" alt="AIGoCode" width="150"></a></td>
+<td>Thanks to AIGoCode for sponsoring this project! AIGoCode is an all-in-one platform that integrates Claude Code, Codex, and the latest Gemini models, providing you with stable, efficient, and highly cost-effective AI coding services. The platform offers flexible subscription plans, zero risk of account suspension, direct access with no VPN required, and lightning-fast responses. AIGoCode has prepared a special benefit for sub2api users: if you register via <a href="https://aigocode.com/invite/SUB2API">this link</a>, you'll receive an extra 10% bonus credit on your first top-up!</td>
+</tr>
+
+<tr>
+<td width="180"><a href="https://apikey.fun/register?aff=SUB2API"><img src="assets/partners/logos/apikey-fun.png" alt="APIKEY.FUN" width="150"></a></td>
+<td>Thanks to APIKEY.FUN for sponsoring this project! <a href="https://apikey.fun/register?aff=SUB2API">APIKEY.FUN</a> is one of the core contributors to the sub2api open-source project, dedicated to providing open, stable, and cost-effective AI API access. The platform supports API relay services for Claude, OpenAI, Gemini, and other popular models, with pricing starting from as low as 7% of the original rate. Register via the exclusive link: <a href="https://apikey.fun/register?aff=SUB2API">APIKEY</a> to enjoy a permanent 5% discount on all recharges.</td>
+</tr>
+
+<tr>
+<td width="180"><a href="https://code.silkapi.com/register?aff=SUB2API"><img src="assets/partners/logos/silkapi.png" alt="silkapi" width="150"></a></td>
+<td>Thanks to SilkAPI for sponsoring this project! <a href="https://code.silkapi.com/register?aff=SUB2API">SilkAPI</a> is a relay service built on Sub2API, specializing in providing high-speed and stable Codex API relay.</td>
 </tr>
 
 <tr>
@@ -75,12 +88,7 @@ AI Gateway is an AI API gateway platform designed to distribute and manage API q
 
 <tr>
 <td width="180"><a href="https://www.aicodemirror.com/register?invitecode=KMVZQM"><img src="assets/partners/logos/AICodeMirror.jpg" alt="AICodeMirror" width="150"></a></td>
-<td>Thanks to AICodeMirror for sponsoring this project! AICodeMirror provides official high-stability relay services for Claude Code / Codex / Gemini CLI, with enterprise-grade concurrency, fast invoicing, and 24/7 dedicated technical support. Claude Code / Codex / Gemini official channels at 38% / 2% / 9% of original price, with extra discounts on top-ups! AICodeMirror offers special benefits for gateway users: register via <a href="https://www.aicodemirror.com/register?invitecode=KMVZQM">this link</a> to enjoy 20% off your first top-up, and enterprise customers can get up to 25% off!</td>
-</tr>
-
-<tr>
-<td width="180"><a href="https://aigocode.com/invite/GATEWAY"><img src="assets/partners/logos/aigocode.png" alt="AIGoCode" width="150"></a></td>
-<td>Thanks to AIGoCode for sponsoring this project! AIGoCode is an all-in-one platform that integrates Claude Code, Codex, and the latest Gemini models, providing you with stable, efficient, and highly cost-effective AI coding services. The platform offers flexible subscription plans, zero risk of account suspension, direct access with no VPN required, and lightning-fast responses. AIGoCode has prepared a special benefit for gateway users: if you register via <a href="https://aigocode.com/invite/GATEWAY">this link</a>, you'll receive an extra 10% bonus credit on your first top-up!</td>
+<td>Thanks to AICodeMirror for sponsoring this project! AICodeMirror provides official high-stability relay services for Claude Code / Codex / Gemini CLI, with enterprise-grade concurrency, fast invoicing, and 24/7 dedicated technical support. Claude Code / Codex / Gemini official channels at 38% / 2% / 9% of original price, with extra discounts on top-ups! AICodeMirror offers special benefits for sub2api users: register via <a href="https://www.aicodemirror.com/register?invitecode=KMVZQM">this link</a> to enjoy 20% off your first top-up, and enterprise customers can get up to 25% off!</td>
 </tr>
 
 <tr>
@@ -100,16 +108,22 @@ Enterprise-grade high concurrency is also supported, with a dedicated management
 Register now via <a href="https://pateway.ai/?ch=1tsfr51">this link</a> to receive $3 in trial credits. User top-ups start as low as 60% off, and referring friends earns both parties rewards — referral bonuses up to $150.</td>
 </tr>
 
+<tr>
+<td width="180"><a href="https://api.pptoken.org/register?promo=SUB2API"><img src="assets/partners/logos/pptoken.png" alt="pptoken" width="150"></a></td>
+<td>Thanks to PPToken.org for sponsoring this project! <a href="https://api.pptoken.org/register?promo=SUB2API">PPToken.org</a> specializes in GPT model API relay services, supporting Codex, Claude Code, OpenAI-compatible clients, and Gemini CLI integration. Top-ups are 1:1 (¥1 = $1 credit); GPT models start at 0.16x rate multiplier, with overall cost at roughly 2.2% of official pricing and first-token latency around 1 second — ideal for developers seeking low-cost, high-speed access to GPT model capabilities. Technical support: 24/7 real human responses (no bots), @tech in the group chat and get a reply within 10 minutes. Sponsor benefit: the first 200 users who register via the <a href="https://api.pptoken.org/register?promo=SUB2API">exclusive registration link</a> and enter promo code `SUB2API` can claim free Codex / Claude Code trial credits — no minimum spend, no card required.
+</td>
+</tr>
+
 </table>
 
 ## Ecosystem
 
-Community projects that extend or integrate with AI Gateway:
+Community projects that extend or integrate with Sub2API:
 
 | Project | Description | Features |
 |---------|-------------|----------|
-| Built-in Payment | Self-service payment system | Payment is integrated into AI Gateway, no separate deployment needed. See [Payment Configuration Guide](docs/PAYMENT.md) |
-| [gateway-mobile](https://github.com/ckken/gateway-mobile) | Mobile admin console | Cross-platform app (iOS/Android/Web) for user management, account management, monitoring dashboard, and multi-backend switching; built with Expo + React Native |
+| ~~[Sub2ApiPay](https://github.com/touwaeriol/sub2apipay)~~ | ~~Self-service payment system~~ | **Now Built-in** — Payment is now integrated into Sub2API, no separate deployment needed. See [Payment Configuration Guide](docs/PAYMENT.md) |
+| [sub2api-mobile](https://github.com/ckken/sub2api-mobile) | Mobile admin console | Cross-platform app (iOS/Android/Web) for user management, account management, monitoring dashboard, and multi-backend switching; built with Expo + React Native |
 
 ## Tech Stack
 
@@ -124,7 +138,7 @@ Community projects that extend or integrate with AI Gateway:
 
 ## Nginx Reverse Proxy Note
 
-When using Nginx as a reverse proxy for AI Gateway (or CRS) with Codex CLI, add the following to the `http` block in your Nginx configuration:
+When using Nginx as a reverse proxy for Sub2API (or CRS) with Codex CLI, add the following to the `http` block in your Nginx configuration:
 
 ```nginx
 underscores_in_headers on;
@@ -150,13 +164,13 @@ One-click installation script that downloads pre-built binaries from GitHub Rele
 #### Installation Steps
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/yangbb7/sub2api/main/deploy/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install.sh | sudo bash
 ```
 
 The script will:
 1. Detect your system architecture
 2. Download the latest release
-3. Install binary to `/opt/gateway`
+3. Install binary to `/opt/sub2api`
 4. Create systemd service
 5. Configure system user and permissions
 
@@ -164,13 +178,13 @@ The script will:
 
 ```bash
 # 1. Start the service
-sudo systemctl start gateway
+sudo systemctl start sub2api
 
 # 2. Enable auto-start on boot
-sudo systemctl enable gateway
+sudo systemctl enable sub2api
 
 # 3. Open Setup Wizard in browser
-# http://YOUR_SERVER_IP:18080
+# http://YOUR_SERVER_IP:8080
 ```
 
 The Setup Wizard will guide you through:
@@ -191,16 +205,16 @@ The web interface will:
 
 ```bash
 # Check status
-sudo systemctl status gateway
+sudo systemctl status sub2api
 
 # View logs
-sudo journalctl -u gateway -f
+sudo journalctl -u sub2api -f
 
 # Restart service
-sudo systemctl restart gateway
+sudo systemctl restart sub2api
 
 # Uninstall
-curl -sSL https://raw.githubusercontent.com/yangbb7/sub2api/main/deploy/install.sh | sudo bash -s -- uninstall -y
+curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install.sh | sudo bash -s -- uninstall -y
 ```
 
 ---
@@ -220,16 +234,16 @@ Use the automated deployment script for easy setup:
 
 ```bash
 # Create deployment directory
-mkdir -p gateway-deploy && cd gateway-deploy
+mkdir -p sub2api-deploy && cd sub2api-deploy
 
 # Download and run deployment preparation script
-curl -sSL https://raw.githubusercontent.com/yangbb7/sub2api/main/deploy/docker-deploy.sh | bash
+curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/docker-deploy.sh | bash
 
 # Start services
 docker compose up -d
 
 # View logs
-docker compose logs -f gateway
+docker compose logs -f sub2api
 ```
 
 **What the script does:**
@@ -245,7 +259,7 @@ If you prefer manual setup:
 
 ```bash
 # 1. Clone the repository
-git clone git@github.com:yangbb7/sub2api.git
+git clone https://github.com/Wei-Shaw/sub2api.git
 cd sub2api/deploy
 
 # 2. Copy environment configuration
@@ -272,7 +286,7 @@ ADMIN_EMAIL=admin@example.com
 ADMIN_PASSWORD=your_admin_password
 
 # Optional: Custom port
-SERVER_PORT=18080
+SERVER_PORT=8080
 ```
 
 **Generate secure secrets:**
@@ -302,7 +316,7 @@ docker compose up -d
 docker compose -f docker-compose.local.yml ps
 
 # 7. View logs
-docker compose -f docker-compose.local.yml logs -f gateway
+docker compose -f docker-compose.local.yml logs -f sub2api
 ```
 
 #### Deployment Versions
@@ -316,11 +330,11 @@ docker compose -f docker-compose.local.yml logs -f gateway
 
 #### Access
 
-Open `http://YOUR_SERVER_IP:18080` in your browser.
+Open `http://YOUR_SERVER_IP:8080` in your browser.
 
 If admin password was auto-generated, find it in logs:
 ```bash
-docker compose -f docker-compose.local.yml logs gateway | grep "admin password"
+docker compose -f docker-compose.local.yml logs sub2api | grep "admin password"
 ```
 
 #### Upgrade
@@ -339,14 +353,14 @@ When using `docker-compose.local.yml`, migrate to a new server easily:
 # On source server
 docker compose -f docker-compose.local.yml down
 cd ..
-tar czf gateway-complete.tar.gz gateway-deploy/
+tar czf sub2api-complete.tar.gz sub2api-deploy/
 
 # Transfer to new server
-scp gateway-complete.tar.gz user@new-server:/path/
+scp sub2api-complete.tar.gz user@new-server:/path/
 
 # On new server
-tar xzf gateway-complete.tar.gz
-cd gateway-deploy/
+tar xzf sub2api-complete.tar.gz
+cd sub2api-deploy/
 docker compose -f docker-compose.local.yml up -d
 ```
 
@@ -384,7 +398,7 @@ Build and run from source code for development or customization.
 
 ```bash
 # 1. Clone the repository
-git clone git@github.com:yangbb7/sub2api.git
+git clone https://github.com/Wei-Shaw/sub2api.git
 cd sub2api
 
 # 2. Install pnpm (if not already installed)
@@ -398,7 +412,7 @@ pnpm run build
 
 # 4. Build backend with embedded frontend
 cd ../backend
-go build -tags embed -o gateway ./cmd/server
+go build -tags embed -o sub2api ./cmd/server
 
 # 5. Create configuration file
 cp ../deploy/config.example.yaml ./config.yaml
@@ -414,7 +428,7 @@ nano config.yaml
 ```yaml
 server:
   host: "0.0.0.0"
-  port: 18080
+  port: 8080
   mode: "release"
 
 database:
@@ -422,7 +436,7 @@ database:
   port: 5432
   user: "postgres"
   password: "your_password"
-  dbname: "gateway"
+  dbname: "sub2api"
 
 redis:
   host: "localhost"
@@ -501,7 +515,7 @@ If you disable URL validation or response header filtering, harden your network 
 
 ```bash
 # 6. Run the application
-./gateway
+./sub2api
 ```
 
 #### Development Mode
@@ -540,7 +554,7 @@ Simple Mode is designed for individual developers or internal teams who want qui
 
 ## Antigravity Support
 
-AI Gateway supports [Antigravity](https://antigravity.so/) accounts. After authorization, dedicated endpoints are available for Claude and Gemini models.
+Sub2API supports [Antigravity](https://antigravity.so/) accounts. After authorization, dedicated endpoints are available for Claude and Gemini models.
 
 ### Dedicated Endpoints
 
@@ -552,7 +566,7 @@ AI Gateway supports [Antigravity](https://antigravity.so/) accounts. After autho
 ### Claude Code Configuration
 
 ```bash
-export ANTHROPIC_BASE_URL="http://localhost:18080/antigravity"
+export ANTHROPIC_BASE_URL="http://localhost:8080/antigravity"
 export ANTHROPIC_AUTH_TOKEN="sk-xxx"
 ```
 
@@ -573,7 +587,7 @@ In Claude Code, Plan Mode cannot exit automatically. (Normally when using the na
 ## Project Structure
 
 ```
-gateway/
+sub2api/
 ├── backend/                  # Go backend service
 │   ├── cmd/server/           # Application entry
 │   ├── internal/             # Internal modules
@@ -610,11 +624,11 @@ gateway/
 
 ## Star History
 
-<a href="https://star-history.com/#yangbb7/sub2api&Date">
+<a href="https://star-history.com/#Wei-Shaw/sub2api&Date">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=yangbb7/sub2api&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=yangbb7/sub2api&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=yangbb7/sub2api&type=Date" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Wei-Shaw/sub2api&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Wei-Shaw/sub2api&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Wei-Shaw/sub2api&type=Date" />
  </picture>
 </a>
 

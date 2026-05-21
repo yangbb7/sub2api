@@ -7,6 +7,7 @@
       <ProfileInfoCard
         :user="user"
         :linuxdo-enabled="linuxdoOAuthEnabled"
+        :dingtalk-enabled="dingtalkOAuthEnabled"
         :oidc-enabled="oidcOAuthEnabled"
         :oidc-provider-name="oidcOAuthProviderName"
         :wechat-enabled="wechatOAuthEnabled"
@@ -127,6 +128,7 @@ const affiliateEnabled = ref(false)
 const affiliateLoading = ref(false)
 const affiliateDetail = ref<UserAffiliateDetail | null>(null)
 const linuxdoOAuthEnabled = ref(false)
+const dingtalkOAuthEnabled = ref(false)
 const wechatOAuthEnabled = ref(false)
 const wechatOAuthOpenEnabled = ref<boolean | undefined>(undefined)
 const wechatOAuthMPEnabled = ref<boolean | undefined>(undefined)
@@ -181,6 +183,7 @@ onMounted(async () => {
         void loadAffiliateDetail()
       }
       linuxdoOAuthEnabled.value = settings.linuxdo_oauth_enabled ?? false
+      dingtalkOAuthEnabled.value = settings.dingtalk_oauth_enabled ?? false
       wechatOAuthEnabled.value = isWeChatWebOAuthEnabled(settings)
       wechatOAuthOpenEnabled.value = typeof settings.wechat_oauth_open_enabled === 'boolean'
         ? settings.wechat_oauth_open_enabled
