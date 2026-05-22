@@ -67,6 +67,12 @@ func (h *PaymentWebhookHandler) AirwallexWebhook(c *gin.Context) {
 	h.handleNotify(c, payment.TypeAirwallex)
 }
 
+// CoinbaseWebhook handles Coinbase Business webhook events.
+// POST /api/v1/payment/webhook/coinbase
+func (h *PaymentWebhookHandler) CoinbaseWebhook(c *gin.Context) {
+	h.handleNotify(c, payment.TypeCoinbase)
+}
+
 // handleNotify is the shared logic for all provider webhook handlers.
 func (h *PaymentWebhookHandler) handleNotify(c *gin.Context, providerKey string) {
 	var rawBody string
@@ -164,6 +170,27 @@ func extractOutTradeNo(rawBody, providerKey string) string {
 		if err := json.Unmarshal([]byte(rawBody), &payload); err == nil {
 			return strings.TrimSpace(payload.Data.Object.MerchantOrderID)
 		}
+	case payment.TypeCoinbase:
+		var payload struct {
+			Metadata map[string]string `json:"metadata"`
+			Event    struct {
+				Data struct {
+					Metadata map[string]string `json:"metadata"`
+				} `json:"data"`
+			} `json:"event"`
+		}
+		if err := json.Unmarshal([]byte(rawBody), &payload); err == nil {
+			if orderID := strings.TrimSpace(payload.Metadata["orderId"]); orderID != "" {
+				return orderID
+			}
+			if orderID := strings.TrimSpace(payload.Metadata["order_id"]); orderID != "" {
+				return orderID
+			}
+			if orderID := strings.TrimSpace(payload.Event.Data.Metadata["orderId"]); orderID != "" {
+				return orderID
+			}
+			return strings.TrimSpace(payload.Event.Data.Metadata["order_id"])
+		}
 	}
 	// For other providers (Stripe, Alipay direct, WxPay direct), the registry
 	// typically has only one instance, so no instance lookup is needed.
@@ -208,7 +235,7 @@ func writeSuccessResponse(c *gin.Context, providerKey string) {
 	switch providerKey {
 	case payment.TypeWxpay:
 		c.JSON(http.StatusOK, wxpaySuccessResponse{Code: wxpaySuccessCode, Message: wxpaySuccessMessage})
-	case payment.TypeStripe, payment.TypeAirwallex:
+	case payment.TypeStripe, payment.TypeAirwallex, payment.TypeCoinbase:
 		c.String(http.StatusOK, "")
 	default:
 		c.String(http.StatusOK, "success")

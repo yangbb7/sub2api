@@ -13,6 +13,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.96.2
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/coder/websocket v1.8.14
+	github.com/coinbase/cdp-sdk/go v0.0.0-20260521180148-a6be935d61c7
 	github.com/dgraph-io/ristretto v0.2.0
 	github.com/gin-gonic/gin v1.9.1
 	github.com/golang-jwt/jwt/v5 v5.2.2

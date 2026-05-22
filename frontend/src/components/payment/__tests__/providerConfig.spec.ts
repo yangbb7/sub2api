@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { PAYMENT_CURRENCY_OPTIONS, PROVIDER_CONFIG_FIELDS } from '@/components/payment/providerConfig'
+import { CRYPTO_PAYMENT_CURRENCY_OPTIONS, PAYMENT_CURRENCY_OPTIONS, PROVIDER_CONFIG_FIELDS } from '@/components/payment/providerConfig'
 
 function findField(providerKey: string, key: string) {
   const fields = PROVIDER_CONFIG_FIELDS[providerKey] || []
@@ -48,5 +48,19 @@ describe('PROVIDER_CONFIG_FIELDS.stripe', () => {
     expect(currency?.defaultValue).toBe('CNY')
     expect(currency?.hintKey).toBe('admin.settings.payment.field_paymentCurrencyHint')
     expect(currency?.options).toBe(PAYMENT_CURRENCY_OPTIONS)
+  })
+})
+
+describe('PROVIDER_CONFIG_FIELDS.coinbase', () => {
+  it('uses hosted crypto checkout credentials and crypto currency options', () => {
+    expect(findField('coinbase', 'apiKeyId')?.sensitive).toBe(false)
+    expect(findField('coinbase', 'apiKeySecret')?.sensitive).toBe(true)
+    expect(findField('coinbase', 'webhookSecret')?.sensitive).toBe(true)
+    expect(findField('coinbase', 'apiBase')?.defaultValue).toBe('https://business.coinbase.com/api/v1')
+
+    const currency = findField('coinbase', 'currency')
+    expect(currency?.defaultValue).toBe('USDC')
+    expect(currency?.hintKey).toBe('admin.settings.payment.field_coinbaseCurrencyHint')
+    expect(currency?.options).toBe(CRYPTO_PAYMENT_CURRENCY_OPTIONS)
   })
 })

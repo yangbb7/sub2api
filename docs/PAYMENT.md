@@ -25,6 +25,7 @@ AI Gateway has a built-in payment system that enables user self-service top-up w
 | **Alipay (Direct)** | Desktop QR code, mobile Alipay redirect | Direct integration with Alipay Open Platform, returning desktop QR codes and mobile WAP/app launch links |
 | **WeChat Pay (Direct)** | Native QR, H5, MP/JSAPI Pay | Direct integration with WeChat Pay APIv3 with environment-aware routing |
 | **Stripe** | Card, Alipay, WeChat Pay, Link, etc. | International payments, multi-currency support |
+| **Coinbase Business** | Crypto wallet payments | Hosted checkout; users pay with supported crypto wallets and orders are confirmed through signed webhooks |
 
 > Alipay/WeChat Pay direct and EasyPay can both exist as backend provider instances, but the frontend always exposes only two visible buttons: `Alipay` and `WeChat Pay`. Admins choose exactly one source for each visible method: direct or EasyPay. Direct channels connect to payment APIs directly with lower fees; EasyPay aggregates through third-party platforms with easier setup.
 
@@ -154,6 +155,26 @@ International payment platform supporting multiple payment methods and currencie
 | **Publishable Key** | Stripe publishable key (`pk_live_...` or `pk_test_...`) | Yes |
 | **Webhook Secret** | Stripe Webhook signing secret (`whsec_...`) | Yes |
 
+### Coinbase Business
+
+Crypto wallet payment platform. The system creates a single-use hosted Checkout through Coinbase Business, redirects the user to Coinbase's checkout URL, and completes the order only after a signed webhook confirms payment.
+
+| Parameter | Description | Required |
+|-----------|-------------|----------|
+| **API Key ID** | Coinbase Business / CDP API key ID | Yes |
+| **API Key Secret** | Coinbase Business / CDP API private key secret | Yes |
+| **Webhook Secret** | Coinbase Hook0 webhook signing secret | Yes |
+| **API Base URL** | Defaults to `https://business.coinbase.com/api/v1` | Yes |
+| **Currency** | Fixed-price checkout currency. `USDC` is recommended; `USD` can be used if your Coinbase account supports fiat-denominated checkout | Yes |
+
+Webhook endpoint:
+
+| Provider | Callback URL |
+|----------|--------------|
+| **Coinbase Business** | `https://your-domain.com/api/v1/payment/webhook/coinbase` |
+
+Recommended Coinbase Business webhook events: `checkout.payment.success`, `checkout.payment.failed`, `checkout.payment.expired`. Refund events can be added when refund automation is enabled.
+
 ---
 
 ## Provider Instance Management
@@ -195,6 +216,7 @@ When adding a provider, the system auto-generates callback URLs from your site d
 | **Alipay (Direct)** | `https://your-domain.com/api/v1/payment/webhook/alipay` |
 | **WeChat Pay (Direct)** | `https://your-domain.com/api/v1/payment/webhook/wxpay` |
 | **Stripe** | `https://your-domain.com/api/v1/payment/webhook/stripe` |
+| **Coinbase Business** | `https://your-domain.com/api/v1/payment/webhook/coinbase` |
 
 > Replace `your-domain.com` with your actual domain. For EasyPay / Alipay / WeChat Pay, the callback URL is auto-filled when adding the provider — no manual configuration needed.
 
@@ -231,7 +253,8 @@ User selects amount and payment method
   ├─ EasyPay     → QR code / H5 redirect
   ├─ Alipay      → Desktop QR payload (Face-to-Face preferred, Website Pay fallback) / mobile Alipay redirect
   ├─ WeChat Pay  → Desktop Native QR / non-WeChat H5 / in-WeChat JSAPI
-  └─ Stripe      → Payment Element (card/Alipay/WeChat/etc.)
+  ├─ Stripe      → Payment Element (card/Alipay/WeChat/etc.)
+  └─ Coinbase    → Hosted crypto wallet checkout
        │
        ▼
   Webhook callback verified → Order PAID
@@ -271,7 +294,7 @@ If you previously used an external payment system, you can migrate to the built-
 | Aspect | External Integration | Built-in Payment |
 |--------|-----------|-----------------|
 | Deployment | Separate service (Next.js + PostgreSQL) | Built into AI Gateway, no extra deployment |
-| Payment Methods | EasyPay, Alipay, WeChat, Stripe | Same |
+| Payment Methods | EasyPay, Alipay, WeChat, Stripe, Coinbase Business | Same |
 | Configuration | Environment variables + separate admin UI | Unified in AI Gateway admin dashboard |
 | Top-up Integration | Via Admin API callback | Internal processing, more reliable |
 | Subscription Plans | Supported | Not yet (planned) |

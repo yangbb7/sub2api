@@ -121,6 +121,13 @@
     @apply dark:hover:bg-[#62d9ad];
   }
 
+  .btn-crypto {
+    @apply bg-[#0B1220] text-white shadow-md shadow-cyan-500/20;
+    @apply hover:bg-[#172033] hover:shadow-lg hover:shadow-cyan-500/25;
+    @apply dark:bg-[#67E8F9] dark:text-gray-950 dark:shadow-cyan-500/20;
+    @apply dark:hover:bg-[#38BDF8];
+  }
+
   .btn-alipay {
     @apply bg-[#00AEEF] text-white shadow-md shadow-[#00AEEF]/25;
     @apply hover:bg-[#009dd6] hover:shadow-lg hover:shadow-[#00AEEF]/30;

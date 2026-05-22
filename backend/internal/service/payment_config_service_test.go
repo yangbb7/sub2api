@@ -210,6 +210,8 @@ func TestGetBasePaymentType(t *testing.T) {
 		{payment.TypeStripe, payment.TypeStripe},
 		{payment.TypeCard, payment.TypeStripe},
 		{payment.TypeLink, payment.TypeStripe},
+		{payment.TypeCoinbase, payment.TypeCrypto},
+		{payment.TypeCrypto, payment.TypeCrypto},
 		{payment.TypeAlipay, payment.TypeAlipay},
 		{payment.TypeAlipayDirect, payment.TypeAlipay},
 		{payment.TypeWxpay, payment.TypeWxpay},

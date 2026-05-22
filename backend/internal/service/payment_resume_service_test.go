@@ -26,9 +26,11 @@ func TestNormalizeVisibleMethods(t *testing.T) {
 		" wxpay_direct ",
 		"wxpay",
 		"stripe",
+		"coinbase",
+		"crypto",
 	})
 
-	want := []string{"alipay", "wxpay", "stripe"}
+	want := []string{"alipay", "wxpay", "stripe", "crypto"}
 	if len(got) != len(want) {
 		t.Fatalf("NormalizeVisibleMethods len = %d, want %d (%v)", len(got), len(want), got)
 	}

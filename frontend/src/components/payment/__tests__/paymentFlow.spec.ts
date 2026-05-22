@@ -39,6 +39,7 @@ describe('getVisibleMethods', () => {
       wxpay: methodLimit({ single_max: 100 }),
       stripe: methodLimit({ fee_rate: 3 }),
       airwallex: methodLimit({ single_min: 10 }),
+      coinbase: methodLimit({ single_max: 500 }),
     })
 
     expect(visible).toEqual({
@@ -46,6 +47,7 @@ describe('getVisibleMethods', () => {
       wxpay: methodLimit({ single_max: 100 }),
       stripe: methodLimit({ fee_rate: 3 }),
       airwallex: methodLimit({ single_min: 10 }),
+      crypto: methodLimit({ single_max: 500 }),
     })
   })
 
@@ -127,6 +129,23 @@ describe('decidePaymentLaunch', () => {
     expect(decision.paymentState.currency).toBe('CNY')
     expect(decision.paymentState.countryCode).toBe('CN')
     expect(decision.paymentState.paymentEnv).toBe('demo')
+  })
+
+  it('routes crypto wallet payments through hosted checkout redirects', () => {
+    const decision = decidePaymentLaunch(createOrderResult({
+      pay_url: 'https://payments.coinbase.com/payment-links/pl_123',
+      qr_code: 'https://payments.coinbase.com/payment-links/pl_123',
+      out_trade_no: 'ABC123',
+    }), {
+      visibleMethod: 'crypto',
+      orderType: 'balance',
+      isMobile: false,
+    })
+
+    expect(decision.kind).toBe('redirect_waiting')
+    expect(decision.paymentState.paymentType).toBe('crypto')
+    expect(decision.paymentState.payUrl).toBe('https://payments.coinbase.com/payment-links/pl_123')
+    expect(decision.recovery.outTradeNo).toBe('ABC123')
   })
 
   it('keeps hosted redirect metadata for recovery flows', () => {

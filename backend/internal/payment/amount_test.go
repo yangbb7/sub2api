@@ -227,3 +227,20 @@ func TestNormalizePaymentCurrencyRejectsInvalidCodes(t *testing.T) {
 		t.Fatal("expected non-letter currency to fail")
 	}
 }
+
+func TestStablecoinPaymentCurrencies(t *testing.T) {
+	got, err := NormalizePaymentCurrency("usdc")
+	if err != nil {
+		t.Fatalf("NormalizePaymentCurrency(usdc) unexpected error: %v", err)
+	}
+	if got != "USDC" {
+		t.Fatalf("NormalizePaymentCurrency(usdc) = %q, want USDC", got)
+	}
+	minor, err := AmountToMinorUnit("12.34", "USDC")
+	if err != nil {
+		t.Fatalf("AmountToMinorUnit(USDC) unexpected error: %v", err)
+	}
+	if minor != 1234 {
+		t.Fatalf("AmountToMinorUnit(USDC) = %d, want 1234", minor)
+	}
+}

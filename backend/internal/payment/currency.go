@@ -48,17 +48,24 @@ var paymentCurrencyAmountUnits = map[string]paymentCurrencyAmountUnit{
 	"TND": threeDecimalAmountUnit,
 }
 
+var stablecoinPaymentCurrencies = map[string]paymentCurrencyAmountUnit{
+	"USDC": twoDecimalAmountUnit,
+}
+
 func NormalizePaymentCurrency(raw string) (string, error) {
 	currency := strings.ToUpper(strings.TrimSpace(raw))
 	if currency == "" {
 		return DefaultPaymentCurrency, nil
 	}
+	if _, ok := stablecoinPaymentCurrencies[currency]; ok {
+		return currency, nil
+	}
 	if len(currency) != 3 {
-		return "", fmt.Errorf("payment currency must be a 3-letter ISO currency code")
+		return "", fmt.Errorf("payment currency must be a 3-letter ISO currency code or supported stablecoin code")
 	}
 	for _, ch := range currency {
 		if ch < 'A' || ch > 'Z' {
-			return "", fmt.Errorf("payment currency must be a 3-letter ISO currency code")
+			return "", fmt.Errorf("payment currency must be a 3-letter ISO currency code or supported stablecoin code")
 		}
 	}
 	return currency, nil
@@ -82,6 +89,9 @@ func paymentCurrencyAmountUnitFor(currency string) paymentCurrencyAmountUnit {
 	normalized, err := NormalizePaymentCurrency(currency)
 	if err != nil {
 		return twoDecimalAmountUnit
+	}
+	if amountUnit, ok := stablecoinPaymentCurrencies[normalized]; ok {
+		return amountUnit
 	}
 	if amountUnit, ok := paymentCurrencyAmountUnits[normalized]; ok {
 		return amountUnit

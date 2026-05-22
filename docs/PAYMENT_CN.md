@@ -25,6 +25,7 @@ AI Gateway 内置支付系统，支持用户自助充值，无需部署独立的
 | **支付宝官方** | 桌面二维码扫码、移动端支付宝跳转 | 直接对接支付宝开放平台，桌面端返回二维码，移动端返回 WAP/唤起链接 |
 | **微信官方** | Native 扫码、H5、公众号/JSAPI 支付 | 直接对接微信支付 APIv3，按终端环境自动分流 |
 | **Stripe** | 银行卡、支付宝、微信支付、Link 等 | 国际支付，支持多币种 |
+| **Coinbase Business** | 加密钱包支付 | 托管收银台，用户使用支持的加密钱包完成支付，系统通过签名 Webhook 自动确认订单 |
 
 > 支付宝官方 / 微信官方与易支付可以同时作为后台服务商实例存在，但前台始终只展示 `支付宝`、`微信支付` 两个可见按钮。管理员需要分别为这两个按钮选择唯一支付来源：官方或易支付。官方渠道直接对接 API，资金直达商户账户，手续费更低；易支付通过第三方平台聚合，接入门槛更低。
 
@@ -154,6 +155,26 @@ AI Gateway 内置支付系统，支持用户自助充值，无需部署独立的
 | **Publishable Key** | Stripe 可公开密钥（`pk_live_...` 或 `pk_test_...`） | 是 |
 | **Webhook Secret** | Stripe Webhook 签名密钥（`whsec_...`） | 是 |
 
+### Coinbase Business
+
+加密钱包支付平台。系统通过 Coinbase Business 创建一次性托管 Checkout，用户跳转到 Coinbase 收银台付款；只有签名 Webhook 确认后才完成订单。
+
+| 参数 | 说明 | 必填 |
+|------|------|------|
+| **API Key ID** | Coinbase Business / CDP API Key ID | 是 |
+| **API Key Secret** | Coinbase Business / CDP API 私钥密钥 | 是 |
+| **Webhook Secret** | Coinbase Hook0 Webhook 签名密钥 | 是 |
+| **API 地址** | 默认 `https://business.coinbase.com/api/v1` | 是 |
+| **支付币种** | 固定价格收银台币种，建议 `USDC`；如账户支持法币标价可选 `USD` | 是 |
+
+Webhook 回调地址：
+
+| 服务商 | 回调地址 |
+|------|---------|
+| **Coinbase Business** | `https://your-domain.com/api/v1/payment/webhook/coinbase` |
+
+建议订阅 Coinbase Business Webhook 事件：`checkout.payment.success`、`checkout.payment.failed`、`checkout.payment.expired`。启用自动退款时再追加退款相关事件。
+
 ---
 
 ## 服务商实例管理
@@ -195,6 +216,7 @@ AI Gateway 内置支付系统，支持用户自助充值，无需部署独立的
 | **支付宝官方** | `https://your-domain.com/api/v1/payment/webhook/alipay` |
 | **微信官方** | `https://your-domain.com/api/v1/payment/webhook/wxpay` |
 | **Stripe** | `https://your-domain.com/api/v1/payment/webhook/stripe` |
+| **Coinbase Business** | `https://your-domain.com/api/v1/payment/webhook/coinbase` |
 
 > 将 `your-domain.com` 替换为你的实际域名。EasyPay / 支付宝 / 微信的回调地址在添加服务商时自动填入，无需手动配置。
 
@@ -231,7 +253,8 @@ AI Gateway 内置支付系统，支持用户自助充值，无需部署独立的
   ├─ EasyPay    → 扫码 / H5 跳转
   ├─ 支付宝官方  → 桌面扫码单（当面付优先，电脑网站支付回退）/ 移动端支付宝跳转
   ├─ 微信官方    → 桌面 Native 扫码 / 非微信 H5 / 微信内 JSAPI
-  └─ Stripe     → Payment Element（银行卡/支付宝/微信等）
+  ├─ Stripe     → Payment Element（银行卡/支付宝/微信等）
+  └─ Coinbase   → 托管加密钱包收银台
        │
        ▼
   支付回调验签 → 订单 PAID
@@ -271,7 +294,7 @@ AI Gateway 内置支付系统，支持用户自助充值，无需部署独立的
 | 对比项 | 外部集成 | 内置支付 |
 |--------|-----------|---------|
 | 部署方式 | 独立服务（Next.js + PostgreSQL） | 内置于 AI Gateway，无需额外部署 |
-| 支付方式 | EasyPay、支付宝、微信、Stripe | 相同 |
+| 支付方式 | EasyPay、支付宝、微信、Stripe、Coinbase Business | 相同 |
 | 配置方式 | 环境变量 + 独立管理后台 | AI Gateway 管理后台内统一配置 |
 | 充值对接 | 通过 Admin API 回调 | 内部直接处理，更可靠 |
 | 订阅套餐 | 支持 | 暂不支持（计划中） |

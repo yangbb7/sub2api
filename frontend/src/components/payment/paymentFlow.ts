@@ -16,9 +16,11 @@ const VISIBLE_METHOD_ALIASES = {
   wxpay_direct: 'wxpay',
   stripe: 'stripe',
   airwallex: 'airwallex',
+  coinbase: 'crypto',
+  crypto: 'crypto',
 } as const
 
-export type VisiblePaymentMethod = 'alipay' | 'wxpay' | 'stripe' | 'airwallex'
+export type VisiblePaymentMethod = 'alipay' | 'wxpay' | 'stripe' | 'airwallex' | 'crypto'
 export type StripeVisibleMethod = 'alipay' | 'wechat_pay'
 export type PaymentLaunchKind =
   | 'qr_waiting'
@@ -196,6 +198,10 @@ export function decidePaymentLaunch(
   const jsapiPayload = result.jsapi ?? result.jsapi_payload
   if (result.result_type === 'jsapi_ready' && jsapiPayload) {
     return { kind: 'wechat_jsapi', paymentState: baseState, recovery: baseState, jsapi: jsapiPayload }
+  }
+
+  if (visibleMethod === 'crypto' && baseState.payUrl) {
+    return { kind: 'redirect_waiting', paymentState: baseState, recovery: baseState }
   }
 
   const normalizedPaymentMode = baseState.paymentMode.trim().toLowerCase()

@@ -1,7 +1,9 @@
 export const DEFAULT_PAYMENT_CURRENCY = 'CNY'
+const STABLECOIN_CURRENCIES = new Set(['USDC'])
 
 export function normalizePaymentCurrency(currency?: string | null): string {
   const normalized = String(currency || '').trim().toUpperCase()
+  if (STABLECOIN_CURRENCIES.has(normalized)) return normalized
   return /^[A-Z]{3}$/.test(normalized) ? normalized : DEFAULT_PAYMENT_CURRENCY
 }
 
