@@ -47,6 +47,8 @@ const (
 
 	// OpenAIParsedRequestBodyKey 缓存 handler 侧已解析的请求体，避免重复解析。
 	OpenAIParsedRequestBodyKey = "openai_parsed_request_body"
+	// OpenAIPromptCacheKey 缓存 handler 已经从请求体提取出的 prompt_cache_key。
+	OpenAIPromptCacheKey = "openai_prompt_cache_key"
 	// OpenAI WS Mode 失败后的重连次数上限（不含首次尝试）。
 	// 与 Codex 客户端保持一致：失败后最多重连 5 次。
 	openAIWSReconnectRetryLimit = 5
@@ -1149,6 +1151,13 @@ func (s *OpenAIGatewayService) ExtractSessionID(c *gin.Context, body []byte) str
 	if sessionID == "" {
 		sessionID = strings.TrimSpace(c.GetHeader("conversation_id"))
 	}
+	if sessionID == "" {
+		if cached, ok := c.Get(OpenAIPromptCacheKey); ok {
+			if cachedSessionID, ok := cached.(string); ok {
+				sessionID = strings.TrimSpace(cachedSessionID)
+			}
+		}
+	}
 	if sessionID == "" && len(body) > 0 {
 		sessionID = strings.TrimSpace(gjson.GetBytes(body, "prompt_cache_key").String())
 	}
@@ -1163,6 +1172,13 @@ func explicitOpenAISessionID(c *gin.Context, body []byte) string {
 	sessionID := strings.TrimSpace(c.GetHeader("session_id"))
 	if sessionID == "" {
 		sessionID = strings.TrimSpace(c.GetHeader("conversation_id"))
+	}
+	if sessionID == "" {
+		if cached, ok := c.Get(OpenAIPromptCacheKey); ok {
+			if cachedSessionID, ok := cached.(string); ok {
+				sessionID = strings.TrimSpace(cachedSessionID)
+			}
+		}
 	}
 	if sessionID == "" && len(body) > 0 {
 		sessionID = strings.TrimSpace(gjson.GetBytes(body, "prompt_cache_key").String())

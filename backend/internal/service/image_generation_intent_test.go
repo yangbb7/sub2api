@@ -64,6 +64,15 @@ func TestIsImageGenerationIntent(t *testing.T) {
 	}
 }
 
+func TestIsImageGenerationIntentFromValidJSONMatchesValidatedPath(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.4","tools":[{"type":"image_generation"}]}`)
+
+	require.Equal(t,
+		IsImageGenerationIntent("/v1/responses", "gpt-5.4", body),
+		IsImageGenerationIntentFromValidJSON("/v1/responses", "gpt-5.4", body),
+	)
+}
+
 func TestResolveOpenAIResponsesImageBillingConfigUsesCurrentBodyModel(t *testing.T) {
 	imageModel, imageSize, err := resolveOpenAIResponsesImageBillingConfigFromBody(
 		[]byte(`{"model":"mapped-image-model","tools":[{"type":"image_generation","size":"1024x1024"}]}`),

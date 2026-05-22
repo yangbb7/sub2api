@@ -25,13 +25,21 @@ func GroupAllowsImageGeneration(group *Group) bool {
 
 // IsImageGenerationIntent classifies requests that can produce generated images.
 func IsImageGenerationIntent(endpoint string, requestedModel string, body []byte) bool {
+	return isImageGenerationIntent(endpoint, requestedModel, body, false)
+}
+
+func IsImageGenerationIntentFromValidJSON(endpoint string, requestedModel string, body []byte) bool {
+	return isImageGenerationIntent(endpoint, requestedModel, body, true)
+}
+
+func isImageGenerationIntent(endpoint string, requestedModel string, body []byte, bodyIsValidJSON bool) bool {
 	if IsImageGenerationEndpoint(endpoint) {
 		return true
 	}
 	if isOpenAIImageGenerationModel(requestedModel) {
 		return true
 	}
-	if len(body) == 0 || !gjson.ValidBytes(body) {
+	if len(body) == 0 || (!bodyIsValidJSON && !gjson.ValidBytes(body)) {
 		return false
 	}
 	if model := strings.TrimSpace(gjson.GetBytes(body, "model").String()); isOpenAIImageGenerationModel(model) {

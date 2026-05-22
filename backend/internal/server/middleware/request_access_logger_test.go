@@ -10,6 +10,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 )
 
@@ -124,6 +125,13 @@ func TestLogger_AccessLogIncludesCoreFields(t *testing.T) {
 		ctx = context.WithValue(ctx, ctxkey.Platform, "openai")
 		ctx = context.WithValue(ctx, ctxkey.Model, "gpt-5")
 		c.Request = c.Request.WithContext(ctx)
+		service.SetOpsLatencyMs(c, service.OpsBodyReadLatencyMsKey, 11)
+		service.SetOpsLatencyMs(c, service.OpsRequestMetaLatencyMsKey, 12)
+		service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, 13)
+		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, 14)
+		service.SetOpsLatencyMs(c, service.OpsUpstreamLatencyMsKey, 15)
+		service.SetOpsLatencyMs(c, service.OpsResponseLatencyMsKey, 16)
+		service.SetOpsLatencyMs(c, service.OpsTimeToFirstTokenMsKey, 17)
 		c.Next()
 	})
 	r.GET("/api/test", func(c *gin.Context) {
@@ -174,9 +182,32 @@ func TestLogger_AccessLogIncludesCoreFields(t *testing.T) {
 		if event.Fields["platform"] != "openai" || event.Fields["model"] != "gpt-5" {
 			t.Fatalf("platform/model mismatch: %+v", event.Fields)
 		}
+		assertAccessLogIntField(t, event, "body_read_ms", 11)
+		assertAccessLogIntField(t, event, "request_meta_ms", 12)
+		assertAccessLogIntField(t, event, "auth_latency_ms", 13)
+		assertAccessLogIntField(t, event, "routing_latency_ms", 14)
+		assertAccessLogIntField(t, event, "upstream_latency_ms", 15)
+		assertAccessLogIntField(t, event, "response_latency_ms", 16)
+		assertAccessLogIntField(t, event, "time_to_first_token_ms", 17)
 	}
 	if !found {
 		t.Fatalf("access log event not found")
+	}
+}
+
+func assertAccessLogIntField(t *testing.T, event *logger.LogEvent, key string, want int64) {
+	t.Helper()
+	switch v := event.Fields[key].(type) {
+	case int64:
+		if v != want {
+			t.Fatalf("%s=%d, want %d", key, v, want)
+		}
+	case int:
+		if int64(v) != want {
+			t.Fatalf("%s=%d, want %d", key, v, want)
+		}
+	default:
+		t.Fatalf("%s type mismatch: %T fields=%+v", key, v, event.Fields)
 	}
 }
 

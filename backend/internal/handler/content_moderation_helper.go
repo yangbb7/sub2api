@@ -16,7 +16,7 @@ func (h *GatewayHandler) checkContentModeration(c *gin.Context, reqLog *zap.Logg
 	if h == nil || h.contentModerationService == nil {
 		return nil
 	}
-	return runContentModeration(c, reqLog, h.contentModerationService, apiKey, subject, protocol, model, body)
+	return runContentModeration(c, reqLog, h.contentModerationService, apiKey, subject, protocol, model, body, false)
 }
 
 func contentModerationStatus(decision *service.ContentModerationDecision) int {
@@ -34,14 +34,22 @@ func (h *OpenAIGatewayHandler) checkContentModeration(c *gin.Context, reqLog *za
 	if h == nil || h.contentModerationService == nil {
 		return nil
 	}
-	return runContentModeration(c, reqLog, h.contentModerationService, apiKey, subject, protocol, model, body)
+	return runContentModeration(c, reqLog, h.contentModerationService, apiKey, subject, protocol, model, body, false)
 }
 
-func runContentModeration(c *gin.Context, reqLog *zap.Logger, svc *service.ContentModerationService, apiKey *service.APIKey, subject middleware2.AuthSubject, protocol string, model string, body []byte) *service.ContentModerationDecision {
+func (h *OpenAIGatewayHandler) checkContentModerationWithValidJSON(c *gin.Context, reqLog *zap.Logger, apiKey *service.APIKey, subject middleware2.AuthSubject, protocol string, model string, body []byte) *service.ContentModerationDecision {
+	if h == nil || h.contentModerationService == nil {
+		return nil
+	}
+	return runContentModeration(c, reqLog, h.contentModerationService, apiKey, subject, protocol, model, body, true)
+}
+
+func runContentModeration(c *gin.Context, reqLog *zap.Logger, svc *service.ContentModerationService, apiKey *service.APIKey, subject middleware2.AuthSubject, protocol string, model string, body []byte, bodyIsValidJSON bool) *service.ContentModerationDecision {
 	if svc == nil || c == nil || c.Request == nil {
 		return nil
 	}
 	input := buildContentModerationInput(c, apiKey, subject, protocol, model, body)
+	input.BodyIsValidJSON = bodyIsValidJSON
 	if reqLog != nil {
 		reqLog.Info("content_moderation.gateway_check_start",
 			zap.String("request_id", input.RequestID),

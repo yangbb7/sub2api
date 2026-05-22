@@ -6,6 +6,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -55,6 +56,11 @@ func Logger() gin.HandlerFunc {
 		}
 		if model != "" {
 			fields = append(fields, zap.String("model", model))
+		}
+		for _, field := range service.OpsLatencyLogFields() {
+			if value, ok := service.GetOpsLatencyMs(c, field.ContextKey); ok {
+				fields = append(fields, zap.Int64(field.LogField, value))
+			}
 		}
 
 		l := logger.FromContext(c.Request.Context()).With(fields...)

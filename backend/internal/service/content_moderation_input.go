@@ -14,7 +14,15 @@ func ExtractContentModerationText(protocol string, body []byte) string {
 }
 
 func ExtractContentModerationInput(protocol string, body []byte) ContentModerationInput {
-	if len(body) == 0 || !gjson.ValidBytes(body) {
+	return extractContentModerationInput(protocol, body, false)
+}
+
+func ExtractContentModerationInputFromValidJSON(protocol string, body []byte) ContentModerationInput {
+	return extractContentModerationInput(protocol, body, true)
+}
+
+func extractContentModerationInput(protocol string, body []byte, bodyIsValidJSON bool) ContentModerationInput {
+	if len(body) == 0 || (!bodyIsValidJSON && !gjson.ValidBytes(body)) {
 		return ContentModerationInput{}
 	}
 	var parts []string

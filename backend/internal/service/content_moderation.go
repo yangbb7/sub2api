@@ -258,18 +258,19 @@ type UpdateContentModerationConfigInput struct {
 }
 
 type ContentModerationCheckInput struct {
-	RequestID  string
-	UserID     int64
-	UserEmail  string
-	APIKeyID   int64
-	APIKeyName string
-	GroupID    *int64
-	GroupName  string
-	Endpoint   string
-	Provider   string
-	Model      string
-	Protocol   string
-	Body       []byte
+	RequestID       string
+	UserID          int64
+	UserEmail       string
+	APIKeyID        int64
+	APIKeyName      string
+	GroupID         *int64
+	GroupName       string
+	Endpoint        string
+	Provider        string
+	Model           string
+	Protocol        string
+	Body            []byte
+	BodyIsValidJSON bool
 }
 
 type ContentModerationInput struct {
@@ -768,7 +769,12 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 			"configured_group_ids", cfg.GroupIDs)
 		return allow, nil
 	}
-	content := ExtractContentModerationInput(input.Protocol, input.Body)
+	var content ContentModerationInput
+	if input.BodyIsValidJSON {
+		content = ExtractContentModerationInputFromValidJSON(input.Protocol, input.Body)
+	} else {
+		content = ExtractContentModerationInput(input.Protocol, input.Body)
+	}
 	if content.IsEmpty() {
 		slog.Info("content_moderation.skip_empty_input",
 			"user_id", input.UserID,

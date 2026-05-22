@@ -115,7 +115,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	}
 
 	// Read request body
+	bodyReadStart := time.Now()
 	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
+	service.SetOpsLatencyMs(c, service.OpsBodyReadLatencyMsKey, time.Since(bodyReadStart).Milliseconds())
 	if err != nil {
 		if maxErr, ok := extractMaxBytesError(err); ok {
 			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
@@ -146,28 +148,30 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		}
 	}
 
-	// 校验请求体 JSON 合法性
-	if !gjson.ValidBytes(body) {
+	metaStart := time.Now()
+	requestMeta, validJSON := service.ExtractOpenAIResponsesRequestMeta(body)
+	service.SetOpsLatencyMs(c, service.OpsRequestMetaLatencyMsKey, time.Since(metaStart).Milliseconds())
+	if !validJSON {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return
 	}
 
-	// 使用 gjson 只读提取字段做校验，避免完整 Unmarshal
-	modelResult := gjson.GetBytes(body, "model")
-	if !modelResult.Exists() || modelResult.Type != gjson.String || modelResult.String() == "" {
+	if !requestMeta.ModelExists || !requestMeta.ModelIsString || requestMeta.Model == "" {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "model is required")
 		return
 	}
-	reqModel := modelResult.String()
+	if requestMeta.PromptCacheKey != "" {
+		c.Set(service.OpenAIPromptCacheKey, requestMeta.PromptCacheKey)
+	}
+	reqModel := requestMeta.Model
 
-	streamResult := gjson.GetBytes(body, "stream")
-	if streamResult.Exists() && streamResult.Type != gjson.True && streamResult.Type != gjson.False {
+	if requestMeta.StreamExists && !requestMeta.StreamIsBool {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "invalid stream field type")
 		return
 	}
-	reqStream := streamResult.Bool()
+	reqStream := requestMeta.Stream
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
-	previousResponseID := strings.TrimSpace(gjson.GetBytes(body, "previous_response_id").String())
+	previousResponseID := requestMeta.PreviousResponseID
 	if previousResponseID != "" {
 		previousResponseIDKind := service.ClassifyOpenAIPreviousResponseIDKind(previousResponseID)
 		reqLog = reqLog.With(
@@ -192,12 +196,17 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	setOpsRequestContext(c, reqModel, reqStream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))
 
-	if decision := h.checkContentModeration(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, reqModel, body); decision != nil && decision.Blocked {
+	moderationStart := time.Now()
+	decision := h.checkContentModerationWithValidJSON(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, reqModel, body)
+	service.SetOpsLatencyMs(c, service.OpsContentModerationLatencyMsKey, time.Since(moderationStart).Milliseconds())
+	if decision != nil && decision.Blocked {
 		h.errorResponse(c, contentModerationStatus(decision), contentModerationErrorCode(decision), decision.Message)
 		return
 	}
 
-	imageIntent := service.IsImageGenerationIntent("/v1/responses", reqModel, body)
+	imageIntentStart := time.Now()
+	imageIntent := service.IsImageGenerationIntentFromValidJSON("/v1/responses", reqModel, body)
+	service.SetOpsLatencyMs(c, service.OpsImageIntentLatencyMsKey, time.Since(imageIntentStart).Milliseconds())
 	if imageIntent && !service.GroupAllowsImageGeneration(apiKey.Group) {
 		h.errorResponse(c, http.StatusForbidden, "permission_error", service.ImageGenerationPermissionMessage())
 		return
@@ -215,10 +224,15 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	}
 
 	// 解析渠道级模型映射
+	channelMappingStart := time.Now()
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
+	service.SetOpsLatencyMs(c, service.OpsChannelMappingLatencyMsKey, time.Since(channelMappingStart).Milliseconds())
 
 	// 提前校验 function_call_output 是否具备可关联上下文，避免上游 400。
-	if !h.validateFunctionCallOutputRequest(c, body, reqLog) {
+	functionValidationStart := time.Now()
+	functionCallOutputValid := h.validateFunctionCallOutputRequest(c, body, reqLog)
+	service.SetOpsLatencyMs(c, service.OpsFunctionCallValidationLatencyMsKey, time.Since(functionValidationStart).Milliseconds())
+	if !functionCallOutputValid {
 		return
 	}
 
@@ -243,7 +257,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	}
 
 	// 2. Re-check billing eligibility after wait
+	billingStart := time.Now()
 	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription); err != nil {
+		service.SetOpsLatencyMs(c, service.OpsBillingLatencyMsKey, time.Since(billingStart).Milliseconds())
 		reqLog.Info("openai.billing_eligibility_check_failed", zap.Error(err))
 		status, code, message, retryAfter := billingErrorDetails(err)
 		if retryAfter > 0 {
@@ -252,9 +268,12 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		h.handleStreamingAwareError(c, status, code, message, streamStarted)
 		return
 	}
+	service.SetOpsLatencyMs(c, service.OpsBillingLatencyMsKey, time.Since(billingStart).Milliseconds())
 
 	// Generate session hash (header first; fallback to prompt_cache_key)
+	sessionHashStart := time.Now()
 	sessionHash := h.gatewayService.GenerateSessionHash(c, sessionHashBody)
+	service.SetOpsLatencyMs(c, service.OpsSessionHashLatencyMsKey, time.Since(sessionHashStart).Milliseconds())
 	requireCompact := isOpenAIRemoteCompactPath(c)
 
 	maxAccountSwitches := h.maxAccountSwitches
@@ -328,10 +347,12 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
 		// 应用渠道模型映射到请求体
+		forwardPrepareStart := time.Now()
 		forwardBody := body
 		if channelMapping.Mapped {
 			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
 		}
+		service.SetOpsLatencyMs(c, service.OpsForwardPrepareLatencyMsKey, time.Since(forwardPrepareStart).Milliseconds())
 		writerSizeBeforeForward := c.Writer.Size()
 		result, err := h.gatewayService.Forward(c.Request.Context(), c, account, forwardBody)
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()

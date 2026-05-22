@@ -50,6 +50,87 @@ func TestExtractOpenAIRequestMetaFromBody(t *testing.T) {
 	}
 }
 
+func TestExtractOpenAIResponsesRequestMeta(t *testing.T) {
+	tests := []struct {
+		name                 string
+		body                 []byte
+		wantValid            bool
+		wantModel            string
+		wantModelExists      bool
+		wantModelIsString    bool
+		wantStream           bool
+		wantStreamExists     bool
+		wantStreamIsBool     bool
+		wantPreviousResponse string
+		wantPromptCacheKey   string
+	}{
+		{
+			name:                 "完整字段",
+			body:                 []byte(`{"model":"gpt-5.5","stream":true,"previous_response_id":" resp_123 ","prompt_cache_key":" cache_123 "}`),
+			wantValid:            true,
+			wantModel:            "gpt-5.5",
+			wantModelExists:      true,
+			wantModelIsString:    true,
+			wantStream:           true,
+			wantStreamExists:     true,
+			wantStreamIsBool:     true,
+			wantPreviousResponse: "resp_123",
+			wantPromptCacheKey:   "cache_123",
+		},
+		{
+			name:              "stream 缺失时保持 false",
+			body:              []byte(`{"model":"gpt-5.5"}`),
+			wantValid:         true,
+			wantModel:         "gpt-5.5",
+			wantModelExists:   true,
+			wantModelIsString: true,
+			wantStream:        false,
+			wantStreamExists:  false,
+			wantStreamIsBool:  false,
+		},
+		{
+			name:              "stream 字符串不是 bool",
+			body:              []byte(`{"model":"gpt-5.5","stream":"true"}`),
+			wantValid:         true,
+			wantModel:         "gpt-5.5",
+			wantModelExists:   true,
+			wantModelIsString: true,
+			wantStream:        false,
+			wantStreamExists:  true,
+			wantStreamIsBool:  false,
+		},
+		{
+			name:              "model 数字保持 exists 但不是 string",
+			body:              []byte(`{"model":123,"stream":false}`),
+			wantValid:         true,
+			wantModelExists:   true,
+			wantModelIsString: false,
+			wantStreamExists:  true,
+			wantStreamIsBool:  true,
+		},
+		{
+			name:      "非法 JSON",
+			body:      []byte(`{"model":"gpt-5.5"`),
+			wantValid: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, valid := ExtractOpenAIResponsesRequestMeta(tt.body)
+			require.Equal(t, tt.wantValid, valid)
+			require.Equal(t, tt.wantModel, got.Model)
+			require.Equal(t, tt.wantModelExists, got.ModelExists)
+			require.Equal(t, tt.wantModelIsString, got.ModelIsString)
+			require.Equal(t, tt.wantStream, got.Stream)
+			require.Equal(t, tt.wantStreamExists, got.StreamExists)
+			require.Equal(t, tt.wantStreamIsBool, got.StreamIsBool)
+			require.Equal(t, tt.wantPreviousResponse, got.PreviousResponseID)
+			require.Equal(t, tt.wantPromptCacheKey, got.PromptCacheKey)
+		})
+	}
+}
+
 func TestExtractOpenAIReasoningEffortFromBody(t *testing.T) {
 	tests := []struct {
 		name      string

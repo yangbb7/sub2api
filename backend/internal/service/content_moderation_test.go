@@ -712,6 +712,20 @@ func TestExtractContentModerationInput_OpenAIResponsesCodexPayloadUsesLastUserMe
 	require.NotContains(t, input.Text, "first user prompt")
 }
 
+func TestExtractContentModerationInputFromValidJSONMatchesValidatedPath(t *testing.T) {
+	body := []byte(`{
+		"model":"gpt-5.5",
+		"input":[
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"latest user prompt"}]}
+		]
+	}`)
+
+	validated := ExtractContentModerationInput(ContentModerationProtocolOpenAIResponses, body)
+	trusted := ExtractContentModerationInputFromValidJSON(ContentModerationProtocolOpenAIResponses, body)
+
+	require.Equal(t, validated, trusted)
+}
+
 func TestContentModerationCheck_OpenAIResponsesRecordsNonHitForCodexPayload(t *testing.T) {
 	var moderationRequest moderationAPIRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

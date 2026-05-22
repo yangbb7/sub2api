@@ -195,6 +195,11 @@ func TestOpenAIGatewayService_GenerateSessionHash_Priority(t *testing.T) {
 	if h4 != "" {
 		t.Fatalf("expected empty hash when no signals")
 	}
+
+	// 5) cached prompt_cache_key is used before scanning the body
+	c.Set(OpenAIPromptCacheKey, "ses_cached")
+	h5 := svc.GenerateSessionHash(c, []byte(`{}`))
+	require.Equal(t, fmt.Sprintf("%016x", xxhash.Sum64String("ses_cached")), h5)
 }
 
 func TestOpenAIGatewayService_GenerateSessionHash_UsesXXHash64(t *testing.T) {

@@ -17,11 +17,20 @@ const (
 	OpsUpstreamErrorsKey       = "ops_upstream_errors"
 
 	// Optional stage latencies (milliseconds) for troubleshooting and alerting.
-	OpsAuthLatencyMsKey      = "ops_auth_latency_ms"
-	OpsRoutingLatencyMsKey   = "ops_routing_latency_ms"
-	OpsUpstreamLatencyMsKey  = "ops_upstream_latency_ms"
-	OpsResponseLatencyMsKey  = "ops_response_latency_ms"
-	OpsTimeToFirstTokenMsKey = "ops_time_to_first_token_ms"
+	OpsBodyReadLatencyMsKey               = "ops_body_read_latency_ms"
+	OpsRequestMetaLatencyMsKey            = "ops_request_meta_latency_ms"
+	OpsContentModerationLatencyMsKey      = "ops_content_moderation_latency_ms"
+	OpsImageIntentLatencyMsKey            = "ops_image_intent_latency_ms"
+	OpsChannelMappingLatencyMsKey         = "ops_channel_mapping_latency_ms"
+	OpsFunctionCallValidationLatencyMsKey = "ops_function_call_validation_latency_ms"
+	OpsBillingLatencyMsKey                = "ops_billing_latency_ms"
+	OpsSessionHashLatencyMsKey            = "ops_session_hash_latency_ms"
+	OpsForwardPrepareLatencyMsKey         = "ops_forward_prepare_latency_ms"
+	OpsAuthLatencyMsKey                   = "ops_auth_latency_ms"
+	OpsRoutingLatencyMsKey                = "ops_routing_latency_ms"
+	OpsUpstreamLatencyMsKey               = "ops_upstream_latency_ms"
+	OpsResponseLatencyMsKey               = "ops_response_latency_ms"
+	OpsTimeToFirstTokenMsKey              = "ops_time_to_first_token_ms"
 	// OpenAI WS 关键观测字段
 	OpsOpenAIWSQueueWaitMsKey = "ops_openai_ws_queue_wait_ms"
 	OpsOpenAIWSConnPickMsKey  = "ops_openai_ws_conn_pick_ms"
@@ -39,11 +48,66 @@ const (
 	OpsClientBusinessLimitedReasonIPRestriction = "api_key_ip_restriction"
 )
 
+type OpsLatencyLogField struct {
+	ContextKey string
+	LogField   string
+}
+
+var opsLatencyLogFields = []OpsLatencyLogField{
+	{ContextKey: OpsBodyReadLatencyMsKey, LogField: "body_read_ms"},
+	{ContextKey: OpsRequestMetaLatencyMsKey, LogField: "request_meta_ms"},
+	{ContextKey: OpsContentModerationLatencyMsKey, LogField: "content_moderation_ms"},
+	{ContextKey: OpsImageIntentLatencyMsKey, LogField: "image_intent_ms"},
+	{ContextKey: OpsChannelMappingLatencyMsKey, LogField: "channel_mapping_ms"},
+	{ContextKey: OpsFunctionCallValidationLatencyMsKey, LogField: "function_call_validation_ms"},
+	{ContextKey: OpsBillingLatencyMsKey, LogField: "billing_latency_ms"},
+	{ContextKey: OpsSessionHashLatencyMsKey, LogField: "session_hash_ms"},
+	{ContextKey: OpsForwardPrepareLatencyMsKey, LogField: "forward_prepare_ms"},
+	{ContextKey: OpsAuthLatencyMsKey, LogField: "auth_latency_ms"},
+	{ContextKey: OpsRoutingLatencyMsKey, LogField: "routing_latency_ms"},
+	{ContextKey: OpsUpstreamLatencyMsKey, LogField: "upstream_latency_ms"},
+	{ContextKey: OpsResponseLatencyMsKey, LogField: "response_latency_ms"},
+	{ContextKey: OpsTimeToFirstTokenMsKey, LogField: "time_to_first_token_ms"},
+	{ContextKey: OpsOpenAIWSQueueWaitMsKey, LogField: "openai_ws_queue_wait_ms"},
+	{ContextKey: OpsOpenAIWSConnPickMsKey, LogField: "openai_ws_conn_pick_ms"},
+}
+
+func OpsLatencyLogFields() []OpsLatencyLogField {
+	return opsLatencyLogFields
+}
+
 func SetOpsLatencyMs(c *gin.Context, key string, value int64) {
 	if c == nil || strings.TrimSpace(key) == "" || value < 0 {
 		return
 	}
 	c.Set(key, value)
+}
+
+func GetOpsLatencyMs(c *gin.Context, key string) (int64, bool) {
+	if c == nil || strings.TrimSpace(key) == "" {
+		return 0, false
+	}
+	value, ok := c.Get(key)
+	if !ok {
+		return 0, false
+	}
+	switch v := value.(type) {
+	case int64:
+		return v, v >= 0
+	case int:
+		return int64(v), v >= 0
+	case int32:
+		return int64(v), v >= 0
+	case uint:
+		return int64(v), true
+	case uint64:
+		if v > uint64(^uint64(0)>>1) {
+			return 0, false
+		}
+		return int64(v), true
+	default:
+		return 0, false
+	}
 }
 
 func MarkOpsClientBusinessLimited(c *gin.Context, reason string) {
