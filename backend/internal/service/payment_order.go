@@ -56,8 +56,6 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 	if plan != nil {
 		orderAmount = plan.Price
 		limitAmount = plan.Price
-	} else if req.OrderType == payment.OrderTypeBalance {
-		orderAmount = calculateCreditedBalance(req.Amount, cfg.BalanceRechargeMultiplier)
 	}
 	feeRate := cfg.RechargeFeeRate
 	methodCurrency := payment.DefaultPaymentCurrency
@@ -90,6 +88,9 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 	}
 	if err := validateSelectedCreateOrderAmountCurrency(payAmountStr, sel); err != nil {
 		return nil, err
+	}
+	if plan == nil && req.OrderType == payment.OrderTypeBalance {
+		orderAmount = calculateCreateOrderBalanceCreditAmount(req.Amount, cfg, sel)
 	}
 	oauthResp, err := s.maybeBuildWeChatOAuthRequiredResponseForSelection(ctx, req, limitAmount, payAmount, feeRate, sel)
 	if err != nil {
@@ -168,7 +169,11 @@ func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderReq
 	if err != nil {
 		return nil, err
 	}
-	providerSnapshot := buildPaymentOrderProviderSnapshot(sel, req)
+	creditRateToUSD := 0.0
+	if req.OrderType == payment.OrderTypeBalance {
+		creditRateToUSD = paymentProviderCreditRateToUSD(sel, cfg.BalanceRechargeMultiplier)
+	}
+	providerSnapshot := buildPaymentOrderProviderSnapshot(sel, req, creditRateToUSD)
 	selectedInstanceID := ""
 	selectedProviderKey := ""
 	if sel != nil {
@@ -252,7 +257,7 @@ func (s *PaymentService) checkPendingLimit(ctx context.Context, tx *dbent.Tx, us
 	return nil
 }
 
-func buildPaymentOrderProviderSnapshot(sel *payment.InstanceSelection, req CreateOrderRequest) map[string]any {
+func buildPaymentOrderProviderSnapshot(sel *payment.InstanceSelection, req CreateOrderRequest, creditRateToUSD float64) map[string]any {
 	if sel == nil {
 		return nil
 	}
@@ -305,6 +310,9 @@ func buildPaymentOrderProviderSnapshot(sel *payment.InstanceSelection, req Creat
 	}
 	if providerKey == payment.TypeCoinbase {
 		snapshot["currency"] = paymentProviderConfigCurrency(providerKey, sel.Config)
+	}
+	if req.OrderType == payment.OrderTypeBalance && creditRateToUSD > 0 {
+		snapshot["credit_rate_to_usd"] = creditRateToUSD
 	}
 
 	if len(snapshot) == 1 {

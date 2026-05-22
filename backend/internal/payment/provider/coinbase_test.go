@@ -123,6 +123,18 @@ func TestCoinbaseQueryOrderMapsStatus(t *testing.T) {
 	}
 }
 
+func TestCoinbaseDefaultsCurrencyToUSDC(t *testing.T) {
+	t.Parallel()
+
+	prov, err := NewCoinbase("1", testCoinbaseConfig(t, "", ""))
+	if err != nil {
+		t.Fatalf("NewCoinbase returned error: %v", err)
+	}
+	if got := prov.currency(); got != "USDC" {
+		t.Fatalf("currency = %q, want USDC", got)
+	}
+}
+
 func TestCoinbaseWebhookRejectsStaleSignature(t *testing.T) {
 	raw := `{"id":"chk_123","eventType":"checkout.payment.success","status":"COMPLETED"}`
 	headers := map[string]string{

@@ -51,6 +51,18 @@ describe('PROVIDER_CONFIG_FIELDS.stripe', () => {
   })
 })
 
+describe('PROVIDER_CONFIG_FIELDS creditRateToUsd', () => {
+  it('lets every provider override payment-currency to USD balance credit rate', () => {
+    for (const providerKey of ['easypay', 'alipay', 'wxpay', 'stripe', 'airwallex', 'coinbase']) {
+      const field = findField(providerKey, 'creditRateToUsd')
+
+      expect(field?.sensitive).toBe(false)
+      expect(field?.optional).toBe(true)
+      expect(field?.hintKey).toBe('admin.settings.payment.field_creditRateToUsdHint')
+    }
+  })
+})
+
 describe('PROVIDER_CONFIG_FIELDS.coinbase', () => {
   it('uses hosted crypto checkout credentials and crypto currency options', () => {
     expect(findField('coinbase', 'apiKeyId')?.sensitive).toBe(false)
@@ -62,5 +74,7 @@ describe('PROVIDER_CONFIG_FIELDS.coinbase', () => {
     expect(currency?.defaultValue).toBe('USDC')
     expect(currency?.hintKey).toBe('admin.settings.payment.field_coinbaseCurrencyHint')
     expect(currency?.options).toBe(CRYPTO_PAYMENT_CURRENCY_OPTIONS)
+
+    expect(findField('coinbase', 'creditRateToUsd')?.defaultValue).toBe('1')
   })
 })

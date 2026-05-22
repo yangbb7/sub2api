@@ -107,6 +107,17 @@ export const WEBHOOK_PATHS: Record<string, string> = {
 
 export const RETURN_PATH = '/payment/result'
 
+function creditRateToUsdField(defaultValue?: string): ConfigFieldDef {
+  return {
+    key: 'creditRateToUsd',
+    label: '',
+    sensitive: false,
+    optional: true,
+    defaultValue,
+    hintKey: 'admin.settings.payment.field_creditRateToUsdHint',
+  }
+}
+
 /** Fixed callback paths per provider — displayed as read-only after base URL. */
 export const PROVIDER_CALLBACK_PATHS: Record<string, CallbackPaths> = {
   easypay: { notifyUrl: WEBHOOK_PATHS.easypay, returnUrl: RETURN_PATH },
@@ -124,11 +135,13 @@ export const PROVIDER_CONFIG_FIELDS: Record<string, ConfigFieldDef[]> = {
     { key: 'apiBase', label: '', sensitive: false },
     { key: 'cidAlipay', label: '', sensitive: false, optional: true },
     { key: 'cidWxpay', label: '', sensitive: false, optional: true },
+    creditRateToUsdField(),
   ],
   alipay: [
     { key: 'appId', label: 'App ID', sensitive: false },
     { key: 'privateKey', label: '', sensitive: true },
     { key: 'publicKey', label: '', sensitive: true },
+    creditRateToUsdField(),
   ],
   wxpay: [
     { key: 'appId', label: 'App ID', sensitive: false },
@@ -138,12 +151,14 @@ export const PROVIDER_CONFIG_FIELDS: Record<string, ConfigFieldDef[]> = {
     { key: 'certSerial', label: '', sensitive: false },
     { key: 'publicKey', label: '', sensitive: true },
     { key: 'publicKeyId', label: '', sensitive: false },
+    creditRateToUsdField(),
   ],
   stripe: [
     { key: 'secretKey', label: '', sensitive: true },
     { key: 'publishableKey', label: '', sensitive: false },
     { key: 'webhookSecret', label: '', sensitive: true },
     { key: 'currency', label: '', sensitive: false, defaultValue: 'CNY', hintKey: 'admin.settings.payment.field_paymentCurrencyHint', options: PAYMENT_CURRENCY_OPTIONS },
+    creditRateToUsdField(),
   ],
   airwallex: [
     { key: 'clientId', label: '', sensitive: false },
@@ -153,6 +168,7 @@ export const PROVIDER_CONFIG_FIELDS: Record<string, ConfigFieldDef[]> = {
     { key: 'countryCode', label: '', sensitive: false, defaultValue: 'CN' },
     { key: 'currency', label: '', sensitive: false, defaultValue: 'CNY', hintKey: 'admin.settings.payment.field_paymentCurrencyHint', options: PAYMENT_CURRENCY_OPTIONS },
     { key: 'accountId', label: '', sensitive: false, optional: true, clearable: true, hintKey: 'admin.settings.payment.field_accountIdHint' },
+    creditRateToUsdField(),
   ],
   coinbase: [
     { key: 'apiKeyId', label: '', sensitive: false },
@@ -160,6 +176,7 @@ export const PROVIDER_CONFIG_FIELDS: Record<string, ConfigFieldDef[]> = {
     { key: 'webhookSecret', label: '', sensitive: true },
     { key: 'apiBase', label: '', sensitive: false, defaultValue: 'https://business.coinbase.com/api/v1', hintKey: 'admin.settings.payment.field_coinbaseApiBaseHint' },
     { key: 'currency', label: '', sensitive: false, defaultValue: 'USDC', hintKey: 'admin.settings.payment.field_coinbaseCurrencyHint', options: CRYPTO_PAYMENT_CURRENCY_OPTIONS },
+    creditRateToUsdField('1'),
   ],
 }
 

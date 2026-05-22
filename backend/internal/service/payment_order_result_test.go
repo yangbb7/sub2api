@@ -138,6 +138,61 @@ func TestCalculateCreateOrderPayAmountRejectsFractionalZeroDecimal(t *testing.T)
 	}
 }
 
+func TestCalculateCreateOrderBalanceCreditAmountUsesProviderRate(t *testing.T) {
+	t.Parallel()
+
+	cfg := &PaymentConfig{BalanceRechargeMultiplier: 0.14}
+
+	tests := []struct {
+		name   string
+		amount float64
+		sel    *payment.InstanceSelection
+		want   float64
+	}{
+		{
+			name:   "legacy CNY provider falls back to global CNY to USD rate",
+			amount: 100,
+			sel: &payment.InstanceSelection{
+				ProviderKey: payment.TypeEasyPay,
+				Config:      map[string]string{},
+			},
+			want: 14,
+		},
+		{
+			name:   "coinbase USDC defaults to one to one USD credit",
+			amount: 100,
+			sel: &payment.InstanceSelection{
+				ProviderKey: payment.TypeCoinbase,
+				Config:      map[string]string{"currency": "USDC"},
+			},
+			want: 100,
+		},
+		{
+			name:   "provider explicit credit rate overrides defaults",
+			amount: 100,
+			sel: &payment.InstanceSelection{
+				ProviderKey: payment.TypeCoinbase,
+				Config: map[string]string{
+					"currency":        "USDC",
+					"creditRateToUsd": "0.98",
+				},
+			},
+			want: 98,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := calculateCreateOrderBalanceCreditAmount(tt.amount, cfg, tt.sel)
+			if got != tt.want {
+				t.Fatalf("credit amount = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildPaymentSubjectAppliesAffixToSubscriptionPlanProductName(t *testing.T) {
 	t.Parallel()
 

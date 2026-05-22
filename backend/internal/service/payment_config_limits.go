@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/paymentproviderinstance"
@@ -20,6 +21,7 @@ func (s *PaymentConfigService) GetAvailableMethodLimits(ctx context.Context) (*M
 	if err != nil {
 		return nil, fmt.Errorf("query provider instances: %w", err)
 	}
+	globalCreditRate := s.pcGlobalBalanceCreditRate(ctx)
 	typeInstances := pcGroupByPaymentType(instances)
 	typeInstances = s.pcApplyEnabledVisibleMethodInstances(ctx, typeInstances, instances)
 	resp := &MethodLimitsResponse{
@@ -32,6 +34,11 @@ func (s *PaymentConfigService) GetAvailableMethodLimits(ctx context.Context) (*M
 		}
 		ml := pcAggregateMethodLimits(pt, insts)
 		ml.Currency = currency
+		creditRate, ok := s.pcAggregateMethodCreditRateToUSD(insts, globalCreditRate)
+		if !ok {
+			continue
+		}
+		ml.CreditRateToUSD = creditRate
 		resp.Methods[ml.PaymentType] = ml
 	}
 	resp.GlobalMin, resp.GlobalMax = pcComputeGlobalRange(resp.Methods)
@@ -80,6 +87,7 @@ func (s *PaymentConfigService) GetMethodLimits(ctx context.Context, types []stri
 	if err != nil {
 		return nil, fmt.Errorf("query provider instances: %w", err)
 	}
+	globalCreditRate := s.pcGlobalBalanceCreditRate(ctx)
 	result := make([]MethodLimits, 0, len(types))
 	for _, pt := range types {
 		var matching []*dbent.PaymentProviderInstance
@@ -94,6 +102,11 @@ func (s *PaymentConfigService) GetMethodLimits(ctx context.Context, types []stri
 		}
 		ml := pcAggregateMethodLimits(pt, matching)
 		ml.Currency = currency
+		creditRate, ok := s.pcAggregateMethodCreditRateToUSD(matching, globalCreditRate)
+		if !ok {
+			continue
+		}
+		ml.CreditRateToUSD = creditRate
 		result = append(result, ml)
 	}
 	return result, nil
@@ -147,6 +160,52 @@ func (s *PaymentConfigService) pcAggregateMethodCurrency(instances []*dbent.Paym
 		return payment.DefaultPaymentCurrency, true
 	}
 	return currency, true
+}
+
+func (s *PaymentConfigService) pcAggregateMethodCreditRateToUSD(instances []*dbent.PaymentProviderInstance, globalRate float64) (float64, bool) {
+	rate := 0.0
+	for _, inst := range instances {
+		next := s.pcInstanceCreditRateToUSD(inst, globalRate)
+		if next <= 0 {
+			continue
+		}
+		if rate == 0 {
+			rate = next
+			continue
+		}
+		if math.Abs(rate-next) > 1e-9 {
+			return 0, false
+		}
+	}
+	if rate == 0 {
+		return normalizeBalanceRechargeMultiplier(globalRate), true
+	}
+	return rate, true
+}
+
+func (s *PaymentConfigService) pcInstanceCreditRateToUSD(inst *dbent.PaymentProviderInstance, globalRate float64) float64 {
+	if inst == nil {
+		return normalizeBalanceRechargeMultiplier(globalRate)
+	}
+	cfg := map[string]string{}
+	if s != nil {
+		decrypted, err := s.decryptConfig(inst.Config)
+		if err == nil && decrypted != nil {
+			cfg = decrypted
+		}
+	}
+	return paymentProviderConfigCreditRateToUSD(inst.ProviderKey, cfg, globalRate)
+}
+
+func (s *PaymentConfigService) pcGlobalBalanceCreditRate(ctx context.Context) float64 {
+	if s == nil || s.settingRepo == nil {
+		return defaultBalanceRechargeMultiplier
+	}
+	cfg, err := s.GetPaymentConfig(ctx)
+	if err != nil || cfg == nil {
+		return defaultBalanceRechargeMultiplier
+	}
+	return cfg.BalanceRechargeMultiplier
 }
 
 func (s *PaymentConfigService) pcInstancePaymentCurrency(inst *dbent.PaymentProviderInstance) string {

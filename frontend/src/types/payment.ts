@@ -41,6 +41,7 @@ export interface PaymentConfig {
 
 export interface MethodLimit {
   currency?: string
+  credit_rate_to_usd?: number
   daily_limit: number
   daily_used: number
   daily_remaining: number

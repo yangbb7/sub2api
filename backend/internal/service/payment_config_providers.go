@@ -24,6 +24,9 @@ import (
 // Only validates enabled instances — a disabled instance may be a half-filled
 // draft the admin will complete later.
 func (s *PaymentConfigService) validateProviderConfig(providerKey string, config map[string]string) error {
+	if err := validateProviderCreditRateToUSDConfig(config); err != nil {
+		return err
+	}
 	_, err := provider.CreateProvider(providerKey, "_validate_", config)
 	return err
 }

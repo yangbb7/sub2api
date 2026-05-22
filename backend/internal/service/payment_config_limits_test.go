@@ -222,6 +222,70 @@ func TestPcAggregateMethodCurrency(t *testing.T) {
 	require.Equal(t, payment.DefaultPaymentCurrency, currency)
 }
 
+func TestPcAggregateMethodCreditRateToUSD(t *testing.T) {
+	t.Parallel()
+
+	svc := &PaymentConfigService{}
+
+	easypay := makeInstance(1, payment.TypeEasyPay, payment.TypeAlipay, "")
+	rate, ok := svc.pcAggregateMethodCreditRateToUSD([]*dbent.PaymentProviderInstance{easypay}, 0.14)
+	require.True(t, ok)
+	require.Equal(t, 0.14, rate)
+
+	coinbase := makeInstance(2, payment.TypeCoinbase, payment.TypeCrypto, "")
+	coinbase.Config = `{"currency":"USDC"}`
+	rate, ok = svc.pcAggregateMethodCreditRateToUSD([]*dbent.PaymentProviderInstance{coinbase}, 0.14)
+	require.True(t, ok)
+	require.Equal(t, 1.0, rate)
+
+	discounted := makeInstance(3, payment.TypeCoinbase, payment.TypeCrypto, "")
+	discounted.Config = `{"currency":"USDC","creditRateToUsd":"0.98"}`
+	rate, ok = svc.pcAggregateMethodCreditRateToUSD([]*dbent.PaymentProviderInstance{discounted}, 0.14)
+	require.True(t, ok)
+	require.Equal(t, 0.98, rate)
+
+	rate, ok = svc.pcAggregateMethodCreditRateToUSD([]*dbent.PaymentProviderInstance{coinbase, discounted}, 0.14)
+	require.False(t, ok)
+	require.Zero(t, rate)
+}
+
+func TestGetAvailableMethodLimitsIncludesCreditRateToUSD(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+
+	_, err := client.PaymentProviderInstance.Create().
+		SetProviderKey(payment.TypeEasyPay).
+		SetName("EasyPay Alipay").
+		SetConfig("{}").
+		SetSupportedTypes("alipay").
+		SetEnabled(true).
+		Save(ctx)
+	require.NoError(t, err)
+
+	_, err = client.PaymentProviderInstance.Create().
+		SetProviderKey(payment.TypeCoinbase).
+		SetName("Coinbase USDC").
+		SetConfig(`{"currency":"USDC"}`).
+		SetSupportedTypes("crypto").
+		SetEnabled(true).
+		Save(ctx)
+	require.NoError(t, err)
+
+	svc := &PaymentConfigService{
+		entClient: client,
+		settingRepo: &paymentConfigSettingRepoStub{
+			values: map[string]string{
+				SettingBalanceRechargeMult: "0.14",
+			},
+		},
+	}
+	resp, err := svc.GetAvailableMethodLimits(ctx)
+	require.NoError(t, err)
+
+	require.Equal(t, 0.14, resp.Methods[payment.TypeAlipay].CreditRateToUSD)
+	require.Equal(t, 1.0, resp.Methods[payment.TypeCrypto].CreditRateToUSD)
+}
+
 func TestGetAvailableMethodLimitsOmitsMixedCurrencyMethod(t *testing.T) {
 	ctx := context.Background()
 	client := newPaymentConfigServiceTestClient(t)

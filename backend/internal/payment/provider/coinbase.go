@@ -67,6 +67,9 @@ func NewCoinbase(instanceID string, config map[string]string) (*Coinbase, error)
 		return nil, err
 	}
 	cfg["apiBase"] = apiBase
+	if strings.TrimSpace(cfg["currency"]) == "" {
+		cfg["currency"] = "USDC"
+	}
 	currency, err := payment.NormalizePaymentCurrency(cfg["currency"])
 	if err != nil {
 		return nil, fmt.Errorf("coinbase config currency: %w", err)

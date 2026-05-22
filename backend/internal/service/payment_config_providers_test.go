@@ -258,6 +258,18 @@ func TestCreateProviderInstanceAllowsVisibleMethodProvidersFromDifferentSources(
 	require.NoError(t, err)
 }
 
+func TestValidateProviderConfigRejectsInvalidCreditRateToUSD(t *testing.T) {
+	t.Parallel()
+
+	svc := &PaymentConfigService{}
+	cfg := validEasyPayProviderConfig(t)
+	cfg["creditRateToUsd"] = "0"
+
+	err := svc.validateProviderConfig(payment.TypeEasyPay, cfg)
+	require.Error(t, err)
+	require.Equal(t, "VALIDATION_ERROR", infraerrors.Reason(err))
+}
+
 func TestUpdateProviderInstanceAllowsEnablingVisibleMethodProviderFromDifferentSource(t *testing.T) {
 	t.Parallel()
 
@@ -517,6 +529,15 @@ func TestUpdateProviderInstanceAllowsSafeConfigChangesWhilePendingOrders(t *test
 			updateConfig:  map[string]string{"appId": "alipay-app-test"},
 			fieldName:     "appId",
 			wantValue:     "alipay-app-test",
+		},
+		{
+			name:          "easypay credit rate",
+			providerKey:   payment.TypeEasyPay,
+			createConfig:  validEasyPayProviderConfig,
+			supportedType: []string{payment.TypeAlipay},
+			updateConfig:  map[string]string{"creditRateToUsd": "0.15"},
+			fieldName:     "creditRateToUsd",
+			wantValue:     "0.15",
 		},
 	}
 

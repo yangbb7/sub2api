@@ -23,6 +23,14 @@ func calculateCreditedBalance(paymentAmount, multiplier float64) float64 {
 		InexactFloat64()
 }
 
+func calculateCreateOrderBalanceCreditAmount(paymentAmount float64, cfg *PaymentConfig, sel *payment.InstanceSelection) float64 {
+	globalRate := defaultBalanceRechargeMultiplier
+	if cfg != nil {
+		globalRate = cfg.BalanceRechargeMultiplier
+	}
+	return calculateCreditedBalance(paymentAmount, paymentProviderCreditRateToUSD(sel, globalRate))
+}
+
 func calculateGatewayRefundAmount(orderAmount, payAmount, refundAmount float64, currency string) float64 {
 	if orderAmount <= 0 || payAmount <= 0 || refundAmount <= 0 {
 		return 0

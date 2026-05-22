@@ -1,3 +1,4 @@
+import { nextTick } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import PaymentView from '../PaymentView.vue'
@@ -414,5 +415,53 @@ describe('PaymentView WeChat JSAPI flow', () => {
     expect(showWarning).toHaveBeenCalledWith('payment.errors.mobilePaymentFallbackToQr')
     expect(showError).not.toHaveBeenCalled()
     expect(window.localStorage.getItem(PAYMENT_RECOVERY_STORAGE_KEY)).toContain('weixin://wxpay/bizpayurl?pr=fallback-native')
+  })
+
+  it('previews credited USD with the selected payment method credit rate', async () => {
+    routeState.query = {}
+    getCheckoutInfo.mockResolvedValue({
+      data: {
+        ...checkoutInfoFixture().data,
+        methods: {
+          crypto: {
+            daily_limit: 0,
+            daily_used: 0,
+            daily_remaining: 0,
+            single_min: 0,
+            single_max: 0,
+            fee_rate: 0,
+            available: true,
+            currency: 'USDC',
+            credit_rate_to_usd: 1,
+          },
+        },
+        balance_recharge_multiplier: 0.14,
+      },
+    })
+
+    const wrapper = shallowMount(PaymentView, {
+      global: {
+        renderStubDefaultSlot: true,
+        stubs: {
+          Teleport: true,
+          Transition: false,
+        },
+      },
+    })
+    await flushPromises()
+    await flushPromises()
+    Object.assign(wrapper.vm as unknown as {
+      loading: boolean
+      amount: number
+      selectedMethod: string
+    }, {
+      loading: false,
+      amount: 100,
+      selectedMethod: 'crypto',
+    })
+    await nextTick()
+
+    expect(wrapper.text()).toContain('payment.creditedBalance')
+    expect(wrapper.text()).toContain('$100.00')
   })
 })
