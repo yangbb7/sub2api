@@ -1,6 +1,8 @@
 // Package claude provides constants and helpers for Claude API integration.
 package claude
 
+import "strings"
+
 // Claude Code 客户端相关常量
 
 // Beta header 常量
@@ -173,6 +175,20 @@ var ModelIDOverrides = map[string]string{
 	"claude-haiku-4-5":  "claude-haiku-4-5-20251001",
 }
 
+// DisplayModelIDOverrides maps UI-style Claude model names to protocol IDs.
+// Keep this separate from ModelIDOverrides: OAuth forwarding needs dated IDs,
+// while Antigravity routes use the undated protocol IDs below.
+var DisplayModelIDOverrides = map[string]string{
+	"claude-opus-4.7":            "claude-opus-4-7",
+	"claude-opus-4.6":            "claude-opus-4-6",
+	"claude-opus-4.5":            "claude-opus-4-5",
+	"claude-opus-4.5-thinking":   "claude-opus-4-5-thinking",
+	"claude-sonnet-4.6":          "claude-sonnet-4-6",
+	"claude-sonnet-4.5":          "claude-sonnet-4-5",
+	"claude-sonnet-4.5-thinking": "claude-sonnet-4-5-thinking",
+	"claude-haiku-4.5":           "claude-haiku-4-5",
+}
+
 // ModelIDReverseOverrides 用于将上游模型 ID 还原为短名
 var ModelIDReverseOverrides = map[string]string{
 	"claude-sonnet-4-5-20250929": "claude-sonnet-4-5",
@@ -189,6 +205,19 @@ func NormalizeModelID(id string) string {
 		return mapped
 	}
 	return id
+}
+
+// NormalizeDisplayModelID converts Claude display-style model IDs into the
+// canonical IDs used by routing and model mappings.
+func NormalizeDisplayModelID(id string) string {
+	trimmed := strings.TrimSpace(id)
+	if trimmed == "" {
+		return trimmed
+	}
+	if mapped, ok := DisplayModelIDOverrides[trimmed]; ok {
+		return mapped
+	}
+	return trimmed
 }
 
 // DenormalizeModelID 将上游模型 ID 转换为短名

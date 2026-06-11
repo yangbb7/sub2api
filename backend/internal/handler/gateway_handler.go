@@ -158,6 +158,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return
 	}
+	platform := gatewayRequestPlatform(c, apiKey)
+	if platform == service.PlatformAntigravity {
+		body = normalizeAntigravityClaudeModelRequest(body, parsedReq)
+	}
 	reqModel := parsedReq.Model
 	reqStream := parsedReq.Stream
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
@@ -277,13 +281,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		zap.String("metadata_user_id_raw", parsedReq.MetadataUserID),
 	)
 
-	// 获取平台：优先使用强制平台（/antigravity 路由，中间件已设置 request.Context），否则使用分组平台
-	platform := ""
-	if forcePlatform, ok := middleware2.GetForcePlatformFromContext(c); ok {
-		platform = forcePlatform
-	} else if apiKey.Group != nil {
-		platform = apiKey.Group.Platform
-	}
 	sessionKey := sessionHash
 	if platform == service.PlatformGemini && sessionHash != "" {
 		sessionKey = "gemini:" + sessionHash
@@ -1546,6 +1543,10 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return
 	}
+	platform := gatewayRequestPlatform(c, apiKey)
+	if platform == service.PlatformAntigravity {
+		body = normalizeAntigravityClaudeModelRequest(body, parsedReq)
+	}
 	// count_tokens 走 messages 严格校验时，复用已解析请求，避免二次反序列化。
 	SetClaudeCodeClientContext(c, body, parsedReq)
 	reqLog = reqLog.With(zap.String("model", parsedReq.Model), zap.Bool("stream", parsedReq.Stream))
@@ -1599,6 +1600,31 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		// 错误响应已在 ForwardCountTokens 中处理
 		return
 	}
+}
+
+func gatewayRequestPlatform(c *gin.Context, apiKey *service.APIKey) string {
+	if forcePlatform, ok := middleware2.GetForcePlatformFromContext(c); ok {
+		return forcePlatform
+	}
+	if apiKey != nil && apiKey.Group != nil {
+		return apiKey.Group.Platform
+	}
+	return ""
+}
+
+func normalizeAntigravityClaudeModelRequest(body []byte, parsedReq *service.ParsedRequest) []byte {
+	if parsedReq == nil {
+		return body
+	}
+	normalizedModel := claude.NormalizeDisplayModelID(parsedReq.Model)
+	if normalizedModel == parsedReq.Model {
+		parsedReq.Body = body
+		return body
+	}
+	parsedReq.Model = normalizedModel
+	body = service.ReplaceModelInBody(body, normalizedModel)
+	parsedReq.Body = body
+	return body
 }
 
 // InterceptType 表示请求拦截类型

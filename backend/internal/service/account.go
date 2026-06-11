@@ -14,6 +14,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 )
 
 type Account struct {
@@ -576,6 +577,9 @@ func normalizeRequestedModelForLookup(platform, requestedModel string) string {
 	}
 	if platform != PlatformGemini && platform != PlatformAntigravity {
 		return trimmed
+	}
+	if platform == PlatformAntigravity {
+		trimmed = claude.NormalizeDisplayModelID(trimmed)
 	}
 	if trimmed == "gemini-3.1-pro-preview-customtools" {
 		return "gemini-3.1-pro-preview"

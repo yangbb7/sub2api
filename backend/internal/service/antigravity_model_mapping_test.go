@@ -51,6 +51,18 @@ func TestAntigravityGatewayService_GetMappedModel(t *testing.T) {
 			expected:       "claude-opus-4-6-thinking",
 		},
 		{
+			name:           "展示别名 - claude-opus-4.7 → claude-opus-4-6-thinking",
+			requestedModel: "claude-opus-4.7",
+			accountMapping: nil,
+			expected:       "claude-opus-4-6-thinking",
+		},
+		{
+			name:           "展示别名 - claude-sonnet-4.6 透传",
+			requestedModel: "claude-sonnet-4.6",
+			accountMapping: nil,
+			expected:       "claude-sonnet-4-6",
+		},
+		{
 			name:           "默认映射 - claude-opus-4-5-20251101 → claude-opus-4-6-thinking",
 			requestedModel: "claude-opus-4-5-20251101",
 			accountMapping: nil,
@@ -279,6 +291,12 @@ func TestMapAntigravityModel_WildcardTargetEqualsRequest(t *testing.T) {
 			modelMapping:   map[string]any{"gemini-3.1-pro-preview": "gemini-3.1-pro-high"},
 			requestedModel: "gemini-3.1-pro-preview-customtools",
 			expected:       "gemini-3.1-pro-high",
+		},
+		{
+			name:           "claude display alias falls back to canonical mapping",
+			modelMapping:   map[string]any{"claude-opus-4-7": "claude-opus-4-6-thinking"},
+			requestedModel: "claude-opus-4.7",
+			expected:       "claude-opus-4-6-thinking",
 		},
 	}
 
