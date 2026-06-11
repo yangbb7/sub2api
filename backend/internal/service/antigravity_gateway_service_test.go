@@ -246,6 +246,7 @@ func TestAntigravityGatewayService_Forward_PromptTooLong(t *testing.T) {
 		Concurrency: 1,
 		Credentials: map[string]any{
 			"access_token": "token",
+			"project_id":   "test-project",
 		},
 	}
 
@@ -304,6 +305,7 @@ func TestAntigravityGatewayService_Forward_ModelRateLimitTriggersFailover(t *tes
 		Concurrency: 1,
 		Credentials: map[string]any{
 			"access_token": "token",
+			"project_id":   "test-project",
 		},
 		Extra: map[string]any{
 			modelRateLimitsKey: map[string]any{
@@ -324,6 +326,106 @@ func TestAntigravityGatewayService_Forward_ModelRateLimitTriggersFailover(t *tes
 	require.Equal(t, http.StatusServiceUnavailable, failoverErr.StatusCode)
 	// 非粘性会话请求，ForceCacheBilling 应为 false
 	require.False(t, failoverErr.ForceCacheBilling, "ForceCacheBilling should be false for non-sticky session")
+}
+
+func TestAntigravityGatewayService_Forward_MissingProjectIDTriggersFailover(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	writer := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(writer)
+
+	body, err := json.Marshal(map[string]any{
+		"model":      "claude-sonnet-4-5",
+		"messages":   []map[string]string{{"role": "user", "content": "hi"}},
+		"max_tokens": 1,
+		"stream":     false,
+	})
+	require.NoError(t, err)
+
+	c.Request = httptest.NewRequest(http.MethodPost, "/antigravity/v1/messages", bytes.NewReader(body))
+
+	upstream := &queuedHTTPUpstreamStub{}
+	svc := &AntigravityGatewayService{
+		tokenProvider: &AntigravityTokenProvider{},
+		httpUpstream:  upstream,
+	}
+
+	account := &Account{
+		ID:          11,
+		Name:        "missing-project",
+		Platform:    PlatformAntigravity,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token": "token",
+			"model_mapping": map[string]any{
+				"claude-sonnet-4-5": "claude-sonnet-4-5",
+			},
+		},
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, body, false)
+	require.Nil(t, result)
+
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusNotFound, failoverErr.StatusCode)
+	require.Contains(t, string(failoverErr.ResponseBody), "project_id is missing")
+	require.Empty(t, upstream.requestBodies, "missing project_id must not call Antigravity upstream")
+}
+
+func TestAntigravityGatewayService_Forward_UpstreamNotFoundTriggersFailover(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	writer := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(writer)
+
+	body, err := json.Marshal(map[string]any{
+		"model":      "claude-sonnet-4-5",
+		"messages":   []map[string]string{{"role": "user", "content": "hi"}},
+		"max_tokens": 1,
+		"stream":     false,
+	})
+	require.NoError(t, err)
+
+	c.Request = httptest.NewRequest(http.MethodPost, "/antigravity/v1/messages", bytes.NewReader(body))
+
+	respBody := []byte(`{"error":{"code":404,"message":"Requested entity was not found.","status":"NOT_FOUND"}}`)
+	upstream := &queuedHTTPUpstreamStub{
+		responses: []*http.Response{{
+			StatusCode: http.StatusNotFound,
+			Header:     http.Header{"X-Request-Id": []string{"req-not-found"}},
+			Body:       io.NopCloser(bytes.NewReader(respBody)),
+		}},
+	}
+	svc := &AntigravityGatewayService{
+		tokenProvider: &AntigravityTokenProvider{},
+		httpUpstream:  upstream,
+	}
+
+	account := &Account{
+		ID:          12,
+		Name:        "project-not-found",
+		Platform:    PlatformAntigravity,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token": "token",
+			"project_id":   "stale-project",
+			"model_mapping": map[string]any{
+				"claude-sonnet-4-5": "claude-sonnet-4-5",
+			},
+		},
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, body, false)
+	require.Nil(t, result)
+
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusNotFound, failoverErr.StatusCode)
+	require.Equal(t, respBody, failoverErr.ResponseBody)
+	require.Empty(t, writer.Body.String(), "failover should not write a terminal client response")
 }
 
 // TestAntigravityGatewayService_ForwardGemini_ModelRateLimitTriggersFailover
@@ -360,6 +462,7 @@ func TestAntigravityGatewayService_ForwardGemini_ModelRateLimitTriggersFailover(
 		Concurrency: 1,
 		Credentials: map[string]any{
 			"access_token": "token",
+			"project_id":   "test-project",
 		},
 		Extra: map[string]any{
 			modelRateLimitsKey: map[string]any{
@@ -414,6 +517,7 @@ func TestAntigravityGatewayService_Forward_StickySessionForceCacheBilling(t *tes
 		Concurrency: 1,
 		Credentials: map[string]any{
 			"access_token": "token",
+			"project_id":   "test-project",
 		},
 		Extra: map[string]any{
 			modelRateLimitsKey: map[string]any{
@@ -469,6 +573,7 @@ func TestAntigravityGatewayService_ForwardGemini_StickySessionForceCacheBilling(
 		Concurrency: 1,
 		Credentials: map[string]any{
 			"access_token": "token",
+			"project_id":   "test-project",
 		},
 		Extra: map[string]any{
 			modelRateLimitsKey: map[string]any{
@@ -534,6 +639,7 @@ func TestAntigravityGatewayService_Forward_BillsWithMappedModel(t *testing.T) {
 		Concurrency: 1,
 		Credentials: map[string]any{
 			"access_token": "token",
+			"project_id":   "test-project",
 			"model_mapping": map[string]any{
 				"claude-sonnet-4-5": mappedModel,
 			},
@@ -587,6 +693,7 @@ func TestAntigravityGatewayService_ForwardGemini_BillsWithMappedModel(t *testing
 		Concurrency: 1,
 		Credentials: map[string]any{
 			"access_token": "token",
+			"project_id":   "test-project",
 			"model_mapping": map[string]any{
 				"gemini-2.5-flash": mappedModel,
 			},
@@ -658,6 +765,7 @@ func TestAntigravityGatewayService_ForwardGemini_RetriesCorruptedThoughtSignatur
 		Concurrency: 1,
 		Credentials: map[string]any{
 			"access_token": "token",
+			"project_id":   "test-project",
 			"model_mapping": map[string]any{
 				originalModel: mappedModel,
 			},
@@ -716,6 +824,7 @@ func TestAntigravityGatewayService_ForwardGemini_SignatureRetryPropagatesFailove
 		Concurrency: 1,
 		Credentials: map[string]any{
 			"access_token": "token",
+			"project_id":   "test-project",
 			"model_mapping": map[string]any{
 				originalModel: mappedModel,
 			},

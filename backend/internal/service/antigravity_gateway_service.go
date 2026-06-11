@@ -1033,6 +1033,9 @@ func (s *AntigravityGatewayService) TestConnection(ctx context.Context, account 
 
 	// 获取 project_id（部分账户类型可能没有）
 	projectID := strings.TrimSpace(account.GetCredential("project_id"))
+	if projectID == "" {
+		return nil, errors.New("missing project_id for Antigravity OAuth account")
+	}
 
 	// 模型映射
 	mappedModel := s.getMappedModel(account, modelID)
@@ -1383,6 +1386,9 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 
 	// 获取 project_id（部分账户类型可能没有）
 	projectID := strings.TrimSpace(account.GetCredential("project_id"))
+	if projectID == "" {
+		return nil, missingAntigravityProjectIDFailoverError()
+	}
 
 	// 代理 URL
 	proxyURL := ""
@@ -1705,7 +1711,7 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 				}
 			}
 
-			if s.shouldFailoverUpstreamError(resp.StatusCode) {
+			if s.shouldFailoverUpstreamError(resp.StatusCode, respBody) {
 				upstreamMsg := strings.TrimSpace(extractAntigravityErrorMessage(respBody))
 				upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 				upstreamDetail := s.getUpstreamErrorDetail(respBody)
@@ -2130,6 +2136,9 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 
 	// 获取 project_id（部分账户类型可能没有）
 	projectID := strings.TrimSpace(account.GetCredential("project_id"))
+	if projectID == "" {
+		return nil, missingAntigravityProjectIDFailoverError()
+	}
 
 	// 代理 URL
 	proxyURL := ""
@@ -2377,7 +2386,7 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: unwrappedForOps, RetryableOnSameAccount: true}
 		}
 
-		if s.shouldFailoverUpstreamError(resp.StatusCode) {
+		if s.shouldFailoverUpstreamError(resp.StatusCode, unwrappedForOps) {
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,
 				AccountID:          account.ID,
@@ -2465,12 +2474,21 @@ handleSuccess:
 	}, nil
 }
 
-func (s *AntigravityGatewayService) shouldFailoverUpstreamError(statusCode int) bool {
+func (s *AntigravityGatewayService) shouldFailoverUpstreamError(statusCode int, body []byte) bool {
 	switch statusCode {
 	case 401, 403, 429, 529:
 		return true
+	case http.StatusNotFound:
+		return isModelNotFoundError(statusCode, body)
 	default:
 		return statusCode >= 500
+	}
+}
+
+func missingAntigravityProjectIDFailoverError() *UpstreamFailoverError {
+	return &UpstreamFailoverError{
+		StatusCode:   http.StatusNotFound,
+		ResponseBody: []byte(`{"error":{"code":404,"message":"Antigravity project_id is missing","status":"NOT_FOUND"}}`),
 	}
 }
 
