@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -98,6 +99,56 @@ func TestSettingService_GetPublicSettings_UsesNeutralSiteFallback(t *testing.T) 
 	require.NoError(t, err)
 	require.Equal(t, "AI Gateway", settings.SiteName)
 	require.NotContains(t, settings.SiteName, "Sub2API")
+}
+
+func TestSettingService_GetPublicSettings_ExposesDefaultSecurityPrivacyDocument(t *testing.T) {
+	svc := NewSettingService(&settingPublicRepoStub{values: map[string]string{}}, &config.Config{})
+
+	settings, err := svc.GetPublicSettings(context.Background())
+	require.NoError(t, err)
+
+	require.Contains(t, settings.LoginAgreementDocuments, LoginAgreementDocument{
+		ID:        "security-privacy",
+		Title:     "安全与隐私声明",
+		ContentMD: defaultSecurityPrivacyContentMD,
+	})
+}
+
+func TestSettingService_GetPublicSettings_BackfillsLegacyBlankAgreementDocuments(t *testing.T) {
+	raw, err := json.Marshal(legacyBlankLoginAgreementDocuments())
+	require.NoError(t, err)
+	svc := NewSettingService(&settingPublicRepoStub{
+		values: map[string]string{
+			SettingKeyLoginAgreementDocuments: string(raw),
+		},
+	}, &config.Config{})
+
+	settings, err := svc.GetPublicSettings(context.Background())
+	require.NoError(t, err)
+
+	require.Contains(t, settings.LoginAgreementDocuments, LoginAgreementDocument{
+		ID:        "security-privacy",
+		Title:     "安全与隐私声明",
+		ContentMD: defaultSecurityPrivacyContentMD,
+	})
+}
+
+func TestSettingService_GetPublicSettings_PreservesCustomAgreementDocuments(t *testing.T) {
+	customDocs := []LoginAgreementDocument{
+		{ID: "privacy", Title: "隐私政策", ContentMD: "自定义内容"},
+	}
+	raw, err := json.Marshal(customDocs)
+	require.NoError(t, err)
+	svc := NewSettingService(&settingPublicRepoStub{
+		values: map[string]string{
+			SettingKeyLoginAgreementDocuments: string(raw),
+		},
+	}, &config.Config{})
+
+	settings, err := svc.GetPublicSettings(context.Background())
+	require.NoError(t, err)
+
+	require.Equal(t, customDocs, settings.LoginAgreementDocuments)
 }
 
 func TestSettingService_GetPublicSettings_ExposesWeChatOAuthModeCapabilities(t *testing.T) {

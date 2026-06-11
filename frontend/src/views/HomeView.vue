@@ -381,6 +381,13 @@
           >
             {{ t('home.docs') }}
           </a>
+          <RouterLink
+            v-if="securityStatementPath"
+            :to="securityStatementPath"
+            class="text-sm text-gray-500 transition-colors hover:text-gray-700 dark:text-dark-400 dark:hover:text-white"
+          >
+            {{ t('home.securityStatement') }}
+          </RouterLink>
           <a
             v-if="githubUrl"
             :href="githubUrl"
@@ -420,6 +427,11 @@ const siteLogo = computed(() => sanitizeUrl(appStore.cachedPublicSettings?.site_
 const siteSubtitle = computed(() => appStore.cachedPublicSettings?.site_subtitle || DEFAULT_SITE_SUBTITLE)
 const docUrl = computed(() => appStore.cachedPublicSettings?.doc_url || appStore.docUrl || '')
 const homeContent = computed(() => appStore.cachedPublicSettings?.home_content || '')
+const securityStatementPath = computed(() => {
+  const documents = appStore.cachedPublicSettings?.login_agreement_documents || []
+  const doc = documents.find((item) => item.id === 'security-privacy')
+  return doc ? `/legal/${doc.id}` : ''
+})
 
 // Check if homeContent is a URL (for iframe display)
 const sanitizedHomeUrl = computed(() => sanitizeUrl(homeContent.value))

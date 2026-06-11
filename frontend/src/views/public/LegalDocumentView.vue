@@ -62,7 +62,9 @@
               <Icon :name="documentIcon" size="md" />
             </span>
             <div class="min-w-0">
-              <p class="text-sm font-medium text-primary-700 dark:text-primary-300">登录条款</p>
+              <p class="text-sm font-medium text-primary-700 dark:text-primary-300">
+                {{ documentEyebrow }}
+              </p>
               <h1 class="mt-2 break-words text-2xl font-bold tracking-normal text-gray-950 dark:text-white sm:text-3xl">
                 {{ currentDocument.title }}
               </h1>
@@ -132,6 +134,16 @@ const currentDocument = computed<LoginAgreementDocument | null>(() => {
 })
 
 const hasContent = computed(() => Boolean(currentDocument.value?.content_md?.trim()))
+
+const documentEyebrow = computed(() => {
+  if (currentDocument.value?.id === 'security-privacy') {
+    return '安全与隐私声明'
+  }
+  if (currentDocument.value) {
+    return '公开文档'
+  }
+  return '登录条款'
+})
 
 const renderedHtml = computed(() => {
   const content = currentDocument.value?.content_md?.trim() || ''

@@ -5,6 +5,7 @@ package server_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"math"
@@ -682,10 +683,10 @@ func TestAPIContracts(t *testing.T) {
 						"login_agreement_mode": "modal",
 						"login_agreement_updated_at": "2026-03-31",
 						"login_agreement_documents": [
-							{"id": "terms", "title": "服务条款", "content_md": ""},
-							{"id": "usage-policy", "title": "使用政策", "content_md": ""},
-							{"id": "supported-regions", "title": "支持的国家和地区", "content_md": ""},
-							{"id": "service-specific-terms", "title": "服务特定条款", "content_md": ""}
+							{"id": "terms", "title": "服务条款", "content_md": "__non_empty__"},
+							{"id": "usage-policy", "title": "使用政策", "content_md": "__non_empty__"},
+							{"id": "supported-regions", "title": "支持的国家和地区", "content_md": "__non_empty__"},
+							{"id": "security-privacy", "title": "安全与隐私声明", "content_md": "__non_empty__"}
 						],
 						"smtp_host": "smtp.example.com",
 						"smtp_port": 587,
@@ -944,10 +945,10 @@ func TestAPIContracts(t *testing.T) {
 						"login_agreement_mode": "modal",
 						"login_agreement_updated_at": "2026-03-31",
 						"login_agreement_documents": [
-							{"id": "terms", "title": "服务条款", "content_md": ""},
-							{"id": "usage-policy", "title": "使用政策", "content_md": ""},
-							{"id": "supported-regions", "title": "支持的国家和地区", "content_md": ""},
-							{"id": "service-specific-terms", "title": "服务特定条款", "content_md": ""}
+							{"id": "terms", "title": "服务条款", "content_md": "__non_empty__"},
+							{"id": "usage-policy", "title": "使用政策", "content_md": "__non_empty__"},
+							{"id": "supported-regions", "title": "支持的国家和地区", "content_md": "__non_empty__"},
+							{"id": "security-privacy", "title": "安全与隐私声明", "content_md": "__non_empty__"}
 						],
 						"smtp_host": "",
 						"smtp_port": 587,
@@ -1186,8 +1187,59 @@ func TestAPIContracts(t *testing.T) {
 
 			status, body := doRequest(t, deps.router, tt.method, tt.path, tt.body, tt.headers)
 			require.Equal(t, tt.wantStatus, status)
-			require.JSONEq(t, tt.wantJSON, body)
+			require.JSONEq(t, normalizeContractJSON(t, tt.wantJSON), normalizeContractJSON(t, body))
 		})
+	}
+}
+
+const nonEmptyContentSentinel = "__non_empty__"
+
+func normalizeContractJSON(t *testing.T, raw string) string {
+	t.Helper()
+
+	var payload any
+	require.NoError(t, json.Unmarshal([]byte(raw), &payload))
+
+	normalizeLoginAgreementDocumentContent(payload)
+
+	out, err := json.Marshal(payload)
+	require.NoError(t, err)
+	return string(out)
+}
+
+func normalizeLoginAgreementDocumentContent(value any) {
+	switch typed := value.(type) {
+	case map[string]any:
+		if docs, ok := typed["login_agreement_documents"].([]any); ok {
+			for _, item := range docs {
+				doc, ok := item.(map[string]any)
+				if !ok {
+					continue
+				}
+				id, _ := doc["id"].(string)
+				content, _ := doc["content_md"].(string)
+				if isDefaultLoginAgreementDocumentID(id) && content != "" {
+					doc["content_md"] = nonEmptyContentSentinel
+				}
+			}
+		}
+
+		for _, child := range typed {
+			normalizeLoginAgreementDocumentContent(child)
+		}
+	case []any:
+		for _, child := range typed {
+			normalizeLoginAgreementDocumentContent(child)
+		}
+	}
+}
+
+func isDefaultLoginAgreementDocumentID(id string) bool {
+	switch id {
+	case "terms", "usage-policy", "supported-regions", "security-privacy":
+		return true
+	default:
+		return false
 	}
 }
 

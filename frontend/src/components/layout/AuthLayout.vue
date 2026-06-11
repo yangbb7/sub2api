@@ -50,8 +50,15 @@
           <slot name="footer" />
         </div>
 
-        <div class="mt-8 text-center text-xs text-gray-400 dark:text-dark-500">
-          &copy; {{ currentYear }} {{ siteName }}. All rights reserved.
+        <div class="mt-8 space-y-2 text-center text-xs text-gray-400 dark:text-dark-500">
+          <router-link
+            v-if="securityStatementPath"
+            :to="securityStatementPath"
+            class="inline-flex font-medium transition-colors hover:text-primary-600 dark:hover:text-primary-300"
+          >
+            {{ t('home.securityStatement') }}
+          </router-link>
+          <div>&copy; {{ currentYear }} {{ siteName }}. All rights reserved.</div>
         </div>
       </div>
     </div>
@@ -60,17 +67,24 @@
 
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores'
 import { sanitizeUrl } from '@/utils/url'
 import { DEFAULT_LOGO_URL, DEFAULT_SITE_NAME, DEFAULT_SITE_SUBTITLE } from '@/constants/branding'
 
 const appStore = useAppStore()
+const { t } = useI18n()
 
 const siteName = computed(() => appStore.siteName || DEFAULT_SITE_NAME)
 const siteLogo = computed(() => sanitizeUrl(appStore.siteLogo || '', { allowRelative: true, allowDataUrl: true }))
 const siteSubtitle = computed(() => appStore.cachedPublicSettings?.site_subtitle || DEFAULT_SITE_SUBTITLE)
 
 const currentYear = computed(() => new Date().getFullYear())
+const securityStatementPath = computed(() => {
+  const documents = appStore.cachedPublicSettings?.login_agreement_documents || []
+  const doc = documents.find((item) => item.id === 'security-privacy')
+  return doc ? `/legal/${doc.id}` : ''
+})
 
 onMounted(() => {
   appStore.fetchPublicSettings()
