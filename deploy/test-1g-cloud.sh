@@ -20,6 +20,8 @@ need awk
 echo "Checking shell syntax..."
 bash -n \
   "${DEPLOY_DIR}/deploy-1g.sh" \
+  "${DEPLOY_DIR}/deploy.sh" \
+  "${DEPLOY_DIR}/rollback.sh" \
   "${DEPLOY_DIR}/doctor-1g.sh" \
   "${DEPLOY_DIR}/check-1g.sh" \
   "${DEPLOY_DIR}/restore-1g-config.sh" \
@@ -31,6 +33,7 @@ bash -n \
   "${DEPLOY_DIR}/cloudflare-upsert-dns.sh" \
   "${DEPLOY_DIR}/test-doctor-1g.sh" \
   "${DEPLOY_DIR}/test-cloudflare-upsert-dns.sh" \
+  "${DEPLOY_DIR}/test-simple-prod-scripts.sh" \
   "${DEPLOY_DIR}/test-probe-frontend.sh" \
   "${DEPLOY_DIR}/test-remote-1g-preflight.sh" \
   "${DEPLOY_DIR}/test-remote-1g-bootstrap.sh" \
@@ -382,10 +385,8 @@ wrapper_output="$(
   DRY_RUN=true \
     "${DEPLOY_DIR}/huana-1g-deploy.sh" 2>&1
 )"
-if ! printf '%s\n' "${wrapper_output}" | grep -q 'Would run: ENV_FILE=' ||
-  ! printf '%s\n' "${wrapper_output}" | grep -q 'Would run: DEPLOY_MODE=preflight' ||
-  ! printf '%s\n' "${wrapper_output}" | grep -q 'Would run: DEPLOY_MODE=deploy' ||
-  ! printf '%s\n' "${wrapper_output}" | grep -q 'Would run: ENV_FILE=.*/verify-live-1g.sh' ||
+if ! printf '%s\n' "${wrapper_output}" | grep -q 'DEPRECATED' ||
+  ! printf '%s\n' "${wrapper_output}" | grep -q 'Would run: deploy/deploy.sh' ||
   printf '%s\n' "${wrapper_output}" | grep -q 'secret_ssh_password\|secret_cloudflare_token'; then
   echo "Huana deploy wrapper dry run output is incorrect or leaked secrets" >&2
   printf '%s\n' "${wrapper_output}" >&2
@@ -418,6 +419,9 @@ MIN_DOCKER_FREE_KB=1 \
 
 echo "Running 1G doctor validation tests..."
 "${DEPLOY_DIR}/test-doctor-1g.sh"
+
+echo "Running simple production deploy/rollback script tests..."
+"${DEPLOY_DIR}/test-simple-prod-scripts.sh"
 
 echo "Running Cloudflare DNS mock tests..."
 "${DEPLOY_DIR}/test-cloudflare-upsert-dns.sh"
