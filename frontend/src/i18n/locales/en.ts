@@ -111,14 +111,6 @@ export default {
     }
   },
 
-  securityStatementModal: {
-    title: 'Security & Privacy Statement',
-    noticeTitle: 'Please review this security and privacy statement before continuing.',
-    noticeBody: 'The platform processes account details, API keys, balance, usage, and necessary audit data. API requests are routed to upstream model services according to gateway rules.',
-    openFullStatement: 'Open full statement',
-    acknowledge: 'I understand, continue'
-  },
-
   // Key Usage Query Page
   keyUsage: {
     title: 'API Key Usage',
