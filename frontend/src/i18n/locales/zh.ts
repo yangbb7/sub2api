@@ -111,6 +111,13 @@ export default {
     }
   },
 
+  securityStatementModal: {
+    title: '安全与隐私声明',
+    summary: '使用本服务前，请确认你已了解请求转发、数据处理和合规使用要求。',
+    openFullStatement: '查看完整声明',
+    acknowledge: '我已了解，继续'
+  },
+
   // Key Usage Query Page
   keyUsage: {
     title: 'API Key 用量查询',

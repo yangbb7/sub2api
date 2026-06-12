@@ -111,6 +111,13 @@ export default {
     }
   },
 
+  securityStatementModal: {
+    title: 'Security and Privacy Statement',
+    summary: 'Before using this service, please review how requests are forwarded, how data is handled, and what compliant use requires.',
+    openFullStatement: 'View full statement',
+    acknowledge: 'I understand, continue'
+  },
+
   // Key Usage Query Page
   keyUsage: {
     title: 'API Key Usage',
