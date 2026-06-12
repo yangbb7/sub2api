@@ -111,6 +111,14 @@ export default {
     }
   },
 
+  securityStatementModal: {
+    title: '安全与隐私声明',
+    noticeTitle: '继续使用前，请先阅读这份安全与隐私说明。',
+    noticeBody: '平台会处理账号、API Key、余额、用量和必要审计数据；API 请求会按调度规则转发到上游模型服务。',
+    openFullStatement: '打开完整声明页面',
+    acknowledge: '我已了解，继续使用'
+  },
+
   // Key Usage Query Page
   keyUsage: {
     title: 'API Key 用量查询',
