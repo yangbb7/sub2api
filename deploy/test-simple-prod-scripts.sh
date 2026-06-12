@@ -61,6 +61,12 @@ assert_contains "${DEPLOY_SCRIPT}" 'caddy reload' \
   "deploy.sh must hot-reload Caddy instead of recreating it"
 assert_contains "${DEPLOY_SCRIPT}" 'https://\$\{DOMAIN\}/v1/responses' \
   "deploy.sh must verify /v1/responses is not a Cloudflare 521"
+assert_contains "${DEPLOY_SCRIPT}" 'HEALTH_MIN_SUCCESS' \
+  "deploy.sh must tolerate a small number of transient public health probe failures"
+assert_contains "${DEPLOY_SCRIPT}" 'max_streak' \
+  "deploy.sh must require a stable success streak before accepting a deploy"
+assert_not_contains "${DEPLOY_SCRIPT}" '\[\s*"\$\{fail\}"\s*-ne\s*0\s*\]' \
+  "deploy.sh must not roll back solely because one transient public probe failed"
 
 assert_contains "${ROLLBACK_SCRIPT}" '^(usage|list_targets|select_previous_target|switch_caddy)' \
   "rollback.sh must expose list, previous selection, and Caddy switch helpers"

@@ -10,6 +10,8 @@ TARGET_REGION="${TARGET_REGION:-jp}"
 SSH_CONNECT_TIMEOUT="${SSH_CONNECT_TIMEOUT:-15}"
 HEALTH_ATTEMPTS="${HEALTH_ATTEMPTS:-60}"
 HEALTH_SLEEP="${HEALTH_SLEEP:-0.2}"
+HEALTH_MIN_SUCCESS="${HEALTH_MIN_SUCCESS:-10}"
+HEALTH_REQUIRED_STREAK="${HEALTH_REQUIRED_STREAK:-5}"
 
 usage() {
   cat <<'EOF'
@@ -273,19 +275,28 @@ switch_back() {
 verify_public() {
   local active_gateway="$1"
   local fail=0
+  local success=0
+  local streak=0
+  local max_streak=0
   local code
   for i in $(seq 1 "${HEALTH_ATTEMPTS}"); do
     code="$(curl -sS -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 5 "https://${DOMAIN}/health" || echo curl_fail)"
-    if [ "${code}" != 200 ]; then
+    if [ "${code}" = 200 ]; then
+      success=$((success + 1))
+      streak=$((streak + 1))
+      [ "${streak}" -gt "${max_streak}" ] && max_streak="${streak}"
+    else
       echo "health check failed: try=${i} code=${code}" >&2
       fail=$((fail + 1))
+      streak=0
     fi
     sleep "${HEALTH_SLEEP}"
   done
-  if [ "${fail}" -ne 0 ]; then
+  if [ "${success}" -lt "${HEALTH_MIN_SUCCESS}" ] || [ "${max_streak}" -lt "${HEALTH_REQUIRED_STREAK}" ]; then
     switch_back "${active_gateway}"
-    die "Public health loop failed ${fail} time(s)."
+    die "Public health loop was unstable: success=${success} fail=${fail} max_streak=${max_streak}."
   fi
+  echo "Public health loop passed: success=${success} fail=${fail} max_streak=${max_streak}"
 
   curl -fsS --connect-timeout 8 --max-time 20 "https://${DOMAIN}/login" | grep -q '<div id="app"' || {
     switch_back "${active_gateway}"
