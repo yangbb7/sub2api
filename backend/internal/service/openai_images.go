@@ -175,6 +175,47 @@ func (r *OpenAIImagesRequest) StickySessionSeed() string {
 	return seed
 }
 
+func (r *OpenAIImagesRequest) UsageRequestSnapshot() *UsageCallSnapshot {
+	if r == nil {
+		return nil
+	}
+	if !r.Multipart {
+		return BuildUsageRequestSnapshot(r.Body)
+	}
+	payload := map[string]any{
+		"endpoint":  strings.TrimSpace(r.Endpoint),
+		"model":     strings.TrimSpace(r.Model),
+		"prompt":    strings.TrimSpace(r.Prompt),
+		"size":      strings.TrimSpace(r.Size),
+		"multipart": true,
+	}
+	if len(r.Uploads) > 0 {
+		uploads := make([]map[string]any, 0, len(r.Uploads))
+		for _, upload := range r.Uploads {
+			uploads = append(uploads, map[string]any{
+				"field_name":   strings.TrimSpace(upload.FieldName),
+				"file_name":    strings.TrimSpace(upload.FileName),
+				"content_type": strings.TrimSpace(upload.ContentType),
+				"bytes":        len(upload.Data),
+			})
+		}
+		payload["uploads"] = uploads
+	}
+	if r.MaskUpload != nil {
+		payload["mask_upload"] = map[string]any{
+			"field_name":   strings.TrimSpace(r.MaskUpload.FieldName),
+			"file_name":    strings.TrimSpace(r.MaskUpload.FileName),
+			"content_type": strings.TrimSpace(r.MaskUpload.ContentType),
+			"bytes":        len(r.MaskUpload.Data),
+		}
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil
+	}
+	return BuildUsageRequestSnapshot(body)
+}
+
 func (s *OpenAIGatewayService) ParseOpenAIImagesRequest(c *gin.Context, body []byte) (*OpenAIImagesRequest, error) {
 	if c == nil || c.Request == nil {
 		return nil, fmt.Errorf("missing request context")

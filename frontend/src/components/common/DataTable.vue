@@ -36,6 +36,12 @@
         v-for="(row, index) in sortedData"
         :key="resolveRowKey(row, index)"
         class="rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-900"
+        :class="{ 'cursor-pointer transition-colors hover:bg-gray-50 dark:hover:bg-dark-800': rowClickable }"
+        role="button"
+        :tabindex="rowClickable ? 0 : undefined"
+        @click="handleRowClick(row)"
+        @keydown.enter="handleRowClick(row)"
+        @keydown.space.prevent="handleRowClick(row)"
       >
         <div class="space-y-3">
           <div
@@ -163,6 +169,12 @@
             :data-index="virtualRow.index"
             :ref="measureElement"
             class="hover:bg-gray-50 dark:hover:bg-dark-800"
+            :class="{ 'cursor-pointer': rowClickable }"
+            :role="rowClickable ? 'button' : undefined"
+            :tabindex="rowClickable ? 0 : undefined"
+            @click="handleRowClick(sortedData[virtualRow.index])"
+            @keydown.enter="handleRowClick(sortedData[virtualRow.index])"
+            @keydown.space.prevent="handleRowClick(sortedData[virtualRow.index])"
           >
             <td
               v-for="(column, colIndex) in columns"
@@ -211,6 +223,7 @@ const isDesktopViewport = ref(
 
 const emit = defineEmits<{
   sort: [key: string, order: 'asc' | 'desc']
+  'row-click': [row: any]
 }>()
 
 // 表格容器引用
@@ -361,6 +374,8 @@ interface Props {
   estimateRowHeight?: number
   /** Number of rows to render beyond the visible area (default 5) */
   overscan?: number
+  /** Emit row-click when the user clicks a row */
+  rowClickable?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -552,6 +567,11 @@ const handleSort = (key: string) => {
     sortKey.value = key
     sortOrder.value = newOrder
   }
+}
+
+const handleRowClick = (row: any) => {
+  if (!props.rowClickable) return
+  emit('row-click', row)
 }
 
 const sortedData = computed(() => {

@@ -470,6 +470,10 @@ type UsageLog struct {
 	// User-Agent
 	UserAgent *string `json:"user_agent"`
 
+	// RequestSnapshot and ResponseSnapshot are sanitized, length-limited call previews.
+	RequestSnapshot  *UsageCallSnapshot `json:"request_snapshot,omitempty"`
+	ResponseSnapshot *UsageCallSnapshot `json:"response_snapshot,omitempty"`
+
 	// Cache TTL Override 标记
 	CacheTTLOverridden bool `json:"cache_ttl_overridden"`
 
@@ -482,6 +486,11 @@ type UsageLog struct {
 	APIKey       *APIKey           `json:"api_key,omitempty"`
 	Group        *Group            `json:"group,omitempty"`
 	Subscription *UserSubscription `json:"subscription,omitempty"`
+}
+
+type UsageCallSnapshot struct {
+	Content   string `json:"content"`
+	Truncated bool   `json:"truncated"`
 }
 
 // AdminUsageLog 是管理员接口使用的 usage log DTO（包含管理员字段）。

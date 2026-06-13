@@ -622,6 +622,24 @@ func usageLogFromServiceUser(l *service.UsageLog) UsageLog {
 	}
 }
 
+func usageCallSnapshotFromService(snapshot *service.UsageCallSnapshot) *UsageCallSnapshot {
+	if snapshot == nil {
+		return nil
+	}
+	return &UsageCallSnapshot{
+		Content:   snapshot.Content,
+		Truncated: snapshot.Truncated,
+	}
+}
+
+func includeUsageCallSnapshots(log *UsageLog, source *service.UsageLog) {
+	if log == nil || source == nil {
+		return
+	}
+	log.RequestSnapshot = usageCallSnapshotFromService(source.RequestSnapshot)
+	log.ResponseSnapshot = usageCallSnapshotFromService(source.ResponseSnapshot)
+}
+
 // UsageLogFromService converts a service UsageLog to DTO for regular users.
 // It excludes Account details and IP address - users should not see these.
 func UsageLogFromService(l *service.UsageLog) *UsageLog {
@@ -630,6 +648,13 @@ func UsageLogFromService(l *service.UsageLog) *UsageLog {
 	}
 	u := usageLogFromServiceUser(l)
 	return &u
+}
+
+// UsageLogFromServiceWithSnapshots converts a single usage record for detail views.
+func UsageLogFromServiceWithSnapshots(l *service.UsageLog) *UsageLog {
+	u := UsageLogFromService(l)
+	includeUsageCallSnapshots(u, l)
+	return u
 }
 
 // UsageLogFromServiceAdmin converts a service UsageLog to DTO for admin users.
@@ -649,6 +674,15 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *AdminUsageLog {
 		IPAddress:             l.IPAddress,
 		Account:               AccountSummaryFromService(l.Account),
 	}
+}
+
+// UsageLogFromServiceAdminWithSnapshots converts a single admin usage record for detail views.
+func UsageLogFromServiceAdminWithSnapshots(l *service.UsageLog) *AdminUsageLog {
+	u := UsageLogFromServiceAdmin(l)
+	if u != nil {
+		includeUsageCallSnapshots(&u.UsageLog, l)
+	}
+	return u
 }
 
 func UsageCleanupTaskFromService(task *service.UsageCleanupTask) *UsageCleanupTask {

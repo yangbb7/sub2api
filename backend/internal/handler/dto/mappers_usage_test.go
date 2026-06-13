@@ -207,6 +207,41 @@ func TestUsageLogFromService_PreservesHistoricalMissingImageSize(t *testing.T) {
 	require.NotContains(t, string(body), `"image_size":"2K"`)
 }
 
+func TestUsageLogFromServiceWithSnapshots_IncludesSanitizedCallSnapshots(t *testing.T) {
+	t.Parallel()
+
+	log := &service.UsageLog{
+		RequestID: "req_snapshot",
+		Model:     "gpt-5.5",
+		RequestSnapshot: &service.UsageCallSnapshot{
+			Content:   `{"model":"gpt-5.5","messages":[{"role":"user","content":"hello"}]}`,
+			Truncated: false,
+		},
+		ResponseSnapshot: &service.UsageCallSnapshot{
+			Content:   `{"output_text":"world"}`,
+			Truncated: true,
+		},
+	}
+
+	listDTO := UsageLogFromService(log)
+	adminListDTO := UsageLogFromServiceAdmin(log)
+	userDTO := UsageLogFromServiceWithSnapshots(log)
+	adminDTO := UsageLogFromServiceAdminWithSnapshots(log)
+
+	require.Nil(t, listDTO.RequestSnapshot)
+	require.Nil(t, listDTO.ResponseSnapshot)
+	require.Nil(t, adminListDTO.RequestSnapshot)
+	require.Nil(t, adminListDTO.ResponseSnapshot)
+	require.NotNil(t, userDTO.RequestSnapshot)
+	require.Equal(t, log.RequestSnapshot.Content, userDTO.RequestSnapshot.Content)
+	require.False(t, userDTO.RequestSnapshot.Truncated)
+	require.NotNil(t, userDTO.ResponseSnapshot)
+	require.Equal(t, log.ResponseSnapshot.Content, userDTO.ResponseSnapshot.Content)
+	require.True(t, userDTO.ResponseSnapshot.Truncated)
+	require.Equal(t, userDTO.RequestSnapshot, adminDTO.RequestSnapshot)
+	require.Equal(t, userDTO.ResponseSnapshot, adminDTO.ResponseSnapshot)
+}
+
 func f64Ptr(value float64) *float64 {
 	return &value
 }

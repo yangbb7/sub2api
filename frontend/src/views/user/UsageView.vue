@@ -154,9 +154,11 @@
           :data="usageLogs"
           :loading="loading"
           :server-side-sort="true"
+          :row-clickable="true"
           default-sort-key="created_at"
           default-sort-order="desc"
           @sort="handleSort"
+          @row-click="openCallDetails"
         >
           <template #cell-api_key="{ row }">
             <span class="text-sm text-gray-900 dark:text-white">{{
@@ -535,6 +537,72 @@
       </div>
     </div>
   </Teleport>
+
+  <BaseDialog
+    :show="callDetailsVisible"
+    :title="t('usage.callDetails')"
+    width="wide"
+    @close="closeCallDetails"
+  >
+    <div v-if="selectedUsageLog" class="space-y-5">
+      <div class="grid gap-3 text-sm text-gray-600 dark:text-gray-300 sm:grid-cols-2">
+        <div>
+          <div class="text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
+            {{ t('usage.requestId') }}
+          </div>
+          <div class="mt-1 break-all font-mono text-gray-900 dark:text-white">
+            {{ selectedUsageLog.request_id || '-' }}
+          </div>
+        </div>
+        <div>
+          <div class="text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
+            {{ t('usage.model') }}
+          </div>
+          <div class="mt-1 font-medium text-gray-900 dark:text-white">
+            {{ selectedUsageLog.model }}
+          </div>
+        </div>
+      </div>
+
+      <div class="grid gap-4 lg:grid-cols-2">
+        <section class="space-y-2">
+          <div class="flex items-center justify-between">
+            <h4 class="text-sm font-semibold text-gray-900 dark:text-white">
+              {{ t('usage.requestSnapshot') }}
+            </h4>
+            <span
+              v-if="selectedUsageLog.request_snapshot?.truncated"
+              class="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-500/20 dark:text-amber-300"
+            >
+              {{ t('usage.truncated') }}
+            </span>
+          </div>
+          <pre class="max-h-[420px] overflow-auto rounded border border-gray-200 bg-gray-50 p-3 text-xs leading-relaxed text-gray-800 dark:border-dark-700 dark:bg-dark-900 dark:text-dark-100">{{ formatSnapshot(selectedUsageLog.request_snapshot) }}</pre>
+        </section>
+
+        <section class="space-y-2">
+          <div class="flex items-center justify-between">
+            <h4 class="text-sm font-semibold text-gray-900 dark:text-white">
+              {{ t('usage.responseSnapshot') }}
+            </h4>
+            <span
+              v-if="selectedUsageLog.response_snapshot?.truncated"
+              class="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-500/20 dark:text-amber-300"
+            >
+              {{ t('usage.truncated') }}
+            </span>
+          </div>
+          <pre class="max-h-[420px] overflow-auto rounded border border-gray-200 bg-gray-50 p-3 text-xs leading-relaxed text-gray-800 dark:border-dark-700 dark:bg-dark-900 dark:text-dark-100">{{ formatSnapshot(selectedUsageLog.response_snapshot) }}</pre>
+        </section>
+      </div>
+    </div>
+
+    <template #footer>
+      <button type="button" class="btn btn-secondary" @click="closeCallDetails">
+        {{ t('common.close') }}
+      </button>
+    </template>
+  </BaseDialog>
 </template>
 
 <script setup lang="ts">
@@ -549,8 +617,9 @@ import Pagination from '@/components/common/Pagination.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Select from '@/components/common/Select.vue'
 import DateRangePicker from '@/components/common/DateRangePicker.vue'
+import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
-import type { UsageLog, ApiKey, UsageQueryParams, UsageStatsResponse } from '@/types'
+import type { UsageLog, ApiKey, UsageQueryParams, UsageStatsResponse, UsageCallSnapshot } from '@/types'
 import type { Column } from '@/components/common/types'
 import { formatDateTime, formatReasoningEffort } from '@/utils/format'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
@@ -586,6 +655,10 @@ const tooltipData = ref<UsageLog | null>(null)
 const tokenTooltipVisible = ref(false)
 const tokenTooltipPosition = ref({ x: 0, y: 0 })
 const tokenTooltipData = ref<UsageLog | null>(null)
+
+const callDetailsVisible = ref(false)
+const callDetailsLoading = ref(false)
+const selectedUsageLog = ref<UsageLog | null>(null)
 
 // Usage stats from API
 const usageStats = ref<UsageStatsResponse | null>(null)
@@ -721,6 +794,11 @@ const getRequestTypeExportText = (log: UsageLog): string => {
 const formatUsageEndpoints = (log: UsageLog): string => {
   const inbound = log.inbound_endpoint?.trim()
   return inbound || '-'
+}
+
+const formatSnapshot = (snapshot: UsageCallSnapshot | null | undefined): string => {
+  const content = snapshot?.content?.trim()
+  return content || t('usage.snapshotUnavailable')
 }
 
 const formatTokens = (value: number): string => {
@@ -986,6 +1064,25 @@ const showTokenTooltip = (event: MouseEvent, row: UsageLog) => {
 const hideTokenTooltip = () => {
   tokenTooltipVisible.value = false
   tokenTooltipData.value = null
+}
+
+const openCallDetails = async (row: UsageLog) => {
+  selectedUsageLog.value = row
+  callDetailsVisible.value = true
+  callDetailsLoading.value = true
+  try {
+    selectedUsageLog.value = await usageAPI.getById(row.id)
+  } catch (error) {
+    appStore.showError(t('usage.failedToLoadCallDetails'))
+    console.error('Failed to load usage call details:', error)
+  } finally {
+    callDetailsLoading.value = false
+  }
+}
+
+const closeCallDetails = () => {
+  callDetailsVisible.value = false
+  selectedUsageLog.value = null
 }
 
 onMounted(() => {

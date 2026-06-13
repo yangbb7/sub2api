@@ -1169,6 +1169,11 @@ export type UsageRequestType = 'unknown' | 'sync' | 'stream' | 'ws_v2'
 export type ImageSizeSource = 'output' | 'input' | 'default' | 'legacy'
 export type ImageSizeBreakdown = Record<string, number>
 
+export interface UsageCallSnapshot {
+  content: string
+  truncated: boolean
+}
+
 export interface UsageLog {
   id: number
   user_id: number
@@ -1216,6 +1221,9 @@ export interface UsageLog {
 
   // User-Agent
   user_agent: string | null
+
+  request_snapshot?: UsageCallSnapshot | null
+  response_snapshot?: UsageCallSnapshot | null
 
   // Cache TTL Override
   cache_ttl_overridden: boolean

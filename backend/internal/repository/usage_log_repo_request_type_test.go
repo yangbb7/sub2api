@@ -90,6 +90,8 @@ func TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields(t *testing.T) {
 			sqlmock.AnyArg(), // billing_tier
 			sqlmock.AnyArg(), // billing_mode
 			sqlmock.AnyArg(), // account_stats_cost
+			sqlmock.AnyArg(), // request_snapshot
+			sqlmock.AnyArg(), // response_snapshot
 			createdAt,
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(99), createdAt))
@@ -173,6 +175,8 @@ func TestUsageLogRepositoryCreate_PersistsServiceTier(t *testing.T) {
 			sqlmock.AnyArg(), // billing_tier
 			sqlmock.AnyArg(), // billing_mode
 			sqlmock.AnyArg(), // account_stats_cost
+			sqlmock.AnyArg(), // request_snapshot
+			sqlmock.AnyArg(), // response_snapshot
 			createdAt,
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(100), createdAt))
@@ -222,6 +226,38 @@ func TestExecUsageLogInsertNoResult_PersistsRequestedModel(t *testing.T) {
 	err := execUsageLogInsertNoResult(context.Background(), db, prepared)
 	require.NoError(t, err)
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestPrepareUsageLogInsert_PersistsCallSnapshots(t *testing.T) {
+	createdAt := time.Date(2026, 6, 12, 12, 0, 0, 0, time.UTC)
+	log := &service.UsageLog{
+		UserID:         1,
+		APIKeyID:       2,
+		AccountID:      3,
+		RequestID:      "req-call-snapshot",
+		Model:          "gpt-5.5",
+		RequestedModel: "gpt-5.5",
+		RequestSnapshot: &service.UsageCallSnapshot{
+			Content:   `{"model":"gpt-5.5","messages":[{"role":"user","content":"hello"}]}`,
+			Truncated: false,
+		},
+		ResponseSnapshot: &service.UsageCallSnapshot{
+			Content:   `{"output_text":"world"}`,
+			Truncated: true,
+		},
+		CreatedAt: createdAt,
+	}
+
+	prepared := prepareUsageLogInsert(log)
+
+	require.Len(t, prepared.args, len(usageLogInsertArgTypes))
+	requestSnapshotValue, ok := prepared.args[len(prepared.args)-3].(string)
+	require.True(t, ok)
+	require.JSONEq(t, `{"content":"{\"model\":\"gpt-5.5\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}","truncated":false}`, requestSnapshotValue)
+
+	responseSnapshotValue, ok := prepared.args[len(prepared.args)-2].(string)
+	require.True(t, ok)
+	require.JSONEq(t, `{"content":"{\"output_text\":\"world\"}","truncated":true}`, responseSnapshotValue)
 }
 
 func TestPrepareUsageLogInsert_ArgCountMatchesTypes(t *testing.T) {
@@ -583,6 +619,19 @@ type usageLogScannerStub struct {
 	values []any
 }
 
+func usageLogScanValues(values ...any) []any {
+	// Keep older tests focused on their target fields while matching usageLogSelectColumns.
+	// request_snapshot and response_snapshot live immediately before created_at.
+	if len(values) == 0 {
+		return values
+	}
+	out := make([]any, 0, len(values)+2)
+	out = append(out, values[:len(values)-1]...)
+	out = append(out, sql.NullString{}, sql.NullString{})
+	out = append(out, values[len(values)-1])
+	return out
+}
+
 func (s usageLogScannerStub) Scan(dest ...any) error {
 	if len(dest) != len(s.values) {
 		return fmt.Errorf("scan arg count mismatch: got %d want %d", len(dest), len(s.values))
@@ -600,7 +649,7 @@ func (s usageLogScannerStub) Scan(dest ...any) error {
 func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 	t.Run("image_size_metadata_is_scanned", func(t *testing.T) {
 		now := time.Now().UTC()
-		log, err := scanUsageLog(usageLogScannerStub{values: []any{
+		log, err := scanUsageLog(usageLogScannerStub{values: usageLogScanValues(
 			int64(4),
 			int64(13),
 			int64(23),
@@ -641,7 +690,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},
 			sql.NullFloat64{},
 			now,
-		}})
+		)})
 		require.NoError(t, err)
 		require.Equal(t, 2, log.ImageCount)
 		require.NotNil(t, log.ImageSize)
@@ -657,7 +706,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 
 	t.Run("request_type_ws_v2_overrides_legacy", func(t *testing.T) {
 		now := time.Now().UTC()
-		log, err := scanUsageLog(usageLogScannerStub{values: []any{
+		log, err := scanUsageLog(usageLogScannerStub{values: usageLogScanValues(
 			int64(1),  // id
 			int64(10), // user_id
 			int64(20), // api_key_id
@@ -709,7 +758,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},  // billing_mode
 			sql.NullFloat64{}, // account_stats_cost
 			now,
-		}})
+		)})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
 		require.Equal(t, "priority", *log.ServiceTier)
@@ -720,7 +769,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 
 	t.Run("request_type_unknown_falls_back_to_legacy", func(t *testing.T) {
 		now := time.Now().UTC()
-		log, err := scanUsageLog(usageLogScannerStub{values: []any{
+		log, err := scanUsageLog(usageLogScannerStub{values: usageLogScanValues(
 			int64(2),
 			int64(11),
 			int64(21),
@@ -761,7 +810,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},  // billing_mode
 			sql.NullFloat64{}, // account_stats_cost
 			now,
-		}})
+		)})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
 		require.Equal(t, "flex", *log.ServiceTier)
@@ -772,7 +821,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 
 	t.Run("service_tier_is_scanned", func(t *testing.T) {
 		now := time.Now().UTC()
-		log, err := scanUsageLog(usageLogScannerStub{values: []any{
+		log, err := scanUsageLog(usageLogScannerStub{values: usageLogScanValues(
 			int64(3),
 			int64(12),
 			int64(22),
@@ -813,7 +862,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},  // billing_mode
 			sql.NullFloat64{}, // account_stats_cost
 			now,
-		}})
+		)})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
 		require.Equal(t, "priority", *log.ServiceTier)

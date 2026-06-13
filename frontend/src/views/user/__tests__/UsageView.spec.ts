@@ -4,8 +4,9 @@ import { nextTick } from 'vue'
 
 import UsageView from '../UsageView.vue'
 
-const { query, getStatsByDateRange, list, showError, showWarning, showSuccess, showInfo } = vi.hoisted(() => ({
+const { query, getById, getStatsByDateRange, list, showError, showWarning, showSuccess, showInfo } = vi.hoisted(() => ({
   query: vi.fn(),
+  getById: vi.fn(),
   getStatsByDateRange: vi.fn(),
   list: vi.fn(),
   showError: vi.fn(),
@@ -58,6 +59,14 @@ const messages: Record<string, string> = {
   'usage.imageSizeUnknown': 'unknown',
   'usage.imageUnitPrice': 'Per-image price',
   'usage.imageTotalPrice': 'Image total price',
+  'usage.actions': 'Actions',
+  'usage.callDetails': 'Details',
+  'usage.requestId': 'Request ID',
+  'usage.requestSnapshot': 'Request',
+  'usage.responseSnapshot': 'Response',
+  'usage.snapshotUnavailable': 'Not captured for this request.',
+  'usage.truncated': 'Truncated',
+  'usage.failedToLoadCallDetails': 'Failed to load call details',
   'admin.usage.billingModeToken': 'Token',
   'admin.usage.billingModePerRequest': 'Per request',
   'admin.usage.billingModeImage': 'Image',
@@ -66,6 +75,7 @@ const messages: Record<string, string> = {
 vi.mock('@/api', () => ({
   usageAPI: {
     query,
+    getById,
     getStatsByDateRange,
   },
   keysAPI: {
@@ -91,11 +101,17 @@ const AppLayoutStub = { template: '<div><slot /></div>' }
 const TablePageLayoutStub = {
   template: '<div><slot name="actions" /><slot name="filters" /><slot name="table" /><slot /></div>',
 }
+const BaseDialogStub = {
+  props: ['show', 'title'],
+  emits: ['close'],
+  template: '<div v-if="show"><h2>{{ title }}</h2><slot /><slot name="footer" /></div>',
+}
 const DataTableStub = {
+  emits: ['row-click'],
   props: ['data'],
   template: `
     <div>
-      <div v-for="row in data" :key="row.request_id">
+      <div v-for="row in data" :key="row.request_id" data-testid="usage-row" @click="$emit('row-click', row)">
         <slot name="cell-billing_mode" :row="row" />
         <slot name="cell-tokens" :row="row" />
         <slot name="cell-cost" :row="row" />
@@ -107,6 +123,7 @@ const DataTableStub = {
 describe('user UsageView tooltip', () => {
   beforeEach(() => {
     query.mockReset()
+    getById.mockReset()
     getStatsByDateRange.mockReset()
     list.mockReset()
     showError.mockReset()
@@ -214,6 +231,85 @@ describe('user UsageView tooltip', () => {
     expect(text).toContain('$0.092883')
     expect(text).toContain('$5.0000 / 1M tokens')
     expect(text).toContain('$30.0000 / 1M tokens')
+  })
+
+  it('loads and displays sanitized call details', async () => {
+    const listedLog = {
+      id: 42,
+      request_id: 'req-call-details',
+      actual_cost: 0.01,
+      total_cost: 0.01,
+      rate_multiplier: 1,
+      input_cost: 0,
+      output_cost: 0,
+      cache_creation_cost: 0,
+      cache_read_cost: 0,
+      input_tokens: 1,
+      output_tokens: 1,
+      cache_creation_tokens: 0,
+      cache_read_tokens: 0,
+      cache_creation_5m_tokens: 0,
+      cache_creation_1h_tokens: 0,
+      image_count: 0,
+      image_size: null,
+      first_token_ms: null,
+      duration_ms: 1,
+      created_at: '2026-03-08T00:00:00Z',
+      model: 'gpt-5.5',
+      reasoning_effort: null,
+      user_agent: null,
+    }
+    query.mockResolvedValue({
+      items: [listedLog],
+      total: 1,
+      pages: 1,
+    })
+    getById.mockResolvedValue({
+      ...listedLog,
+      request_snapshot: {
+        content: '{\n  "model": "gpt-5.5",\n  "messages": [{"role": "user", "content": "hello"}]\n}',
+        truncated: false,
+      },
+      response_snapshot: {
+        content: '{\n  "output_text": "world"\n}',
+        truncated: false,
+      },
+    })
+    getStatsByDateRange.mockResolvedValue({
+      total_requests: 1,
+      total_tokens: 2,
+      total_cost: 0.01,
+      avg_duration_ms: 1,
+    })
+    list.mockResolvedValue({ items: [] })
+
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          TablePageLayout: TablePageLayoutStub,
+          Pagination: true,
+          EmptyState: true,
+          Select: true,
+          DateRangePicker: true,
+          DataTable: DataTableStub,
+          BaseDialog: BaseDialogStub,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    await flushPromises()
+    await wrapper.get('[data-testid="usage-row"]').trigger('click')
+    await flushPromises()
+
+    expect(getById).toHaveBeenCalledWith(42)
+    const text = wrapper.text()
+    expect(text).toContain('Request')
+    expect(text).toContain('Response')
+    expect(text).toContain('"model": "gpt-5.5"')
+    expect(text).toContain('"output_text": "world"')
   })
 
   it('exports csv with input and output unit price columns', async () => {
@@ -536,5 +632,76 @@ describe('user UsageView tooltip', () => {
     expect(text).toContain('Output size')
     expect(text).toContain('3840x2160')
     expect(text).toContain('4K x 2')
+  })
+
+  it('opens call details when clicking a usage row', async () => {
+    query.mockResolvedValue({
+      items: [
+        {
+          id: 88,
+          request_id: 'req-row-click',
+          model: 'gpt-5.5',
+          actual_cost: 0.1,
+          total_cost: 0.1,
+          rate_multiplier: 1,
+          service_tier: null,
+          input_cost: 0,
+          output_cost: 0,
+          cache_creation_cost: 0,
+          cache_read_cost: 0,
+          input_tokens: 10,
+          output_tokens: 20,
+          cache_creation_tokens: 0,
+          cache_read_tokens: 0,
+          cache_creation_5m_tokens: 0,
+          cache_creation_1h_tokens: 0,
+          billing_mode: 'token',
+          image_count: 0,
+          first_token_ms: null,
+          duration_ms: 1000,
+          created_at: '2026-03-08T00:00:00Z',
+        },
+      ],
+      total: 1,
+      pages: 1,
+    })
+    getById.mockResolvedValue({
+      id: 88,
+      request_id: 'req-row-click',
+      model: 'gpt-5.5',
+      request_snapshot: { content: '{"model":"gpt-5.5"}', truncated: false },
+      response_snapshot: { content: '{"output_text":"ok"}', truncated: false },
+    })
+    getStatsByDateRange.mockResolvedValue({
+      total_requests: 1,
+      total_tokens: 30,
+      total_cost: 0.1,
+      avg_duration_ms: 1000,
+    })
+    list.mockResolvedValue({ items: [] })
+
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          TablePageLayout: TablePageLayoutStub,
+          Pagination: true,
+          EmptyState: true,
+          Select: true,
+          DateRangePicker: true,
+          DataTable: DataTableStub,
+          Icon: true,
+          Teleport: true,
+          BaseDialog: BaseDialogStub,
+        },
+      },
+    })
+
+    await flushPromises()
+    await wrapper.get('[data-testid="usage-row"]').trigger('click')
+    await flushPromises()
+
+    expect(getById).toHaveBeenCalledWith(88)
+    expect(wrapper.text()).toContain('{"output_text":"ok"}')
   })
 })

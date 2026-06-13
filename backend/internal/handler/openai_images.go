@@ -296,6 +296,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		if parsed.Multipart {
 			requestPayloadHash = service.HashUsageRequestPayload([]byte(parsed.StickySessionSeed()))
 		}
+		requestSnapshot := parsed.UsageRequestSnapshot()
 		inboundEndpoint := GetInboundEndpoint(c)
 		upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 
@@ -315,6 +316,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 				UserAgent:          userAgent,
 				IPAddress:          clientIP,
 				RequestPayloadHash: requestPayloadHash,
+				RequestSnapshot:    requestSnapshot,
 				APIKeyService:      h.apiKeyService,
 				ChannelUsageFields: channelMapping.ToUsageFields(parsed.Model, upstreamModel),
 			}); err != nil {

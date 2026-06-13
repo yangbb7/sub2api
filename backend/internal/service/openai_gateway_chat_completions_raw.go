@@ -269,6 +269,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	scanner.Buffer(make([]byte, 0, 64*1024), maxLineSize)
 
 	var usage OpenAIUsage
+	responseSnapshot := newUsageCallSnapshotCollector()
 	var firstTokenMs *int
 	clientDisconnected := false
 	clientOutputStarted := false
@@ -309,6 +310,8 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		responseSnapshot.AppendString(line)
+		responseSnapshot.AppendString("\n")
 		refusalDetector.ObserveSSELine(line)
 		if payload, ok := extractOpenAISSEDataLine(line); ok {
 			trimmedPayload := strings.TrimSpace(payload)
@@ -367,16 +370,17 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	}
 
 	return &OpenAIForwardResult{
-		RequestID:       requestID,
-		Usage:           usage,
-		Model:           originalModel,
-		BillingModel:    billingModel,
-		UpstreamModel:   upstreamModel,
-		ReasoningEffort: reasoningEffort,
-		ServiceTier:     serviceTier,
-		Stream:          true,
-		Duration:        time.Since(startTime),
-		FirstTokenMs:    firstTokenMs,
+		RequestID:        requestID,
+		Usage:            usage,
+		Model:            originalModel,
+		BillingModel:     billingModel,
+		UpstreamModel:    upstreamModel,
+		ReasoningEffort:  reasoningEffort,
+		ServiceTier:      serviceTier,
+		Stream:           true,
+		Duration:         time.Since(startTime),
+		FirstTokenMs:     firstTokenMs,
+		ResponseSnapshot: responseSnapshot.Snapshot(),
 	}, nil
 }
 
@@ -464,15 +468,16 @@ func (s *OpenAIGatewayService) bufferRawChatCompletions(
 	_, _ = c.Writer.Write(respBody)
 
 	return &OpenAIForwardResult{
-		RequestID:       requestID,
-		Usage:           usage,
-		Model:           originalModel,
-		BillingModel:    billingModel,
-		UpstreamModel:   upstreamModel,
-		ReasoningEffort: reasoningEffort,
-		ServiceTier:     serviceTier,
-		Stream:          false,
-		Duration:        time.Since(startTime),
+		RequestID:        requestID,
+		Usage:            usage,
+		Model:            originalModel,
+		BillingModel:     billingModel,
+		UpstreamModel:    upstreamModel,
+		ReasoningEffort:  reasoningEffort,
+		ServiceTier:      serviceTier,
+		Stream:           false,
+		Duration:         time.Since(startTime),
+		ResponseSnapshot: BuildUsageResponseSnapshot(respBody),
 	}, nil
 }
 

@@ -158,6 +158,11 @@ type UsageLog struct {
 	UserAgent    *string
 	IPAddress    *string
 
+	// RequestSnapshot/ResponseSnapshot are user-visible, sanitized call snapshots.
+	// They must never contain credentials, auth headers, raw upstream secrets, or unbounded payloads.
+	RequestSnapshot  *UsageCallSnapshot
+	ResponseSnapshot *UsageCallSnapshot
+
 	// Cache TTL Override 标记（管理员强制替换了缓存 TTL 计费）
 	CacheTTLOverridden bool
 
