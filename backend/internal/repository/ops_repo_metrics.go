@@ -194,7 +194,17 @@ FROM ops_system_metrics
 WHERE window_minutes = $1
   AND platform IS NULL
   AND group_id IS NULL
-ORDER BY created_at DESC
+ORDER BY
+  CASE
+    WHEN created_at >= NOW() - INTERVAL '5 minutes'
+      AND disk_used_mb IS NOT NULL
+      AND disk_total_mb IS NOT NULL
+      AND disk_usage_percent IS NOT NULL
+    THEN 0
+    ELSE 1
+  END,
+  created_at DESC,
+  id DESC
 LIMIT 1`
 
 	var out service.OpsSystemMetricsSnapshot

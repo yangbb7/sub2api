@@ -144,3 +144,63 @@ func TestOpsRepositoryGetLatestSystemMetricsMapsDiskStats(t *testing.T) {
 	require.InDelta(t, 50.0, *out.DiskUsagePercent, 0.0001)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+func TestOpsRepositoryGetLatestSystemMetricsPrefersRecentCompleteDiskStats(t *testing.T) {
+	db, mock := newSQLMock(t)
+	repo := &opsRepository{db: db}
+
+	createdAt := time.Date(2026, 6, 13, 10, 32, 0, 0, time.UTC)
+	rows := sqlmock.NewRows([]string{
+		"id",
+		"created_at",
+		"window_minutes",
+		"cpu_usage_percent",
+		"memory_used_mb",
+		"memory_total_mb",
+		"memory_usage_percent",
+		"disk_used_mb",
+		"disk_total_mb",
+		"disk_usage_percent",
+		"db_ok",
+		"redis_ok",
+		"redis_conn_total",
+		"redis_conn_idle",
+		"db_conn_active",
+		"db_conn_idle",
+		"db_conn_waiting",
+		"goroutine_count",
+		"concurrency_queue_depth",
+		"account_switch_count",
+	}).AddRow(
+		int64(9),
+		createdAt,
+		1,
+		12.5,
+		int64(512),
+		int64(1024),
+		50.0,
+		int64(2048),
+		int64(4096),
+		50.0,
+		true,
+		true,
+		4,
+		2,
+		3,
+		5,
+		0,
+		88,
+		1,
+		int64(6),
+	)
+
+	mock.ExpectQuery(`ORDER BY[\s\S]*created_at >= NOW\(\) - INTERVAL '5 minutes'[\s\S]*disk_usage_percent IS NOT NULL[\s\S]*created_at DESC,[\s\S]*id DESC`).
+		WithArgs(1).
+		WillReturnRows(rows)
+
+	out, err := repo.GetLatestSystemMetrics(context.Background(), 1)
+	require.NoError(t, err)
+	require.NotNil(t, out)
+	require.Equal(t, int64(9), out.ID)
+	require.NoError(t, mock.ExpectationsWereMet())
+}

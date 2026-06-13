@@ -50,6 +50,7 @@ type OpsMetricsCollector struct {
 
 	db          *sql.DB
 	redisClient *redis.Client
+	redisLeaderLocker opsRedisLeaderLocker
 	instanceID  string
 
 	lastCgroupCPUUsageNanos uint64
@@ -63,6 +64,28 @@ type OpsMetricsCollector struct {
 	skipLogAt time.Time
 }
 
+type opsRedisLeaderLocker interface {
+	Set(ctx context.Context, key string, value any, expiration time.Duration) error
+	SetNX(ctx context.Context, key string, value any, expiration time.Duration) (bool, error)
+	Get(ctx context.Context, key string) (string, error)
+}
+
+type opsRedisClientLeaderLocker struct {
+	client *redis.Client
+}
+
+func (l opsRedisClientLeaderLocker) Set(ctx context.Context, key string, value any, expiration time.Duration) error {
+	return l.client.Set(ctx, key, value, expiration).Err()
+}
+
+func (l opsRedisClientLeaderLocker) SetNX(ctx context.Context, key string, value any, expiration time.Duration) (bool, error) {
+	return l.client.SetNX(ctx, key, value, expiration).Result()
+}
+
+func (l opsRedisClientLeaderLocker) Get(ctx context.Context, key string) (string, error) {
+	return l.client.Get(ctx, key).Result()
+}
+
 func NewOpsMetricsCollector(
 	opsRepo OpsRepository,
 	settingRepo SettingRepository,
@@ -72,7 +95,7 @@ func NewOpsMetricsCollector(
 	redisClient *redis.Client,
 	cfg *config.Config,
 ) *OpsMetricsCollector {
-	return &OpsMetricsCollector{
+	collector := &OpsMetricsCollector{
 		opsRepo:            opsRepo,
 		settingRepo:        settingRepo,
 		cfg:                cfg,
@@ -82,6 +105,10 @@ func NewOpsMetricsCollector(
 		redisClient:        redisClient,
 		instanceID:         uuid.NewString(),
 	}
+	if redisClient != nil {
+		collector.redisLeaderLocker = opsRedisClientLeaderLocker{client: redisClient}
+	}
+	return collector
 }
 
 func (c *OpsMetricsCollector) Start() {
@@ -871,22 +898,34 @@ func (c *OpsMetricsCollector) dbPoolStats() (active int, idle int) {
 	return stats.InUse, stats.Idle
 }
 
-var opsMetricsCollectorReleaseScript = redis.NewScript(`
-if redis.call("GET", KEYS[1]) == ARGV[1] then
-  return redis.call("DEL", KEYS[1])
-end
-return 0
-`)
-
 func (c *OpsMetricsCollector) tryAcquireLeaderLock(ctx context.Context) (func(), bool) {
-	if c == nil || c.redisClient == nil {
+	if c == nil {
+		return nil, true
+	}
+	if c.redisLeaderLocker == nil && c.redisClient == nil {
 		return nil, true
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	locker := c.redisLeaderLocker
+	if locker == nil {
+		locker = opsRedisClientLeaderLocker{client: c.redisClient}
+	}
+	instanceID := strings.TrimSpace(c.instanceID)
+	if instanceID == "" {
+		instanceID = uuid.NewString()
+		c.instanceID = instanceID
+	}
 
-	ok, err := c.redisClient.SetNX(ctx, opsMetricsCollectorLeaderLockKey, c.instanceID, opsMetricsCollectorLeaderLockTTL).Result()
+	owner, getErr := locker.Get(ctx, opsMetricsCollectorLeaderLockKey)
+	if getErr == nil && owner == instanceID {
+		if err := locker.Set(ctx, opsMetricsCollectorLeaderLockKey, instanceID, opsMetricsCollectorLeaderLockTTL); err == nil {
+			return nil, true
+		}
+	}
+
+	ok, err := locker.SetNX(ctx, opsMetricsCollectorLeaderLockKey, instanceID, opsMetricsCollectorLeaderLockTTL)
 	if err != nil {
 		// Prefer fail-closed to avoid stampeding the database when Redis is flaky.
 		// Fallback to a DB advisory lock when Redis is present but unavailable.
@@ -902,12 +941,7 @@ func (c *OpsMetricsCollector) tryAcquireLeaderLock(ctx context.Context) (func(),
 		return nil, false
 	}
 
-	release := func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		_, _ = opsMetricsCollectorReleaseScript.Run(ctx, c.redisClient, []string{opsMetricsCollectorLeaderLockKey}, c.instanceID).Result()
-	}
-	return release, true
+	return nil, true
 }
 
 func (c *OpsMetricsCollector) maybeLogSkip() {
