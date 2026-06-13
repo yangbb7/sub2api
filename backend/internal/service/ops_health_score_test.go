@@ -188,6 +188,26 @@ func TestComputeDashboardHealthScore_Comprehensive(t *testing.T) {
 			wantMax: 100,
 		},
 		{
+			name: "critical disk usage",
+			overview: &OpsDashboardOverview{
+				RequestCountTotal: 1000,
+				RequestCountSLA:   1000,
+				SLA:               0.995,
+				ErrorRate:         0,
+				UpstreamErrorRate: 0,
+				Duration:          OpsPercentiles{P99: intPtr(500)},
+				SystemMetrics: &OpsSystemMetricsSnapshot{
+					DBOK:               boolPtr(true),
+					RedisOK:            boolPtr(true),
+					CPUUsagePercent:    float64Ptr(30),
+					MemoryUsagePercent: float64Ptr(40),
+					DiskUsagePercent:   float64Ptr(98),
+				},
+			},
+			wantMin: 85,
+			wantMax: 95,
+		},
+		{
 			name: "combined failures - business degraded + infra healthy",
 			overview: &OpsDashboardOverview{
 				RequestCountTotal: 1000,

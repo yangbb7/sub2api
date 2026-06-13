@@ -79,7 +79,7 @@ func computeInfraHealth(now time.Time, overview *OpsDashboardOverview) float64 {
 		}
 	}
 
-	// Compute resources score: CPU + Memory
+	// Compute resources score: CPU + Memory + Disk
 	computeScore := 100.0
 	if overview.SystemMetrics != nil {
 		cpuScore := 100.0
@@ -106,7 +106,19 @@ func computeInfraHealth(now time.Time, overview *OpsDashboardOverview) float64 {
 			}
 		}
 
-		computeScore = (cpuScore + memScore) / 2
+		diskScore := 100.0
+		if overview.SystemMetrics.DiskUsagePercent != nil {
+			diskPct := clampFloat64(*overview.SystemMetrics.DiskUsagePercent, 0, 100)
+			if diskPct > 85 {
+				if diskPct <= 100 {
+					diskScore = (100 - diskPct) / 15 * 100
+				} else {
+					diskScore = 0
+				}
+			}
+		}
+
+		computeScore = math.Min(cpuScore, math.Min(memScore, diskScore))
 	}
 
 	// Background jobs score

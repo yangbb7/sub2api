@@ -50,6 +50,11 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	requireColumn(t, tx, "usage_logs", "image_size_breakdown", "jsonb", 0, true)
 	requireColumn(t, tx, "usage_logs", "request_snapshot", "jsonb", 0, true)
 	requireColumn(t, tx, "usage_logs", "response_snapshot", "jsonb", 0, true)
+
+	// ops_system_metrics: runtime resource snapshots
+	requireColumn(t, tx, "ops_system_metrics", "disk_used_mb", "bigint", 0, true)
+	requireColumn(t, tx, "ops_system_metrics", "disk_total_mb", "bigint", 0, true)
+	requireColumn(t, tx, "ops_system_metrics", "disk_usage_percent", "double precision", 0, true)
 	requireConstraintDefinitionContains(
 		t,
 		tx,

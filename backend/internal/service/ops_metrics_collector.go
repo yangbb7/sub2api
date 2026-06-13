@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/shirou/gopsutil/v4/cpu"
+	"github.com/shirou/gopsutil/v4/disk"
 	"github.com/shirou/gopsutil/v4/mem"
 )
 
@@ -337,6 +338,9 @@ func (c *OpsMetricsCollector) collectAndPersist(ctx context.Context) error {
 		MemoryUsedMB:       sys.memoryUsedMB,
 		MemoryTotalMB:      sys.memoryTotalMB,
 		MemoryUsagePercent: sys.memoryUsagePercent,
+		DiskUsedMB:         sys.diskUsedMB,
+		DiskTotalMB:        sys.diskTotalMB,
+		DiskUsagePercent:   sys.diskUsagePercent,
 
 		DBOK:    boolPtr(dbOK),
 		RedisOK: boolPtr(redisOK),
@@ -579,6 +583,9 @@ type opsCollectedSystemStats struct {
 	memoryUsedMB       *int64
 	memoryTotalMB      *int64
 	memoryUsagePercent *float64
+	diskUsedMB         *int64
+	diskTotalMB        *int64
+	diskUsagePercent   *float64
 }
 
 func (c *OpsMetricsCollector) collectSystemStats(ctx context.Context) (*opsCollectedSystemStats, error) {
@@ -634,6 +641,20 @@ func (c *OpsMetricsCollector) collectSystemStats(ctx context.Context) (*opsColle
 					out.memoryUsagePercent = &pct
 				}
 			}
+		}
+	}
+
+	if usage, err := disk.UsageWithContext(ctx, "/"); err == nil && usage != nil {
+		usedMB := int64(usage.Used / bytesPerMB)
+		totalMB := int64(usage.Total / bytesPerMB)
+		out.diskUsedMB = &usedMB
+		out.diskTotalMB = &totalMB
+		if usage.Total > 0 {
+			pct := roundTo1DP(float64(usage.Used) / float64(usage.Total) * 100)
+			out.diskUsagePercent = &pct
+		} else {
+			pct := roundTo1DP(usage.UsedPercent)
+			out.diskUsagePercent = &pct
 		}
 	}
 
