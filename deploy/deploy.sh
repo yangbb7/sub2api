@@ -12,6 +12,7 @@ HEALTH_ATTEMPTS="${HEALTH_ATTEMPTS:-60}"
 HEALTH_SLEEP="${HEALTH_SLEEP:-0.2}"
 HEALTH_MIN_SUCCESS="${HEALTH_MIN_SUCCESS:-10}"
 HEALTH_REQUIRED_STREAK="${HEALTH_REQUIRED_STREAK:-5}"
+KEEP_ROLLBACKS="${KEEP_ROLLBACKS:-1}"
 
 usage() {
   cat <<'EOF'
@@ -316,6 +317,46 @@ verify_public() {
   esac
 }
 
+cleanup_old_gateways() {
+  local deployed_gateway="$1"
+  local rollback_gateway="$2"
+  local keep_rollbacks="$3"
+  local tmp
+  tmp="$(mktemp)"
+  cat > "${tmp}" <<REMOTE
+#!/usr/bin/env bash
+set -euo pipefail
+DEPLOYED_GATEWAY=$(single_quote "${deployed_gateway}")
+ROLLBACK_GATEWAY=$(single_quote "${rollback_gateway}")
+KEEP_ROLLBACKS=$(single_quote "${keep_rollbacks}")
+
+case "\${KEEP_ROLLBACKS}" in
+  ''|*[!0-9]*) KEEP_ROLLBACKS=1 ;;
+esac
+if [ "\${KEEP_ROLLBACKS}" -lt 0 ]; then
+  KEEP_ROLLBACKS=1
+fi
+
+keep_file="\$(mktemp /tmp/gateway-keep.XXXXXX)"
+trap 'rm -f "\${keep_file}"' EXIT
+printf '%s\n' "\${DEPLOYED_GATEWAY}" >> "\${keep_file}"
+if [ "\${KEEP_ROLLBACKS}" -gt 0 ] && [ -n "\${ROLLBACK_GATEWAY}" ]; then
+  printf '%s\n' "\${ROLLBACK_GATEWAY}" >> "\${keep_file}"
+fi
+
+docker ps --format '{{.Names}}' | grep -E '^(gateway$|gateway-(green|blue|next|rollback))' | while read -r name; do
+  if grep -Fxq "\${name}" "\${keep_file}"; then
+    echo "keep gateway container: \${name}"
+    continue
+  fi
+  echo "stop old gateway container: \${name}"
+  docker stop "\${name}" >/dev/null || true
+done
+REMOTE
+  run_remote_root_script "${tmp}"
+  rm -f "${tmp}"
+}
+
 main() {
   if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
     usage
@@ -339,6 +380,7 @@ main() {
   build_remote_image
   promote_new_container "${active_gateway}" "${commit}"
   verify_public "${active_gateway}"
+  cleanup_old_gateways "gateway-green-${commit}" "${active_gateway}" "${KEEP_ROLLBACKS}"
 
   echo "Deploy complete: gateway-green-${commit}"
   echo "Rollback command: deploy/rollback.sh to ${active_gateway}"

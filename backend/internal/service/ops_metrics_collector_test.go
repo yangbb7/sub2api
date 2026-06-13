@@ -32,12 +32,13 @@ func TestOpsMetricsCollectorLeaderLockIsStickyForActiveInstance(t *testing.T) {
 	collector := &OpsMetricsCollector{
 		redisLeaderLocker: fake,
 		instanceID:        "new-container",
+		startedAt:         time.Unix(200, 0),
 	}
 
 	release, ok := collector.tryAcquireLeaderLock(ctx)
 	require.True(t, ok)
 	require.Nil(t, release)
-	require.Equal(t, "new-container", fake.value)
+	require.Equal(t, "200000000000:new-container", fake.value)
 
 	release, ok = collector.tryAcquireLeaderLock(ctx)
 	require.True(t, ok)
@@ -47,11 +48,43 @@ func TestOpsMetricsCollectorLeaderLockIsStickyForActiveInstance(t *testing.T) {
 	other := &OpsMetricsCollector{
 		redisLeaderLocker: fake,
 		instanceID:        "old-container",
+		startedAt:         time.Unix(100, 0),
 	}
 	release, ok = other.tryAcquireLeaderLock(ctx)
 	require.False(t, ok)
 	require.Nil(t, release)
-	require.Equal(t, "new-container", fake.value)
+	require.Equal(t, "200000000000:new-container", fake.value)
+}
+
+func TestOpsMetricsCollectorLeaderLockNewerInstanceTakesOver(t *testing.T) {
+	t.Parallel()
+
+	fake := newFakeOpsLeaderRedis()
+	ctx := context.Background()
+	oldInstance := &OpsMetricsCollector{
+		redisLeaderLocker: fake,
+		instanceID:        "old-container",
+		startedAt:         time.Unix(100, 0),
+	}
+	newInstance := &OpsMetricsCollector{
+		redisLeaderLocker: fake,
+		instanceID:        "new-container",
+		startedAt:         time.Unix(200, 0),
+	}
+
+	release, ok := oldInstance.tryAcquireLeaderLock(ctx)
+	require.True(t, ok)
+	require.Nil(t, release)
+	require.Equal(t, "100000000000:old-container", fake.value)
+
+	release, ok = newInstance.tryAcquireLeaderLock(ctx)
+	require.True(t, ok)
+	require.Nil(t, release)
+	require.Equal(t, "200000000000:new-container", fake.value)
+
+	release, ok = oldInstance.tryAcquireLeaderLock(ctx)
+	require.False(t, ok)
+	require.Nil(t, release)
 }
 
 type fakeOpsLeaderRedis struct {

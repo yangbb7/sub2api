@@ -67,6 +67,10 @@ assert_contains "${DEPLOY_SCRIPT}" 'max_streak' \
   "deploy.sh must require a stable success streak before accepting a deploy"
 assert_not_contains "${DEPLOY_SCRIPT}" '\[\s*"\$\{fail\}"\s*-ne\s*0\s*\]' \
   "deploy.sh must not roll back solely because one transient public probe failed"
+assert_contains "${DEPLOY_SCRIPT}" 'cleanup_old_gateways' \
+  "deploy.sh must prune old blue/green gateway containers after a verified deploy"
+assert_contains "${DEPLOY_SCRIPT}" 'KEEP_ROLLBACKS' \
+  "deploy.sh must keep a bounded number of rollback gateway containers"
 
 assert_contains "${ROLLBACK_SCRIPT}" '^(usage|list_targets|select_previous_target|switch_caddy)' \
   "rollback.sh must expose list, previous selection, and Caddy switch helpers"

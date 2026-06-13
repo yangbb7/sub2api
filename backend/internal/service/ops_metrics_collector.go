@@ -48,10 +48,11 @@ type OpsMetricsCollector struct {
 	accountRepo        AccountRepository
 	concurrencyService *ConcurrencyService
 
-	db          *sql.DB
-	redisClient *redis.Client
+	db                *sql.DB
+	redisClient       *redis.Client
 	redisLeaderLocker opsRedisLeaderLocker
-	instanceID  string
+	instanceID        string
+	startedAt         time.Time
 
 	lastCgroupCPUUsageNanos uint64
 	lastCgroupCPUSampleAt   time.Time
@@ -104,11 +105,41 @@ func NewOpsMetricsCollector(
 		db:                 db,
 		redisClient:        redisClient,
 		instanceID:         uuid.NewString(),
+		startedAt:          time.Now().UTC(),
 	}
 	if redisClient != nil {
 		collector.redisLeaderLocker = opsRedisClientLeaderLocker{client: redisClient}
 	}
 	return collector
+}
+
+func (c *OpsMetricsCollector) leaderToken() string {
+	if c == nil {
+		return ""
+	}
+	if strings.TrimSpace(c.instanceID) == "" {
+		c.instanceID = uuid.NewString()
+	}
+	if c.startedAt.IsZero() {
+		c.startedAt = time.Now().UTC()
+	}
+	return fmt.Sprintf("%d:%s", c.startedAt.UnixNano(), c.instanceID)
+}
+
+func parseOpsMetricsLeaderToken(token string) (int64, string, bool) {
+	parts := strings.SplitN(strings.TrimSpace(token), ":", 2)
+	if len(parts) != 2 {
+		return 0, "", false
+	}
+	startedAtNanos, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return 0, "", false
+	}
+	instanceID := strings.TrimSpace(parts[1])
+	if instanceID == "" {
+		return 0, "", false
+	}
+	return startedAtNanos, instanceID, true
 }
 
 func (c *OpsMetricsCollector) Start() {
@@ -912,20 +943,31 @@ func (c *OpsMetricsCollector) tryAcquireLeaderLock(ctx context.Context) (func(),
 	if locker == nil {
 		locker = opsRedisClientLeaderLocker{client: c.redisClient}
 	}
-	instanceID := strings.TrimSpace(c.instanceID)
-	if instanceID == "" {
-		instanceID = uuid.NewString()
-		c.instanceID = instanceID
-	}
+	token := c.leaderToken()
 
 	owner, getErr := locker.Get(ctx, opsMetricsCollectorLeaderLockKey)
-	if getErr == nil && owner == instanceID {
-		if err := locker.Set(ctx, opsMetricsCollectorLeaderLockKey, instanceID, opsMetricsCollectorLeaderLockTTL); err == nil {
-			return nil, true
+	if getErr == nil {
+		if shouldOpsMetricsCollectorTakeOver(owner, token) {
+			if err := locker.Set(ctx, opsMetricsCollectorLeaderLockKey, token, opsMetricsCollectorLeaderLockTTL); err == nil {
+				return nil, true
+			}
+		} else {
+			c.maybeLogSkip()
+			return nil, false
 		}
 	}
+	if getErr != nil && !errors.Is(getErr, redis.Nil) {
+		// Prefer fail-closed to avoid stampeding the database when Redis is flaky.
+		// Fallback to a DB advisory lock when Redis is present but unavailable.
+		release, ok := tryAcquireDBAdvisoryLock(ctx, c.db, opsMetricsCollectorAdvisoryLockID)
+		if !ok {
+			c.maybeLogSkip()
+			return nil, false
+		}
+		return release, true
+	}
 
-	ok, err := locker.SetNX(ctx, opsMetricsCollectorLeaderLockKey, instanceID, opsMetricsCollectorLeaderLockTTL)
+	ok, err := locker.SetNX(ctx, opsMetricsCollectorLeaderLockKey, token, opsMetricsCollectorLeaderLockTTL)
 	if err != nil {
 		// Prefer fail-closed to avoid stampeding the database when Redis is flaky.
 		// Fallback to a DB advisory lock when Redis is present but unavailable.
@@ -937,11 +979,36 @@ func (c *OpsMetricsCollector) tryAcquireLeaderLock(ctx context.Context) (func(),
 		return release, true
 	}
 	if !ok {
+		owner, getErr = locker.Get(ctx, opsMetricsCollectorLeaderLockKey)
+		if getErr == nil {
+			if shouldOpsMetricsCollectorTakeOver(owner, token) {
+				if err := locker.Set(ctx, opsMetricsCollectorLeaderLockKey, token, opsMetricsCollectorLeaderLockTTL); err == nil {
+					return nil, true
+				}
+			}
+		}
+		if getErr != nil && !errors.Is(getErr, redis.Nil) {
+			release, ok := tryAcquireDBAdvisoryLock(ctx, c.db, opsMetricsCollectorAdvisoryLockID)
+			if !ok {
+				c.maybeLogSkip()
+				return nil, false
+			}
+			return release, true
+		}
 		c.maybeLogSkip()
 		return nil, false
 	}
 
 	return nil, true
+}
+
+func shouldOpsMetricsCollectorTakeOver(ownerToken, selfToken string) bool {
+	if ownerToken == selfToken {
+		return true
+	}
+	ownerStartedAt, _, ownerOK := parseOpsMetricsLeaderToken(ownerToken)
+	selfStartedAt, _, selfOK := parseOpsMetricsLeaderToken(selfToken)
+	return !ownerOK || (selfOK && selfStartedAt > ownerStartedAt)
 }
 
 func (c *OpsMetricsCollector) maybeLogSkip() {
