@@ -40,9 +40,15 @@ RUN pnpm config set registry "${PNPM_REGISTRY}" && \
     pnpm config set network-timeout 600000 && \
     pnpm install --frozen-lockfile
 
-# Copy frontend source and build. Type checking is kept out of the 1G remote
-# image build because vue-tsc can spend minutes swapping on 1C1G VPSes.
+# Copy frontend source and build.
+# LegalDocumentView.vue (admin-compliance gate) build-time imports
+# ../../../../docs/legal/*.md?raw, so docs/legal/ must sit beside frontend/
+# in the image (WORKDIR /app/frontend -> resolves to /app/docs/legal/*.md).
+# Copy only that subtree to keep the build dependency minimal.
+# Type checking is kept out of the 1G remote image build because vue-tsc can
+# spend minutes swapping on 1C1G VPSes.
 COPY frontend/ ./
+COPY docs/legal/ /app/docs/legal/
 RUN VITE_DISABLE_CHECKER=true NODE_OPTIONS="${NODE_OPTIONS}" pnpm exec vite build
 
 # -----------------------------------------------------------------------------
