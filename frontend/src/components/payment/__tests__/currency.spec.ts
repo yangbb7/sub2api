@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatPaymentAmount } from '../currency'
+import { currencySymbol, formatPaymentAmount } from '../currency'
 
 describe('formatPaymentAmount', () => {
   it('uses the currency default fraction digits', () => {
@@ -10,5 +10,15 @@ describe('formatPaymentAmount', () => {
 
   it('formats supported stablecoin codes without falling back to CNY', () => {
     expect(formatPaymentAmount(12.34, 'USDC', 'en-US')).toContain('USDC')
+  })
+})
+
+describe('currencySymbol', () => {
+  it('maps common payment currencies and falls back safely', () => {
+    expect(currencySymbol('USD')).toBe('$')
+    expect(currencySymbol('cny')).toBe('¥')
+    expect(currencySymbol('EUR')).toBe('€')
+    expect(currencySymbol('')).toBe('¥')
+    expect(currencySymbol('XYZ')).toBe('XYZ')
   })
 })
