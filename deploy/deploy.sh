@@ -13,6 +13,9 @@ HEALTH_SLEEP="${HEALTH_SLEEP:-0.2}"
 HEALTH_MIN_SUCCESS="${HEALTH_MIN_SUCCESS:-10}"
 HEALTH_REQUIRED_STREAK="${HEALTH_REQUIRED_STREAK:-5}"
 KEEP_ROLLBACKS="${KEEP_ROLLBACKS:-1}"
+GATEWAY_MEMORY_LIMIT="${GATEWAY_MEMORY_LIMIT:-}"
+GATEWAY_GOMAXPROCS="${GATEWAY_GOMAXPROCS:-}"
+GATEWAY_GOMEMLIMIT="${GATEWAY_GOMEMLIMIT:-}"
 
 usage() {
   cat <<'EOF'
@@ -78,6 +81,7 @@ load_connection_defaults() {
   local name
   for name in \
     TARGET_REGION DOMAIN REMOTE_DIR SSH_TARGET SSH_PORT SSH_KEY SSH_PASSWORD SSH_PASS SUDO_PASSWORD \
+    GATEWAY_MEMORY_LIMIT GATEWAY_GOMAXPROCS GATEWAY_GOMEMLIMIT \
     JP_SSH_TARGET JP_SSH_PORT JP_SSH_KEY JP_SSH_PASSWORD JP_SSH_PASS \
     HK_SSH_TARGET HK_SSH_PORT HK_SSH_KEY HK_SSH_PASSWORD HK_SSH_PASS
   do
@@ -105,6 +109,30 @@ load_connection_defaults() {
   [ -n "${SSH_TARGET:-}" ] || die "SSH_TARGET is empty. Set TARGET_REGION=jp with JP_SSH_TARGET, or export SSH_TARGET."
   if [ -n "${SSH_KEY:-}" ] && [ -n "${SSH_PASSWORD:-}" ]; then
     die "Use SSH_KEY or SSH_PASS/SSH_PASSWORD, not both."
+  fi
+}
+
+validate_simple_token() {
+  local name="$1"
+  local value="$2"
+  [ -z "${value}" ] && return 0
+  case "${value}" in
+    *[!A-Za-z0-9_.:-]*)
+      die "${name} contains unsupported characters."
+      ;;
+  esac
+}
+
+validate_runtime_overrides() {
+  GATEWAY_MEMORY_LIMIT="${GATEWAY_MEMORY_LIMIT:-256m}"
+  validate_simple_token GATEWAY_MEMORY_LIMIT "${GATEWAY_MEMORY_LIMIT}"
+  validate_simple_token GATEWAY_GOMAXPROCS "${GATEWAY_GOMAXPROCS:-}"
+  validate_simple_token GATEWAY_GOMEMLIMIT "${GATEWAY_GOMEMLIMIT:-}"
+  if [ -n "${GATEWAY_GOMAXPROCS:-}" ]; then
+    case "${GATEWAY_GOMAXPROCS}" in
+      ''|*[!0-9]*) die "GATEWAY_GOMAXPROCS must be a positive integer." ;;
+      0) die "GATEWAY_GOMAXPROCS must be a positive integer." ;;
+    esac
   fi
 }
 
@@ -219,6 +247,9 @@ cd $(single_quote "${REMOTE_DIR}")
 ACTIVE_GATEWAY=$(single_quote "${active_gateway}")
 NEXT_GATEWAY=$(single_quote "${next_gateway}")
 EXPECTED_REVISION=$(single_quote "${commit}")
+GATEWAY_MEMORY_LIMIT=$(single_quote "${GATEWAY_MEMORY_LIMIT}")
+GATEWAY_GOMAXPROCS=$(single_quote "${GATEWAY_GOMAXPROCS:-}")
+GATEWAY_GOMEMLIMIT=$(single_quote "${GATEWAY_GOMEMLIMIT:-}")
 
 image_revision="\$(docker inspect gateway:cloud --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
 test "\${image_revision}" = "\${EXPECTED_REVISION}"
@@ -229,12 +260,23 @@ docker rm -f "\${NEXT_GATEWAY}" >/dev/null 2>&1 || true
 env_file="\$(mktemp /tmp/gateway-next-env.XXXXXX)"
 chmod 600 "\${env_file}"
 docker inspect "\${ACTIVE_GATEWAY}" --format '{{range .Config.Env}}{{println .}}{{end}}' > "\${env_file}"
+set_env_override() {
+  key="\$1"
+  value="\$2"
+  [ -n "\${value}" ] || return 0
+  next_env="\${env_file}.next"
+  awk -F= -v key="\${key}" '\$1 != key { print }' "\${env_file}" > "\${next_env}"
+  printf '%s=%s\n' "\${key}" "\${value}" >> "\${next_env}"
+  mv "\${next_env}" "\${env_file}"
+}
+set_env_override GOMAXPROCS "\${GATEWAY_GOMAXPROCS}"
+set_env_override GOMEMLIMIT "\${GATEWAY_GOMEMLIMIT}"
 docker run -d \\
   --name "\${NEXT_GATEWAY}" \\
   --restart unless-stopped \\
   --network gateway_gateway-network \\
   --ulimit nofile=65535:65535 \\
-  --memory 256m \\
+  --memory "\${GATEWAY_MEMORY_LIMIT}" \\
   --env-file "\${env_file}" \\
   -v /opt/gateway/data:/app/data \\
   gateway:cloud >/dev/null
@@ -368,6 +410,7 @@ main() {
   need git
   need sed
   load_connection_defaults
+  validate_runtime_overrides
   require_clean_head
 
   local commit active_gateway
@@ -376,6 +419,9 @@ main() {
   [ -n "${active_gateway}" ] || die "Could not determine active Caddy upstream."
   echo "Current production gateway: ${active_gateway}"
   echo "Deploying revision: ${commit}"
+  echo "Gateway runtime memory limit: ${GATEWAY_MEMORY_LIMIT}"
+  [ -n "${GATEWAY_GOMAXPROCS:-}" ] && echo "Gateway runtime GOMAXPROCS: ${GATEWAY_GOMAXPROCS}"
+  [ -n "${GATEWAY_GOMEMLIMIT:-}" ] && echo "Gateway runtime GOMEMLIMIT: ${GATEWAY_GOMEMLIMIT}"
 
   build_remote_image
   promote_new_container "${active_gateway}" "${commit}"
