@@ -51,7 +51,9 @@ vi.mock('vue-i18n', async (importOriginal) => {
           'admin.ops.conns': 'Conns',
           'admin.ops.active': 'Active',
           'admin.ops.idle': 'Idle',
+          'admin.ops.idleStatus': 'Idle',
           'admin.ops.waiting': 'Waiting',
+          'admin.ops.riskyStatus': 'Risk',
           'admin.ops.ok': 'OK',
         }
         return labels[key] ?? key
@@ -177,5 +179,43 @@ describe('OpsDashboardHeader disk metrics', () => {
     expect(wrapper.text()).toContain('Disk')
     expect(wrapper.text()).toContain('50.0%')
     expect(wrapper.text()).toContain('2,048 / 4,096 MB')
+  })
+
+  it('does not show idle when the selected window still has traffic but current qps is zero', async () => {
+    const wrapper = mount(OpsDashboardHeader, {
+      props: {
+        overview: {
+          ...overview,
+          health_score: 63,
+          qps: { current: 0, peak: 0.2, avg: 0.1 },
+          tps: { current: 648.8, peak: 1766.2, avg: 648.8 },
+          request_count_total: 107,
+          token_consumed: 2_336_000,
+          duration: { p99_ms: 43105 },
+          ttft: { p99_ms: 26996 },
+        } as any,
+        platform: '',
+        groupId: null,
+        timeRange: '1h',
+        queryMode: 'auto',
+        loading: false,
+        lastUpdated: new Date('2026-06-13T11:00:00Z'),
+        thresholds: null,
+      },
+      global: {
+        stubs: {
+          Select: SelectStub,
+          HelpTooltip: HelpTooltipStub,
+          BaseDialog: BaseDialogStub,
+          Icon: IconStub,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('63')
+    expect(wrapper.text()).toContain('Risk')
+    expect(wrapper.text()).not.toContain('admin.ops.healthCondition Idle')
   })
 })

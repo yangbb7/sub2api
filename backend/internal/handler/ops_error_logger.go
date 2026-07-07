@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"net/http"
 	"runtime"
 	"runtime/debug"
 	"strconv"
@@ -704,6 +705,22 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			}
 			recoveredMsg = truncateString(recoveredMsg, 2048)
 
+			contextWindowLimited := isOpsContextWindowExceeded(c, recoveredMsg, "")
+			errorPhase := "upstream"
+			errorType := "upstream_error"
+			errorOwner := "provider"
+			errorSource := "upstream_http"
+			isBusinessLimited := false
+			severity := classifyOpsSeverity(errorType, effectiveUpstreamStatus)
+			if contextWindowLimited {
+				errorPhase = "request"
+				errorType = "invalid_request_error"
+				errorOwner = "client"
+				errorSource = "client_request"
+				isBusinessLimited = true
+				severity = classifyOpsSeverity(errorType, http.StatusBadRequest)
+			}
+
 			entry := &service.OpsInsertErrorLogInput{
 				RequestID:       requestID,
 				ClientRequestID: clientRequestID,
@@ -743,19 +760,19 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 				}(),
 				UserAgent: c.GetHeader("User-Agent"),
 
-				ErrorPhase: "upstream",
-				ErrorType:  "upstream_error",
+				ErrorPhase: errorPhase,
+				ErrorType:  errorType,
 				// Severity should reflect the upstream failure, not the final client status (200).
-				Severity:          classifyOpsSeverity("upstream_error", effectiveUpstreamStatus),
+				Severity:          severity,
 				StatusCode:        status,
-				IsBusinessLimited: false,
+				IsBusinessLimited: isBusinessLimited,
 				IsCountTokens:     isCountTokensRequest(c),
 
 				ErrorMessage: recoveredMsg,
 				ErrorBody:    "",
 
-				ErrorSource: "upstream_http",
-				ErrorOwner:  "provider",
+				ErrorSource: errorSource,
+				ErrorOwner:  errorOwner,
 
 				UpstreamStatusCode:   upstreamStatusCode,
 				UpstreamErrorMessage: upstreamErrorMessage,
@@ -1227,11 +1244,14 @@ func classifyOpsErrorLog(c *gin.Context, errType, message, code string, status i
 	phase = classifyOpsPhase(errType, message, code)
 	routingCapacityLimited := isOpsRoutingCapacityLimited(c)
 	clientBusinessLimited := service.HasOpsClientBusinessLimited(c)
+	contextWindowLimited := isOpsContextWindowExceeded(c, message, code)
 	upstreamError := hasOpsUpstreamErrorContext(c)
-	if upstreamError && !routingCapacityLimited {
+	if contextWindowLimited {
+		phase = "request"
+	} else if upstreamError && !routingCapacityLimited {
 		phase = "upstream"
 	}
-	if clientBusinessLimited && !upstreamError && !routingCapacityLimited {
+	if clientBusinessLimited && !upstreamError && !routingCapacityLimited && !contextWindowLimited {
 		phase = "auth"
 	}
 	if routingCapacityLimited {
@@ -1240,10 +1260,37 @@ func classifyOpsErrorLog(c *gin.Context, errType, message, code string, status i
 	msg := strings.ToLower(message)
 	localClientAuthError := !upstreamError && phase == "auth" && isOpsClientAuthError(code, msg)
 	localBusinessLimited := !upstreamError && classifyOpsIsBusinessLimited(errType, phase, code, status, message, localClientAuthError)
-	isBusinessLimited = routingCapacityLimited || (clientBusinessLimited && !upstreamError) || localBusinessLimited
+	isBusinessLimited = routingCapacityLimited || contextWindowLimited || (clientBusinessLimited && !upstreamError) || localBusinessLimited
 	errorOwner = classifyOpsErrorOwner(phase, message)
 	errorSource = classifyOpsErrorSource(phase, message)
 	return phase, isBusinessLimited, errorOwner, errorSource
+}
+
+func isOpsContextWindowExceeded(c *gin.Context, message, code string) bool {
+	if service.OpsClientBusinessLimitedReason(c) == service.OpsClientBusinessLimitedReasonContextWindowExceeded {
+		return true
+	}
+	if service.IsOpenAIContextWindowError(message, nil) || service.IsOpenAIContextWindowError(code, nil) {
+		return true
+	}
+	if c == nil {
+		return false
+	}
+	if v, ok := c.Get(service.OpsUpstreamErrorMessageKey); ok {
+		if msg, ok := v.(string); ok && service.IsOpenAIContextWindowError(msg, nil) {
+			return true
+		}
+	}
+	if v, ok := c.Get(service.OpsUpstreamErrorsKey); ok {
+		if events, ok := v.([]*service.OpsUpstreamErrorEvent); ok {
+			for _, event := range events {
+				if event != nil && (service.IsOpenAIContextWindowError(event.Message, nil) || service.IsOpenAIContextWindowError(event.Detail, nil)) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func classifyOpsIsBusinessLimited(errType, phase, code string, status int, message string, localClientAuthError ...bool) bool {

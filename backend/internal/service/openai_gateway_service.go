@@ -1246,6 +1246,10 @@ func isOpenAIContextWindowError(upstreamMsg string, upstreamBody []byte) bool {
 	return match(string(upstreamBody))
 }
 
+func IsOpenAIContextWindowError(upstreamMsg string, upstreamBody []byte) bool {
+	return isOpenAIContextWindowError(upstreamMsg, upstreamBody)
+}
+
 // ExtractSessionID extracts the raw session ID from headers or body without hashing.
 // Used by ForwardAsAnthropic to pass as prompt_cache_key for upstream cache.
 func (s *OpenAIGatewayService) ExtractSessionID(c *gin.Context, body []byte) string {

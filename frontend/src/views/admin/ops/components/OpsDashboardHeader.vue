@@ -428,8 +428,11 @@ const isSystemIdle = computed(() => {
   const ov = overview.value
   if (!ov) return true
   const qps = ov.qps?.current
+  const tps = ov.tps?.current
   const errorRate = ov.error_rate ?? 0
-  return (qps ?? 0) === 0 && errorRate === 0
+  const hasWindowTraffic = (ov.request_count_total ?? 0) > 0 || (ov.token_consumed ?? 0) > 0
+  const hasLatencySamples = ov.duration?.p99_ms != null || ov.ttft?.p99_ms != null
+  return (qps ?? 0) === 0 && (tps ?? 0) === 0 && errorRate === 0 && !hasWindowTraffic && !hasLatencySamples
 })
 
 const healthScoreValue = computed<number | null>(() => {

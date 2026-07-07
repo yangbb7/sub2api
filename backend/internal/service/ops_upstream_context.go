@@ -54,6 +54,7 @@ const (
 	OpsClientBusinessLimitedReasonAPIKeyGroupUnassigned  = "api_key_group_unassigned"
 	OpsClientBusinessLimitedReasonLocalFeatureGate       = "local_feature_gate"
 	OpsClientBusinessLimitedReasonLocalPolicyDenied      = "local_policy_denied"
+	OpsClientBusinessLimitedReasonContextWindowExceeded  = "context_window_exceeded"
 )
 
 type OpsLatencyLogField struct {
@@ -139,6 +140,10 @@ func MarkOpsClientBusinessLimited(c *gin.Context, reason string) {
 	}
 }
 
+func MarkOpsContextWindowExceeded(c *gin.Context) {
+	MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonContextWindowExceeded)
+}
+
 func HasOpsClientBusinessLimited(c *gin.Context) bool {
 	if c == nil {
 		return false
@@ -149,6 +154,18 @@ func HasOpsClientBusinessLimited(c *gin.Context) bool {
 	}
 	marked, _ := v.(bool)
 	return marked
+}
+
+func OpsClientBusinessLimitedReason(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	v, ok := c.Get(OpsClientBusinessLimitedReasonKey)
+	if !ok {
+		return ""
+	}
+	reason, _ := v.(string)
+	return strings.TrimSpace(reason)
 }
 
 // SetOpsUpstreamError is the exported wrapper for setOpsUpstreamError, used by

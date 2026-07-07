@@ -658,6 +658,29 @@ func TestClassifyOpsClientBusinessLimitedMarkerExcludesCustomPolicyDenialFromSLA
 	require.Equal(t, "client_request", errorSource)
 }
 
+func TestClassifyOpsContextWindowExceededWithUpstreamContextExcludedFromSLA(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	service.MarkOpsContextWindowExceeded(c)
+	service.SetOpsUpstreamError(c, http.StatusBadGateway, "Your input exceeds the context window of this model. Please adjust your input and try again.", "")
+
+	errType := normalizeOpsErrorType("upstream_error", "")
+	phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(
+		c,
+		errType,
+		"Your input exceeds the context window of this model. Please adjust your input and try again.",
+		"",
+		http.StatusBadGateway,
+	)
+
+	require.Equal(t, "upstream_error", errType)
+	require.Equal(t, "request", phase)
+	require.True(t, isBusinessLimited)
+	require.Equal(t, "client", errorOwner)
+	require.Equal(t, "client_request", errorSource)
+}
+
 func TestClassifyOpsOtherErrorsStillCountForSLA(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()

@@ -510,7 +510,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					)
 					continue
 				}
-				h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
+				reportOpenAIForwardErrorScheduleResult(h.gatewayService, account.ID, result, c, err)
 				upstreamErrorAlreadyCommunicated := openAIForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
 				wroteFallback := false
 				if !upstreamErrorAlreadyCommunicated {
@@ -2015,6 +2015,22 @@ func openAIForwardErrorAlreadyCommunicated(c *gin.Context, writerSizeBeforeForwa
 		}
 	}
 	return false
+}
+
+func reportOpenAIForwardErrorScheduleResult(gatewayService *service.OpenAIGatewayService, accountID int64, result *service.OpenAIForwardResult, c *gin.Context, err error) {
+	if gatewayService == nil {
+		return
+	}
+	if err != nil && service.IsOpenAIContextWindowError(err.Error(), nil) {
+		service.MarkOpsContextWindowExceeded(c)
+		if result != nil {
+			gatewayService.ReportOpenAIAccountScheduleResult(accountID, true, result.FirstTokenMs)
+			return
+		}
+		gatewayService.ReportOpenAIAccountScheduleResult(accountID, true, nil)
+		return
+	}
+	gatewayService.ReportOpenAIAccountScheduleResult(accountID, false, nil)
 }
 
 // errorResponse returns OpenAI API format error response
