@@ -860,6 +860,9 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 		}
 
 		normalizedType := normalizeOpsErrorType(parsed.ErrorType, parsed.Code)
+		if isOpsContextWindowExceeded(c, parsed.Message, parsed.Code) {
+			normalizedType = "invalid_request_error"
+		}
 
 		phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(c, normalizedType, parsed.Message, parsed.Code, status)
 
