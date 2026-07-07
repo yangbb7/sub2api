@@ -33,6 +33,8 @@ const (
 	openAIQuotaHeadroomNeutralFactor      = 0.5
 	openAIQuotaHeadroomSecondaryLowRemain = 0.10
 	openAIQuotaHeadroomSnapshotStaleAfter = 8 * time.Hour
+	openAIQuotaPressureRetryThreshold     = 0.90
+	openAIAccountScheduleMinPrimary       = 2
 )
 
 type cachedOpenAIAdvancedSchedulerSetting struct {
@@ -105,6 +107,7 @@ type openAIAccountLoadPlan struct {
 	allCandidates             []openAIAccountCandidateScore
 	candidates                []openAIAccountCandidateScore
 	slowTTFTRetry             []openAIAccountCandidateScore
+	quotaPressureRetry        []openAIAccountCandidateScore
 	staleSnapshotCompactRetry []openAIAccountCandidateScore
 	selectionOrder            []openAIAccountCandidateScore
 	candidateCount            int
@@ -819,9 +822,11 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 			weights.Reset*resetFactor +
 			weights.QuotaHeadroom*quotaHeadroomFactor
 	}
+	candidates, quotaPressureRetry := splitQuotaPressureCandidates(candidates, now)
 	candidates, slowTTFTRetry := s.splitSlowTTFTCandidates(candidates)
 	plan.candidates = candidates
 	plan.slowTTFTRetry = slowTTFTRetry
+	plan.quotaPressureRetry = quotaPressureRetry
 	plan.candidateCount = len(candidates)
 
 	plan.topK = s.service.openAIWSLBTopK()
@@ -836,10 +841,48 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 	return plan
 }
 
+func splitQuotaPressureCandidates(
+	candidates []openAIAccountCandidateScore,
+	now time.Time,
+) ([]openAIAccountCandidateScore, []openAIAccountCandidateScore) {
+	if len(candidates) <= 1 {
+		return candidates, nil
+	}
+	primary := make([]openAIAccountCandidateScore, 0, len(candidates))
+	retry := make([]openAIAccountCandidateScore, 0)
+	for _, candidate := range candidates {
+		if shouldRetryOpenAIAccountForQuotaPressure(candidate.account, now) {
+			retry = append(retry, candidate)
+			continue
+		}
+		primary = append(primary, candidate)
+	}
+	if len(primary) == 0 || len(retry) == 0 {
+		return candidates, nil
+	}
+	return primary, retry
+}
+
+func shouldRetryOpenAIAccountForQuotaPressure(account *Account, now time.Time) bool {
+	if account == nil || !account.IsOpenAI() {
+		return false
+	}
+	if utilization, ok := resolveOpenAIQuotaUtilization(account.Extra, "primary", now); ok && utilization >= openAIQuotaPressureRetryThreshold {
+		return true
+	}
+	if resolveAccountExtraBool(account.Extra, "auto_pause_5h_disabled") {
+		return false
+	}
+	if utilization, ok := resolveOpenAIQuotaUtilization(account.Extra, "5h", now); ok && utilization >= openAIQuotaPressureRetryThreshold {
+		return true
+	}
+	return false
+}
+
 func (s *defaultOpenAIAccountScheduler) splitSlowTTFTCandidates(
 	candidates []openAIAccountCandidateScore,
 ) ([]openAIAccountCandidateScore, []openAIAccountCandidateScore) {
-	if len(candidates) <= 1 || s == nil || s.service == nil {
+	if len(candidates) <= openAIAccountScheduleMinPrimary || s == nil || s.service == nil {
 		return candidates, nil
 	}
 	cfg := s.service.openAIStickyEscapeConfig()
@@ -857,6 +900,9 @@ func (s *defaultOpenAIAccountScheduler) splitSlowTTFTCandidates(
 		primary = append(primary, candidate)
 	}
 	if len(primary) == 0 || len(slow) == 0 {
+		return candidates, nil
+	}
+	if len(primary) < openAIAccountScheduleMinPrimary {
 		return candidates, nil
 	}
 	return primary, slow
@@ -879,33 +925,25 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAISelectionOrder(
 	}
 
 	if req.RequireCompact {
-		supported := make([]openAIAccountCandidateScore, 0, len(plan.candidates))
-		unknown := make([]openAIAccountCandidateScore, 0, len(plan.candidates))
-		for _, candidate := range plan.candidates {
-			switch openAICompactSupportTier(candidate.account) {
-			case 2:
-				supported = append(supported, candidate)
-			case 1:
-				unknown = append(unknown, candidate)
-			}
-		}
-		selectionOrder := make([]openAIAccountCandidateScore, 0, len(plan.allCandidates))
-		selectionOrder = append(selectionOrder, buildSelectionOrder(supported)...)
-		selectionOrder = append(selectionOrder, buildSelectionOrder(unknown)...)
-		if len(plan.slowTTFTRetry) > 0 {
-			slowSupported := make([]openAIAccountCandidateScore, 0, len(plan.slowTTFTRetry))
-			slowUnknown := make([]openAIAccountCandidateScore, 0, len(plan.slowTTFTRetry))
-			for _, candidate := range plan.slowTTFTRetry {
+		appendCompactOrder := func(selectionOrder []openAIAccountCandidateScore, pool []openAIAccountCandidateScore) []openAIAccountCandidateScore {
+			supported := make([]openAIAccountCandidateScore, 0, len(pool))
+			unknown := make([]openAIAccountCandidateScore, 0, len(pool))
+			for _, candidate := range pool {
 				switch openAICompactSupportTier(candidate.account) {
 				case 2:
-					slowSupported = append(slowSupported, candidate)
+					supported = append(supported, candidate)
 				case 1:
-					slowUnknown = append(slowUnknown, candidate)
+					unknown = append(unknown, candidate)
 				}
 			}
-			selectionOrder = append(selectionOrder, buildSelectionOrder(slowSupported)...)
-			selectionOrder = append(selectionOrder, buildSelectionOrder(slowUnknown)...)
+			selectionOrder = append(selectionOrder, buildSelectionOrder(supported)...)
+			selectionOrder = append(selectionOrder, buildSelectionOrder(unknown)...)
+			return selectionOrder
 		}
+		selectionOrder := make([]openAIAccountCandidateScore, 0, len(plan.allCandidates))
+		selectionOrder = appendCompactOrder(selectionOrder, plan.candidates)
+		selectionOrder = appendCompactOrder(selectionOrder, plan.slowTTFTRetry)
+		selectionOrder = appendCompactOrder(selectionOrder, plan.quotaPressureRetry)
 		if len(plan.staleSnapshotCompactRetry) > 0 && s.service.schedulerSnapshot != nil {
 			selectionOrder = append(selectionOrder, sortOpenAICompactRetryCandidates(plan.staleSnapshotCompactRetry)...)
 		}
@@ -914,6 +952,7 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAISelectionOrder(
 
 	selectionOrder := buildSelectionOrder(plan.candidates)
 	selectionOrder = append(selectionOrder, buildSelectionOrder(plan.slowTTFTRetry)...)
+	selectionOrder = append(selectionOrder, buildSelectionOrder(plan.quotaPressureRetry)...)
 	return selectionOrder
 }
 

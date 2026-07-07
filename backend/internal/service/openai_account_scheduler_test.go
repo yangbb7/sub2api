@@ -2009,6 +2009,15 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceDefersSlowTT
 			Concurrency: 1,
 			Priority:    5,
 		},
+		{
+			ID:          37103,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Priority:    5,
+		},
 	}
 
 	cfg := &config.Config{}
@@ -2024,10 +2033,12 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceDefersSlowTT
 		loadMap: map[int64]*AccountLoadInfo{
 			37101: {AccountID: 37101, LoadRate: 0, WaitingCount: 0},
 			37102: {AccountID: 37102, LoadRate: 80, WaitingCount: 4},
+			37103: {AccountID: 37103, LoadRate: 70, WaitingCount: 3},
 		},
 		acquireResults: map[int64]bool{
 			37101: true,
 			37102: true,
+			37103: true,
 		},
 	}
 
@@ -2043,6 +2054,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceDefersSlowTT
 	fastTTFT := 5000
 	svc.openaiAccountStats.report(37101, true, &slowTTFT)
 	svc.openaiAccountStats.report(37102, true, &fastTTFT)
+	svc.openaiAccountStats.report(37103, true, &fastTTFT)
 
 	selection, decision, err := svc.SelectAccountWithScheduler(
 		ctx,
@@ -2057,10 +2069,10 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceDefersSlowTT
 	require.NoError(t, err)
 	require.NotNil(t, selection)
 	require.NotNil(t, selection.Account)
-	require.Equal(t, int64(37102), selection.Account.ID)
+	require.Contains(t, []int64{37102, 37103}, selection.Account.ID)
 	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
-	require.Equal(t, 1, decision.CandidateCount)
-	require.Equal(t, 1, decision.TopK)
+	require.Equal(t, 2, decision.CandidateCount)
+	require.Equal(t, 2, decision.TopK)
 	if selection.ReleaseFunc != nil {
 		selection.ReleaseFunc()
 	}
@@ -2088,6 +2100,15 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceUsesSlowTTFT
 			Concurrency: 1,
 			Priority:    0,
 		},
+		{
+			ID:          37203,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Priority:    5,
+		},
 	}
 
 	cfg := &config.Config{}
@@ -2103,10 +2124,12 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceUsesSlowTTFT
 		loadMap: map[int64]*AccountLoadInfo{
 			37201: {AccountID: 37201, LoadRate: 80, WaitingCount: 4},
 			37202: {AccountID: 37202, LoadRate: 0, WaitingCount: 0},
+			37203: {AccountID: 37203, LoadRate: 70, WaitingCount: 3},
 		},
 		acquireResults: map[int64]bool{
 			37201: false,
 			37202: true,
+			37203: false,
 		},
 	}
 
@@ -2122,6 +2145,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceUsesSlowTTFT
 	slowTTFT := 30000
 	svc.openaiAccountStats.report(37201, true, &fastTTFT)
 	svc.openaiAccountStats.report(37202, true, &slowTTFT)
+	svc.openaiAccountStats.report(37203, true, &fastTTFT)
 
 	selection, decision, err := svc.SelectAccountWithScheduler(
 		ctx,
@@ -2138,8 +2162,8 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceUsesSlowTTFT
 	require.NotNil(t, selection.Account)
 	require.Equal(t, int64(37202), selection.Account.ID)
 	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
-	require.Equal(t, 1, decision.CandidateCount)
-	require.Equal(t, 1, decision.TopK)
+	require.Equal(t, 2, decision.CandidateCount)
+	require.Equal(t, 2, decision.TopK)
 	if selection.ReleaseFunc != nil {
 		selection.ReleaseFunc()
 	}

@@ -38,6 +38,14 @@ func openAIPlanScores(plan openAIAccountLoadPlan) map[int64]float64 {
 	return scores
 }
 
+func openAIPlanAccountIDs(candidates []openAIAccountCandidateScore) []int64 {
+	ids := make([]int64, 0, len(candidates))
+	for _, candidate := range candidates {
+		ids = append(ids, candidate.account.ID)
+	}
+	return ids
+}
+
 // Reset 权重 > 0 时，会话窗口最早重置的账号应获得更高分。
 func TestBuildOpenAIAccountLoadPlan_ResetWeightPrefersSoonestReset(t *testing.T) {
 	now := time.Now()
@@ -193,4 +201,127 @@ func TestBuildOpenAIAccountLoadPlan_QuotaHeadroomZeroNoEffect(t *testing.T) {
 	plan := sched.buildOpenAIAccountLoadPlan(OpenAIAccountScheduleRequest{}, filtered, map[int64]*AccountLoadInfo{})
 	scores := openAIPlanScores(plan)
 	require.Equal(t, scores[1], scores[2], "quota_headroom 权重为 0 时不应影响打分")
+}
+
+func TestBuildOpenAIAccountLoadPlan_SlowTTFTDoesNotCollapsePrimaryPoolToOne(t *testing.T) {
+	stats := newOpenAIAccountRuntimeStats()
+	fastTTFT := 5000
+	slowTTFT := 30000
+	stats.report(15, true, &fastTTFT)
+	stats.report(17, true, &slowTTFT)
+	stats.report(18, true, &slowTTFT)
+
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIScheduler.StickyEscapeEnabled = true
+	cfg.Gateway.OpenAIScheduler.StickyEscapeTTFTMs = 15000
+	cfg.Gateway.OpenAIWS.LBTopK = 7
+	sched := &defaultOpenAIAccountScheduler{
+		service: &OpenAIGatewayService{cfg: cfg},
+		stats:   stats,
+	}
+	filtered := []*Account{
+		{ID: 15, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Priority: 0},
+		{ID: 17, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Priority: 0},
+		{ID: 18, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Priority: 0},
+	}
+
+	plan := sched.buildOpenAIAccountLoadPlan(OpenAIAccountScheduleRequest{}, filtered, map[int64]*AccountLoadInfo{})
+
+	require.ElementsMatch(t, []int64{15, 17, 18}, openAIPlanAccountIDs(plan.candidates))
+	require.Empty(t, plan.slowTTFTRetry)
+	require.Equal(t, 3, plan.candidateCount)
+	require.Equal(t, 3, plan.topK)
+}
+
+func TestBuildOpenAIAccountLoadPlan_SlowTTFTDefersOnlyWhenPrimaryPoolRemainsPlural(t *testing.T) {
+	stats := newOpenAIAccountRuntimeStats()
+	fastTTFT := 5000
+	slowTTFT := 30000
+	stats.report(14, true, &fastTTFT)
+	stats.report(15, true, &fastTTFT)
+	stats.report(17, true, &slowTTFT)
+	stats.report(18, true, &slowTTFT)
+
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIScheduler.StickyEscapeEnabled = true
+	cfg.Gateway.OpenAIScheduler.StickyEscapeTTFTMs = 15000
+	cfg.Gateway.OpenAIWS.LBTopK = 7
+	sched := &defaultOpenAIAccountScheduler{
+		service: &OpenAIGatewayService{cfg: cfg},
+		stats:   stats,
+	}
+	filtered := []*Account{
+		{ID: 14, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Priority: 0},
+		{ID: 15, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Priority: 0},
+		{ID: 17, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Priority: 0},
+		{ID: 18, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Priority: 0},
+	}
+
+	plan := sched.buildOpenAIAccountLoadPlan(OpenAIAccountScheduleRequest{}, filtered, map[int64]*AccountLoadInfo{})
+
+	require.ElementsMatch(t, []int64{14, 15}, openAIPlanAccountIDs(plan.candidates))
+	require.ElementsMatch(t, []int64{17, 18}, openAIPlanAccountIDs(plan.slowTTFTRetry))
+	require.Equal(t, 2, plan.candidateCount)
+	require.Equal(t, 2, plan.topK)
+}
+
+func TestBuildOpenAIAccountLoadPlan_QuotaPressureDefersFastExhaustedAccount(t *testing.T) {
+	now := time.Now()
+	stats := newOpenAIAccountRuntimeStats()
+	fastTTFT := 5000
+	slowTTFT := 30000
+	stats.report(15, true, &fastTTFT)
+	stats.report(17, true, &slowTTFT)
+	stats.report(18, true, &slowTTFT)
+
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIScheduler.StickyEscapeEnabled = true
+	cfg.Gateway.OpenAIScheduler.StickyEscapeTTFTMs = 15000
+	cfg.Gateway.OpenAIWS.LBTopK = 7
+	sched := &defaultOpenAIAccountScheduler{
+		service: &OpenAIGatewayService{cfg: cfg},
+		stats:   stats,
+	}
+	filtered := []*Account{
+		{
+			ID:       15,
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeOAuth,
+			Priority: 0,
+			Extra: map[string]any{
+				"codex_primary_used_percent": 100.0,
+				"codex_primary_reset_at":     now.Add(time.Hour).Format(time.RFC3339),
+				"codex_usage_updated_at":     now.Add(-time.Minute).Format(time.RFC3339),
+			},
+		},
+		{
+			ID:       17,
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeOAuth,
+			Priority: 0,
+			Extra: map[string]any{
+				"codex_primary_used_percent": 18.0,
+				"codex_primary_reset_at":     now.Add(4 * time.Hour).Format(time.RFC3339),
+				"codex_usage_updated_at":     now.Add(-time.Minute).Format(time.RFC3339),
+			},
+		},
+		{
+			ID:       18,
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeOAuth,
+			Priority: 0,
+			Extra: map[string]any{
+				"codex_primary_used_percent": 0.0,
+				"codex_primary_reset_at":     now.Add(4 * time.Hour).Format(time.RFC3339),
+				"codex_usage_updated_at":     now.Add(-time.Minute).Format(time.RFC3339),
+			},
+		},
+	}
+
+	plan := sched.buildOpenAIAccountLoadPlan(OpenAIAccountScheduleRequest{}, filtered, map[int64]*AccountLoadInfo{})
+
+	require.ElementsMatch(t, []int64{17, 18}, openAIPlanAccountIDs(plan.candidates))
+	require.Empty(t, plan.slowTTFTRetry)
+	require.Equal(t, 2, plan.candidateCount)
+	require.Equal(t, 2, plan.topK)
 }
