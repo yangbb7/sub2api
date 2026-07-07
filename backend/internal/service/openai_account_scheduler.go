@@ -104,6 +104,7 @@ type openAIAccountSchedulerMetrics struct {
 type openAIAccountLoadPlan struct {
 	allCandidates             []openAIAccountCandidateScore
 	candidates                []openAIAccountCandidateScore
+	slowTTFTRetry             []openAIAccountCandidateScore
 	staleSnapshotCompactRetry []openAIAccountCandidateScore
 	selectionOrder            []openAIAccountCandidateScore
 	candidateCount            int
@@ -818,7 +819,10 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 			weights.Reset*resetFactor +
 			weights.QuotaHeadroom*quotaHeadroomFactor
 	}
+	candidates, slowTTFTRetry := s.splitSlowTTFTCandidates(candidates)
 	plan.candidates = candidates
+	plan.slowTTFTRetry = slowTTFTRetry
+	plan.candidateCount = len(candidates)
 
 	plan.topK = s.service.openAIWSLBTopK()
 	if plan.topK > len(candidates) {
@@ -830,6 +834,32 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 
 	plan.selectionOrder = s.buildOpenAISelectionOrder(req, plan)
 	return plan
+}
+
+func (s *defaultOpenAIAccountScheduler) splitSlowTTFTCandidates(
+	candidates []openAIAccountCandidateScore,
+) ([]openAIAccountCandidateScore, []openAIAccountCandidateScore) {
+	if len(candidates) <= 1 || s == nil || s.service == nil {
+		return candidates, nil
+	}
+	cfg := s.service.openAIStickyEscapeConfig()
+	if !cfg.enabled || cfg.ttftMs <= 0 {
+		return candidates, nil
+	}
+
+	primary := make([]openAIAccountCandidateScore, 0, len(candidates))
+	slow := make([]openAIAccountCandidateScore, 0)
+	for _, candidate := range candidates {
+		if candidate.hasTTFT && candidate.ttft > cfg.ttftMs {
+			slow = append(slow, candidate)
+			continue
+		}
+		primary = append(primary, candidate)
+	}
+	if len(primary) == 0 || len(slow) == 0 {
+		return candidates, nil
+	}
+	return primary, slow
 }
 
 func (s *defaultOpenAIAccountScheduler) buildOpenAISelectionOrder(
@@ -862,13 +892,29 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAISelectionOrder(
 		selectionOrder := make([]openAIAccountCandidateScore, 0, len(plan.allCandidates))
 		selectionOrder = append(selectionOrder, buildSelectionOrder(supported)...)
 		selectionOrder = append(selectionOrder, buildSelectionOrder(unknown)...)
+		if len(plan.slowTTFTRetry) > 0 {
+			slowSupported := make([]openAIAccountCandidateScore, 0, len(plan.slowTTFTRetry))
+			slowUnknown := make([]openAIAccountCandidateScore, 0, len(plan.slowTTFTRetry))
+			for _, candidate := range plan.slowTTFTRetry {
+				switch openAICompactSupportTier(candidate.account) {
+				case 2:
+					slowSupported = append(slowSupported, candidate)
+				case 1:
+					slowUnknown = append(slowUnknown, candidate)
+				}
+			}
+			selectionOrder = append(selectionOrder, buildSelectionOrder(slowSupported)...)
+			selectionOrder = append(selectionOrder, buildSelectionOrder(slowUnknown)...)
+		}
 		if len(plan.staleSnapshotCompactRetry) > 0 && s.service.schedulerSnapshot != nil {
 			selectionOrder = append(selectionOrder, sortOpenAICompactRetryCandidates(plan.staleSnapshotCompactRetry)...)
 		}
 		return selectionOrder
 	}
 
-	return buildSelectionOrder(plan.candidates)
+	selectionOrder := buildSelectionOrder(plan.candidates)
+	selectionOrder = append(selectionOrder, buildSelectionOrder(plan.slowTTFTRetry)...)
+	return selectionOrder
 }
 
 func sortOpenAICompactRetryCandidates(pool []openAIAccountCandidateScore) []openAIAccountCandidateScore {
