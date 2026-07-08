@@ -185,9 +185,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	}
 
 	// Read request body
-	bodyReadStart := time.Now()
 	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
-	service.SetOpsLatencyMs(c, service.OpsBodyReadLatencyMsKey, time.Since(bodyReadStart).Milliseconds())
 	if err != nil {
 		if maxErr, ok := extractMaxBytesError(err); ok {
 			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
@@ -204,36 +202,25 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 
 	setOpsRequestContext(c, "", false)
 	sessionHashBody := body
-	if service.IsOpenAIResponsesCompactPathForTest(c) {
-		if compactSeed := strings.TrimSpace(gjson.GetBytes(body, "prompt_cache_key").String()); compactSeed != "" {
-			c.Set(service.OpenAICompactSessionSeedKeyForTest(), compactSeed)
-		}
-		normalizedCompactBody, normalizedCompact, compactErr := service.NormalizeOpenAICompactRequestBodyForTest(body)
-		if compactErr != nil {
-			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to normalize compact request body")
-			return
-		}
-		if normalizedCompact {
-			body = normalizedCompactBody
-		}
+	body, ok = h.normalizeOpenAIResponsesCompactRequest(c, reqLog, body)
+	if !ok {
+		return
 	}
 
-	metaStart := time.Now()
-	requestMeta, validJSON := service.ExtractOpenAIResponsesRequestMeta(body)
-	service.SetOpsLatencyMs(c, service.OpsRequestMetaLatencyMsKey, time.Since(metaStart).Milliseconds())
-	if !validJSON {
+	// 校验请求体 JSON 合法性
+	if !gjson.ValidBytes(body) {
+		logRequestBodyParseFailure(reqLog, body, nil)
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return
 	}
 
-	if !requestMeta.ModelExists || !requestMeta.ModelIsString || requestMeta.Model == "" {
+	// 使用 gjson 只读提取字段做校验，避免完整 Unmarshal
+	modelResult := gjson.GetBytes(body, "model")
+	if !modelResult.Exists() || modelResult.Type != gjson.String || modelResult.String() == "" {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "model is required")
 		return
 	}
-	if requestMeta.PromptCacheKey != "" {
-		c.Set(service.OpenAIPromptCacheKey, requestMeta.PromptCacheKey)
-	}
-	reqModel := requestMeta.Model
+	reqModel := modelResult.String()
 
 	reqStream, ok := parseOpenAICompatibleStream(body)
 	if !ok {
@@ -241,7 +228,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		return
 	}
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
-	previousResponseID := requestMeta.PreviousResponseID
+	previousResponseID := strings.TrimSpace(gjson.GetBytes(body, "previous_response_id").String())
 	if previousResponseID != "" {
 		previousResponseIDKind := service.ClassifyOpenAIPreviousResponseIDKind(previousResponseID)
 		reqLog = reqLog.With(
@@ -266,17 +253,12 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	setOpsRequestContext(c, reqModel, reqStream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))
 
-	moderationStart := time.Now()
-	decision := h.checkContentModerationWithValidJSON(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, reqModel, body)
-	service.SetOpsLatencyMs(c, service.OpsContentModerationLatencyMsKey, time.Since(moderationStart).Milliseconds())
-	if decision != nil && decision.Blocked {
+	if decision := h.checkContentModeration(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, reqModel, body); decision != nil && decision.Blocked {
 		h.errorResponse(c, contentModerationStatus(decision), contentModerationErrorCode(decision), decision.Message)
 		return
 	}
 
-	imageIntentStart := time.Now()
-	imageIntent := service.IsImageGenerationIntentFromValidJSON("/v1/responses", reqModel, body)
-	service.SetOpsLatencyMs(c, service.OpsImageIntentLatencyMsKey, time.Since(imageIntentStart).Milliseconds())
+	imageIntent := service.IsImageGenerationIntent("/v1/responses", reqModel, body)
 	if imageIntent && !service.GroupAllowsImageGeneration(apiKey.Group) {
 		h.errorResponse(c, http.StatusForbidden, "permission_error", service.ImageGenerationPermissionMessage())
 		return
@@ -294,18 +276,11 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	}
 
 	// 解析渠道级模型映射
-	channelMappingStart := time.Now()
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
-	service.SetOpsLatencyMs(c, service.OpsChannelMappingLatencyMsKey, time.Since(channelMappingStart).Milliseconds())
-	forwardPrepareStart := time.Now()
 	forwardBody := openAIModelMappedBody(body, channelMapping.Mapped, channelMapping.MappedModel, h.gatewayService.ReplaceModelInBody)
-	service.SetOpsLatencyMs(c, service.OpsForwardPrepareLatencyMsKey, time.Since(forwardPrepareStart).Milliseconds())
 
 	// 提前校验 function_call_output 是否具备可关联上下文，避免上游 400。
-	functionValidationStart := time.Now()
-	functionCallOutputValid := h.validateFunctionCallOutputRequest(c, body, reqLog)
-	service.SetOpsLatencyMs(c, service.OpsFunctionCallValidationLatencyMsKey, time.Since(functionValidationStart).Milliseconds())
-	if !functionCallOutputValid {
+	if !h.validateFunctionCallOutputRequest(c, body, reqLog) {
 		return
 	}
 
@@ -331,9 +306,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	}
 
 	// 2. Re-check billing eligibility after wait
-	billingStart := time.Now()
 	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
-		service.SetOpsLatencyMs(c, service.OpsBillingLatencyMsKey, time.Since(billingStart).Milliseconds())
 		reqLog.Info("openai.billing_eligibility_check_failed", zap.Error(err))
 		status, code, message, retryAfter := billingErrorDetails(err)
 		if retryAfter > 0 {
@@ -342,12 +315,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		h.handleStreamingAwareError(c, status, code, message, streamStarted)
 		return
 	}
-	service.SetOpsLatencyMs(c, service.OpsBillingLatencyMsKey, time.Since(billingStart).Milliseconds())
 
 	// Generate session hash (header first; fallback to prompt_cache_key)
-	sessionHashStart := time.Now()
 	sessionHash := h.gatewayService.GenerateSessionHash(c, sessionHashBody)
-	service.SetOpsLatencyMs(c, service.OpsSessionHashLatencyMsKey, time.Since(sessionHashStart).Milliseconds())
 	if h.rejectIfCyberSessionBlocked(c, apiKey, sessionHashBody, reqModel, cyberBlockFormatResponses) {
 		return
 	}
@@ -372,6 +342,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			service.OpenAIUpstreamTransportAny,
 			service.OpenAIEndpointCapabilityChatCompletions,
 			requireCompact,
+			false,
 			requestPlatform,
 		)
 		if err != nil {
@@ -510,7 +481,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					)
 					continue
 				}
-				reportOpenAIForwardErrorScheduleResult(h.gatewayService, account.ID, result, c, err)
+				h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
 				upstreamErrorAlreadyCommunicated := openAIForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
 				wroteFallback := false
 				if !upstreamErrorAlreadyCommunicated {
@@ -531,7 +502,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			}
 		}
 		if result != nil {
-			if account.Type == service.AccountTypeOAuth {
+			// 排除 spark 影子:其 codex_* 仅由 QueryUsage(/wham/usage bengalfox)更新(外审第7轮 P1)。
+			if account.Type == service.AccountTypeOAuth && !account.IsShadow() {
 				h.gatewayService.UpdateCodexUsageSnapshotFromHeaders(c.Request.Context(), account.ID, result.ResponseHeaders)
 			}
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, true, result.FirstTokenMs)
@@ -543,7 +515,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
 		requestPayloadHash := service.HashUsageRequestPayload(body)
-		requestSnapshot := service.BuildUsageRequestSnapshot(body)
 		inboundEndpoint := GetInboundEndpoint(c)
 		upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account)
 		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
@@ -562,7 +533,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				UserAgent:          userAgent,
 				IPAddress:          clientIP,
 				RequestPayloadHash: requestPayloadHash,
-				RequestSnapshot:    requestSnapshot,
 				APIKeyService:      h.apiKeyService,
 				QuotaPlatform:      quotaPlatform,
 				ChannelUsageFields: channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
@@ -592,6 +562,47 @@ func isOpenAIRemoteCompactPath(c *gin.Context) bool {
 	}
 	normalizedPath := strings.TrimRight(strings.TrimSpace(c.Request.URL.Path), "/")
 	return strings.HasSuffix(normalizedPath, "/responses/compact")
+}
+
+// isBareOpenAIResponsesPath 仅匹配裸 /responses 端点（无 /compact 等子路径），
+// body-signal 提升只允许发生在这里，避免误伤 /responses/{id}/... 形态的请求。
+func isBareOpenAIResponsesPath(c *gin.Context) bool {
+	if c == nil || c.Request == nil || c.Request.URL == nil {
+		return false
+	}
+	normalizedPath := strings.TrimRight(strings.TrimSpace(c.Request.URL.Path), "/")
+	return strings.HasSuffix(normalizedPath, "/responses")
+}
+
+// normalizeOpenAIResponsesCompactRequest 统一处理两种入站 compact 形态：
+// path-based（POST /v1/responses/compact）与 Codex remote compact v2 的
+// body-signal（普通 POST /v1/responses 的 input 中携带 type=compaction_trigger，
+// 见 #3777）。body-signal 命中时在 stream 解析、compact body 归一化与
+// requireCompact 调度判定之前改写 URL path，使后续全部链路（含 passthrough
+// 分支与上游 URL 构建）与 path-based 完全一致。
+// 返回归一化后的 body；ok=false 表示错误响应已写出，调用方应直接 return。
+func (h *OpenAIGatewayHandler) normalizeOpenAIResponsesCompactRequest(c *gin.Context, reqLog *zap.Logger, body []byte) ([]byte, bool) {
+	isCompactRequest := service.IsOpenAIResponsesCompactPathForTest(c)
+	if !isCompactRequest && isBareOpenAIResponsesPath(c) && service.HasCompactionTriggerInInput(body) {
+		c.Request.URL.Path = strings.TrimRight(c.Request.URL.Path, "/") + "/compact"
+		isCompactRequest = true
+		reqLog.Info("codex.remote_compact.detected_body_signal")
+	}
+	if !isCompactRequest {
+		return body, true
+	}
+	if compactSeed := strings.TrimSpace(gjson.GetBytes(body, "prompt_cache_key").String()); compactSeed != "" {
+		c.Set(service.OpenAICompactSessionSeedKeyForTest(), compactSeed)
+	}
+	normalizedCompactBody, normalizedCompact, compactErr := service.NormalizeOpenAICompactRequestBodyForTest(body)
+	if compactErr != nil {
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to normalize compact request body")
+		return nil, false
+	}
+	if normalizedCompact {
+		body = normalizedCompactBody
+	}
+	return body, true
 }
 
 func (h *OpenAIGatewayHandler) logOpenAIRemoteCompactOutcome(c *gin.Context, startedAt time.Time) {
@@ -719,6 +730,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	}
 
 	if !gjson.ValidBytes(body) {
+		logRequestBodyParseFailure(reqLog, body, nil)
 		h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return
 	}
@@ -805,6 +817,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			failedAccountIDs,
 			service.OpenAIUpstreamTransportAny,
 			service.OpenAIEndpointCapabilityChatCompletions,
+			false,
 			false,
 			requestPlatform,
 		)
@@ -960,7 +973,6 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
 		requestPayloadHash := service.HashUsageRequestPayload(body)
-		requestSnapshot := service.BuildUsageRequestSnapshot(body)
 		inboundEndpoint := GetInboundEndpoint(c)
 		upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account)
 		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
@@ -978,7 +990,6 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 				UserAgent:          userAgent,
 				IPAddress:          clientIP,
 				RequestPayloadHash: requestPayloadHash,
-				RequestSnapshot:    requestSnapshot,
 				APIKeyService:      h.apiKeyService,
 				QuotaPlatform:      quotaPlatform,
 				ChannelUsageFields: channelMappingMsg.ToUsageFields(reqModel, result.UpstreamModel),
@@ -1291,6 +1302,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "previous_response_id must be a response.id (resp_*), not a message id")
 		return
 	}
+	firstMessageToolCoverage := service.AnalyzeToolCallOutputContextCoverageBytes(firstMessage)
+	previousResponseCanMove := !firstMessageToolCoverage.HasFunctionCallOutput || firstMessageToolCoverage.ContextCoversAllCallIDs
 	reqLog = reqLog.With(
 		zap.Bool("ws_ingress", true),
 		zap.String("model", reqModel),
@@ -1343,7 +1356,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	// 必须尽早注册，确保任何 early return 都能释放已获取的并发槽位。
 	defer releaseTurnSlots()
 
-	userReleaseFunc, userAcquired, err := h.concurrencyHelper.TryAcquireUserSlot(ctx, subject.UserID, subject.Concurrency)
+	userReleaseFunc, userAcquired, err := h.concurrencyHelper.TryAcquireUserSlotForAPIKey(ctx, subject.UserID, subject.Concurrency, apiKey.ID)
 	if err != nil {
 		reqLog.Warn("openai.websocket_user_slot_acquire_failed", zap.Error(err))
 		closeOpenAIClientWS(wsConn, coderws.StatusInternalError, "failed to acquire user concurrency slot")
@@ -1358,7 +1371,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		if currentUserRelease != nil {
 			return true
 		}
-		userReleaseFunc, userAcquired, err := h.concurrencyHelper.TryAcquireUserSlot(ctx, subject.UserID, subject.Concurrency)
+		userReleaseFunc, userAcquired, err := h.concurrencyHelper.TryAcquireUserSlotForAPIKey(ctx, subject.UserID, subject.Concurrency, apiKey.ID)
 		if err != nil {
 			reqLog.Warn("openai.websocket_user_slot_reacquire_failed", zap.Error(err))
 			closeOpenAIClientWS(wsConn, coderws.StatusInternalError, "failed to acquire user concurrency slot")
@@ -1374,7 +1387,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	requestPlatform := openAICompatibleRequestPlatform(apiKey)
-	requiredTransport := service.OpenAIUpstreamTransportResponsesWebsocketV2
+	requiredTransport := service.OpenAIUpstreamTransportResponsesWebsocketV2Ingress
 	if requestPlatform == service.PlatformGrok {
 		requiredTransport = service.OpenAIUpstreamTransportHTTPSSE
 	}
@@ -1406,6 +1419,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			requiredTransport,
 			service.OpenAIEndpointCapabilityChatCompletions,
 			false,
+			previousResponseCanMove,
 			requestPlatform,
 		)
 		if err != nil {
@@ -1476,7 +1490,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		)
 
 		var requestPayloadHash string
-		var requestSnapshot *service.UsageCallSnapshot
 		hooks := &service.OpenAIWSIngressHooks{
 			InitialRequestModel: reqModel,
 			BeforeRequest: func(turn int, payload []byte, originalModel string) error {
@@ -1510,7 +1523,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				// 防御式清理：避免异常路径下旧槽位覆盖导致泄漏。
 				releaseTurnSlots()
 				// 非首轮 turn 需要重新抢占并发槽位，避免长连接空闲占槽。
-				userReleaseFunc, userAcquired, err := h.concurrencyHelper.TryAcquireUserSlot(ctx, subject.UserID, subject.Concurrency)
+				userReleaseFunc, userAcquired, err := h.concurrencyHelper.TryAcquireUserSlotForAPIKey(ctx, subject.UserID, subject.Concurrency, apiKey.ID)
 				if err != nil {
 					return service.NewOpenAIWSClientCloseError(coderws.StatusInternalError, "failed to acquire user concurrency slot", err)
 				}
@@ -1562,7 +1575,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if result == nil {
 					return
 				}
-				if account.Type == service.AccountTypeOAuth {
+				// 排除 spark 影子:其 codex_* 仅由 QueryUsage(/wham/usage bengalfox)更新(外审第7轮 P1)。
+				if account.Type == service.AccountTypeOAuth && !account.IsShadow() {
 					h.gatewayService.UpdateCodexUsageSnapshotFromHeaders(ctx, account.ID, result.ResponseHeaders)
 				}
 				h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, true, result.FirstTokenMs)
@@ -1582,7 +1596,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 						UserAgent:          userAgent,
 						IPAddress:          clientIP,
 						RequestPayloadHash: requestPayloadHash,
-						RequestSnapshot:    requestSnapshot,
 						APIKeyService:      h.apiKeyService,
 						QuotaPlatform:      quotaPlatform,
 						ChannelUsageFields: channelMappingWS.ToUsageFields(reqModel, result.UpstreamModel),
@@ -1607,8 +1620,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		// 说明该会话链不属于本次调度到的账号，原样转发会触发上游会话链鉴权失败（“鉴权失败，请检查 API Key”）。
 		// 故剥离首包里的 previous_response_id，改用首包内 input 重建上下文；带 function_call_output 的
 		// 工具续链无法重建，保持原样。仅作用于首轮首包，后续 turn 的续链由 WS 转发层既有逻辑处理。
-		if previousResponseID != "" && !scheduleDecision.StickyPreviousHit &&
-			!service.ValidateFunctionCallOutputContextBytes(wsFirstMessage).HasFunctionCallOutput {
+		if previousResponseID != "" && !scheduleDecision.StickyPreviousHit && previousResponseCanMove {
 			wsFirstMessage = service.RemovePreviousResponseIDFromBody(wsFirstMessage)
 			reqLog.Debug("openai.websocket_previous_response_id_stripped_cross_group",
 				zap.Int64("account_id", account.ID),
@@ -1618,7 +1630,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 
 		// WebSocket 首包可能很大，hash 必须在 hooks 外算成字符串，避免 AfterTurn 闭包保活请求体。
 		requestPayloadHash = service.HashUsageRequestPayload(wsFirstMessage)
-		requestSnapshot = service.BuildUsageRequestSnapshot(wsFirstMessage)
 
 		if err := h.gatewayService.ProxyResponsesWebSocketFromClient(ctx, c, wsConn, account, token, wsFirstMessage, hooks); err != nil {
 			var failoverErr *service.UpstreamFailoverError
@@ -2015,22 +2026,6 @@ func openAIForwardErrorAlreadyCommunicated(c *gin.Context, writerSizeBeforeForwa
 		}
 	}
 	return false
-}
-
-func reportOpenAIForwardErrorScheduleResult(gatewayService *service.OpenAIGatewayService, accountID int64, result *service.OpenAIForwardResult, c *gin.Context, err error) {
-	if gatewayService == nil {
-		return
-	}
-	if err != nil && service.IsOpenAIContextWindowError(err.Error(), nil) {
-		service.MarkOpsContextWindowExceeded(c)
-		if result != nil {
-			gatewayService.ReportOpenAIAccountScheduleResult(accountID, true, result.FirstTokenMs)
-			return
-		}
-		gatewayService.ReportOpenAIAccountScheduleResult(accountID, true, nil)
-		return
-	}
-	gatewayService.ReportOpenAIAccountScheduleResult(accountID, false, nil)
 }
 
 // errorResponse returns OpenAI API format error response

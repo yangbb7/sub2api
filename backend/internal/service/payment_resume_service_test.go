@@ -28,15 +28,31 @@ func TestNormalizeVisibleMethods(t *testing.T) {
 		"stripe",
 		"coinbase",
 		"crypto",
+		"ldc",
 	})
 
-	want := []string{"alipay", "wxpay", "stripe", "crypto"}
+	want := []string{"alipay", "wxpay", "stripe", "crypto", "ldc"}
 	if len(got) != len(want) {
 		t.Fatalf("NormalizeVisibleMethods len = %d, want %d (%v)", len(got), len(want), got)
 	}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("NormalizeVisibleMethods[%d] = %q, want %q (full=%v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestEnabledVisibleMethodsForEasyPayIncludesCustomSupportedTypes(t *testing.T) {
+	t.Parallel()
+
+	got := enabledVisibleMethodsForProvider(payment.TypeEasyPay, "alipay,ldc,usdt_trc20")
+	want := []string{"alipay", "ldc", "usdt_trc20"}
+	if len(got) != len(want) {
+		t.Fatalf("enabledVisibleMethodsForProvider len = %d, want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("enabledVisibleMethodsForProvider[%d] = %q, want %q (full=%v)", i, got[i], want[i], got)
 		}
 	}
 }

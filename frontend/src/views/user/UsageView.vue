@@ -68,7 +68,33 @@
 
       <div class="card p-6">
         <div class="flex flex-wrap items-end justify-between gap-4">
-          <div class="flex flex-1 flex-wrap items-end gap-4">
+          <div v-if="activeTab === 'errors'" class="flex flex-1 flex-wrap items-end gap-4">
+            <div class="w-full sm:w-auto sm:min-w-[220px]">
+              <label class="input-label">{{ t('usage.errors.keyName') }}</label>
+              <Select v-model="errorFilter.api_key_id" :options="errorKeyOptions" @change="applyErrorFilters" />
+            </div>
+            <div class="w-full sm:w-auto sm:min-w-[220px]">
+              <label class="input-label">{{ t('usage.errors.model') }}</label>
+              <Select
+                v-model="errorFilter.model"
+                :options="errorModelOptions"
+                searchable
+                creatable
+                clearable
+                :placeholder="t('usage.errors.modelPlaceholder')"
+                @change="applyErrorFilters"
+              />
+            </div>
+            <div class="w-full sm:w-auto sm:min-w-[200px]">
+              <label class="input-label">{{ t('usage.errors.category') }}</label>
+              <Select v-model="errorFilter.category" :options="errorCategoryOptions" @change="applyErrorFilters" />
+            </div>
+            <div class="w-full sm:w-auto sm:min-w-[180px]">
+              <label class="input-label">{{ t('usage.errors.status') }}</label>
+              <Select v-model="errorFilter.status_code" :options="errorStatusOptions" @change="applyErrorFilters" />
+            </div>
+          </div>
+          <div v-else class="flex flex-1 flex-wrap items-end gap-4">
             <div class="w-full sm:w-auto sm:min-w-[220px]">
               <label class="input-label">{{ t('usage.apiKeyFilter') }}</label>
               <Select v-model="filters.api_key_id" :options="apiKeyOptions" @change="applyFilters" />
@@ -96,7 +122,7 @@
           </div>
 
           <div class="flex w-full flex-wrap items-center justify-end gap-3 sm:w-auto">
-            <button type="button" @click="refreshData" :disabled="loading" class="btn btn-secondary">
+            <button type="button" @click="refreshData" :disabled="activeTab === 'errors' ? errorLoading : loading" class="btn btn-secondary">
               {{ t('common.refresh') }}
             </button>
             <button type="button" @click="resetFilters" class="btn btn-secondary">
@@ -117,18 +143,18 @@
                 class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
               >
                 <button
-                  v-for="col in toggleableColumns"
+                  v-for="col in currentToggleableColumns"
                   :key="col.key"
                   type="button"
-                  @click="toggleColumn(col.key)"
+                  @click="toggleCurrentColumn(col.key)"
                   class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
                 >
                   <span>{{ col.label }}</span>
-                  <Icon v-if="isColumnVisible(col.key)" name="check" size="sm" class="text-primary-500" />
+                  <Icon v-if="isCurrentColumnVisible(col.key)" name="check" size="sm" class="text-primary-500" />
                 </button>
               </div>
             </div>
-            <button type="button" @click="exportToCSV" :disabled="exporting" class="btn btn-primary">
+            <button v-if="activeTab !== 'errors'" type="button" @click="exportToCSV" :disabled="exporting" class="btn btn-primary">
               {{ exporting ? t('usage.exporting') : t('usage.exportCsv') }}
             </button>
           </div>
@@ -152,13 +178,10 @@
           :server-side-sort="true"
           :show-account-billing="false"
           :show-upstream-endpoint="false"
-          :row-clickable="true"
-          :estimate-row-height="88"
-          :overscan="12"
           default-sort-key="created_at"
           default-sort-order="desc"
           @sort="handleSort"
-          @row-click="openCallDetails"
+          @ipGeoBatchFailed="handleIpGeoBatchFailed"
         />
 
         <Pagination
@@ -178,79 +201,15 @@
         :loading="errorLoading"
         :page="errorPage"
         :page-size="errorPageSize"
-        :api-keys="apiKeys"
-        @filter="onErrorFilter"
+        :visible-column-keys="errVisibleColumnKeys"
+        @sort="onErrorSort"
         @update:page="onErrorPage"
         @update:pageSize="onErrorPageSize"
+        @ipGeoBatchFailed="handleIpGeoBatchFailed"
       />
     </div>
   </AppLayout>
 
-  <BaseDialog
-    :show="callDetailsVisible"
-    :title="t('usage.callDetails')"
-    width="wide"
-    @close="closeCallDetails"
-  >
-    <div v-if="selectedUsageLog" class="space-y-5">
-      <div class="grid gap-3 text-sm text-gray-600 dark:text-gray-300 sm:grid-cols-2">
-        <div>
-          <div class="text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
-            {{ t('usage.requestId') }}
-          </div>
-          <div class="mt-1 break-all font-mono text-gray-900 dark:text-white">
-            {{ selectedUsageLog.request_id || '-' }}
-          </div>
-        </div>
-        <div>
-          <div class="text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
-            {{ t('usage.model') }}
-          </div>
-          <div class="mt-1 font-medium text-gray-900 dark:text-white">
-            {{ selectedUsageLog.model }}
-          </div>
-        </div>
-      </div>
-
-      <div class="grid gap-4 lg:grid-cols-2">
-        <section class="space-y-2">
-          <div class="flex items-center justify-between">
-            <h4 class="text-sm font-semibold text-gray-900 dark:text-white">
-              {{ t('usage.requestSnapshot') }}
-            </h4>
-            <span
-              v-if="selectedUsageLog.request_snapshot?.truncated"
-              class="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-500/20 dark:text-amber-300"
-            >
-              {{ t('usage.truncated') }}
-            </span>
-          </div>
-          <pre class="max-h-[420px] overflow-auto rounded border border-gray-200 bg-gray-50 p-3 text-xs leading-relaxed text-gray-800 dark:border-dark-700 dark:bg-dark-900 dark:text-dark-100">{{ formatSnapshot(selectedUsageLog.request_snapshot) }}</pre>
-        </section>
-
-        <section class="space-y-2">
-          <div class="flex items-center justify-between">
-            <h4 class="text-sm font-semibold text-gray-900 dark:text-white">
-              {{ t('usage.responseSnapshot') }}
-            </h4>
-            <span
-              v-if="selectedUsageLog.response_snapshot?.truncated"
-              class="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-500/20 dark:text-amber-300"
-            >
-              {{ t('usage.truncated') }}
-            </span>
-          </div>
-          <pre class="max-h-[420px] overflow-auto rounded border border-gray-200 bg-gray-50 p-3 text-xs leading-relaxed text-gray-800 dark:border-dark-700 dark:bg-dark-900 dark:text-dark-100">{{ formatSnapshot(selectedUsageLog.response_snapshot) }}</pre>
-        </section>
-      </div>
-    </div>
-
-    <template #footer>
-      <button type="button" class="btn btn-secondary" @click="closeCallDetails">
-        {{ t('common.close') }}
-      </button>
-    </template>
-  </BaseDialog>
 </template>
 
 <script setup lang="ts">
@@ -259,7 +218,6 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { keysAPI, usageAPI, userGroupsAPI } from '@/api'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import BaseDialog from '@/components/common/BaseDialog.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import DateRangePicker from '@/components/common/DateRangePicker.vue'
@@ -283,12 +241,12 @@ import type {
   ModelStat,
   TrendDataPoint,
   UsageLog,
-  UsageCallSnapshot,
   UsageQueryParams,
   UsageStatsResponse,
   UserErrorRequest,
 } from '@/types'
 import type { Column } from '@/components/common/types'
+import { COMMON_ERROR_STATUS_CODES } from '@/utils/errorBadges'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -310,19 +268,56 @@ const chartsLoading = ref(false)
 const modelStatsLoading = ref(false)
 const endpointStatsLoading = ref(false)
 const exporting = ref(false)
-const callDetailsVisible = ref(false)
-const callDetailsLoading = ref(false)
-const selectedUsageLog = ref<UsageLog | null>(null)
 const errorRows = ref<UserErrorRequest[]>([])
 const errorLoading = ref(false)
 const errorPage = ref(1)
 const errorPageSize = ref(20)
+const errorSortBy = ref('created_at')
+const errorSortOrder = ref<'asc' | 'desc'>('desc')
 const errorTotal = ref(0)
-const errorFilter = ref<{ model: string; category: string; api_key_id: number | null }>({
+const errorFilter = ref<{ model: string | null; category: string; api_key_id: number | null; status_code: number | null }>({
   model: '',
   category: '',
   api_key_id: null,
+  status_code: null,
 })
+
+const errorKeyOptions = computed<SelectOption[]>(() => [
+  { value: null, label: t('usage.errors.allKeys') },
+  ...apiKeys.value.map((k) => ({ value: k.id, label: k.name })),
+])
+
+// 模型候选取自当前已加载错误中出现过的模型；creatable 允许输入任意片段做后端模糊。
+const errorModelOptions = computed<SelectOption[]>(() => {
+  const seen = new Set<string>()
+  const opts: SelectOption[] = []
+  for (const r of errorRows.value) {
+    if (r.model && !seen.has(r.model)) {
+      seen.add(r.model)
+      opts.push({ value: r.model, label: r.model })
+    }
+  }
+  return opts
+})
+
+const errorCategoryCodes = ['auth', 'rate_limit', 'quota', 'invalid_request', 'service_unavailable', 'upstream', 'internal', 'cyber']
+
+const errorCategoryOptions = computed<SelectOption[]>(() => [
+  { value: '', label: t('usage.errors.allCategories') },
+  ...errorCategoryCodes.map((c) => ({ value: c, label: t('usage.errors.categories.' + c) })),
+])
+
+// 状态码候选用固定常用列表(与管理端 UsageFilters 共用常量),不受当前页数据限制:
+// 后端 status_code 过滤对全量生效,若只列当前页出现过的码,用户就选不到仅在后续页的码。
+const errorStatusOptions = computed<SelectOption[]>(() => [
+  { value: null, label: t('usage.errors.allStatuses') },
+  ...COMMON_ERROR_STATUS_CODES.map((c) => ({ value: c, label: String(c) })),
+])
+
+const applyErrorFilters = () => {
+  errorPage.value = 1
+  void loadErrors()
+}
 
 let abortController: AbortController | null = null
 let chartReqSeq = 0
@@ -431,30 +426,6 @@ const buildUsageListParams = (page: number, pageSize: number): UsageQueryParams 
   sort_by: sortState.sort_by,
   sort_order: sortState.sort_order,
 })
-
-const formatSnapshot = (snapshot: UsageCallSnapshot | null | undefined): string => {
-  if (!snapshot?.content) return t('usage.snapshotUnavailable')
-  return snapshot.content
-}
-
-const openCallDetails = async (row: UsageLog) => {
-  selectedUsageLog.value = row
-  callDetailsVisible.value = true
-  callDetailsLoading.value = true
-  try {
-    selectedUsageLog.value = await usageAPI.getById(row.id)
-  } catch (error) {
-    appStore.showError(t('usage.failedToLoadCallDetails'))
-    console.error('Failed to load usage call details:', error)
-  } finally {
-    callDetailsLoading.value = false
-  }
-}
-
-const closeCallDetails = () => {
-  callDetailsVisible.value = false
-  selectedUsageLog.value = null
-}
 
 const loadLogs = async () => {
   abortController?.abort()
@@ -583,6 +554,10 @@ const resetFilters = () => {
   }
   granularity.value = getGranularityForRange(range.start, range.end)
   applyFilters()
+  if (activeTab.value === 'errors') {
+    errorFilter.value = { model: '', category: '', api_key_id: null, status_code: null }
+    applyErrorFilters()
+  }
 }
 
 const onDateRangeChange = (range: { startDate: string; endDate: string; preset: string | null }) => {
@@ -610,6 +585,10 @@ const handleSort = (key: string, order: 'asc' | 'desc') => {
   sortState.sort_order = order
   pagination.page = 1
   void loadLogs()
+}
+
+const handleIpGeoBatchFailed = () => {
+  appStore.showError(t('usage.ipGeo.batchFailed'))
 }
 
 const getRequestTypeExportText = (log: UsageLog): string => {
@@ -698,7 +677,7 @@ const exportToCSV = async () => {
       headers.map(escapeCSVValue).join(','),
       ...rows.map((row) => row.join(',')),
     ].join('\n')
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' })
     const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
@@ -715,7 +694,7 @@ const exportToCSV = async () => {
 }
 
 const ALWAYS_VISIBLE = ['created_at']
-const DEFAULT_HIDDEN_COLUMNS = ['reasoning_effort', 'user_agent']
+const DEFAULT_HIDDEN_COLUMNS = ['user_agent']
 const HIDDEN_COLUMNS_KEY = 'user-usage-hidden-columns'
 
 const allColumns = computed<Column[]>(() => [
@@ -754,6 +733,63 @@ const loadSavedColumns = () => {
   } catch {
     DEFAULT_HIDDEN_COLUMNS.forEach((key) => hiddenColumns.add(key))
   }
+}
+
+// 错误请求 tab 独立列设置(机制同用量列设置,存储互不影响)
+const ERR_ALWAYS_VISIBLE = ['status', 'created_at']
+const ERR_DEFAULT_HIDDEN_COLUMNS = ['user_agent']
+const ERR_HIDDEN_COLUMNS_KEY = 'user-usage-error-hidden-columns'
+
+// key 须与 UserErrorRequestsTable 的 allColumns 一致
+const errAllColumns = computed<Column[]>(() => [
+  { key: 'key_name', label: t('usage.errors.keyName') },
+  { key: 'model', label: t('usage.errors.model') },
+  { key: 'endpoint', label: t('usage.errors.endpoint') },
+  { key: 'client_ip', label: 'IP' },
+  { key: 'group', label: t('admin.usage.group') },
+  { key: 'type', label: t('usage.type') },
+  { key: 'platform', label: t('usage.errors.platform') },
+  { key: 'category', label: t('usage.errors.category') },
+  { key: 'status', label: t('usage.errors.status') },
+  { key: 'message', label: t('usage.errors.message') },
+  { key: 'created_at', label: t('usage.errors.time') },
+  { key: 'user_agent', label: t('usage.userAgent') },
+])
+
+const errHiddenColumns = reactive<Set<string>>(new Set())
+const errToggleableColumns = computed(() =>
+  errAllColumns.value.filter((col) => !ERR_ALWAYS_VISIBLE.includes(col.key))
+)
+const errVisibleColumnKeys = computed(() =>
+  errAllColumns.value
+    .filter((col) => ERR_ALWAYS_VISIBLE.includes(col.key) || !errHiddenColumns.has(col.key))
+    .map((col) => col.key)
+)
+const isErrColumnVisible = (key: string) => !errHiddenColumns.has(key)
+const toggleErrColumn = (key: string) => {
+  if (errHiddenColumns.has(key)) errHiddenColumns.delete(key)
+  else errHiddenColumns.add(key)
+  localStorage.setItem(ERR_HIDDEN_COLUMNS_KEY, JSON.stringify([...errHiddenColumns]))
+}
+const loadSavedErrColumns = () => {
+  try {
+    const saved = localStorage.getItem(ERR_HIDDEN_COLUMNS_KEY)
+    const values = saved ? (JSON.parse(saved) as string[]) : ERR_DEFAULT_HIDDEN_COLUMNS
+    values.forEach((key) => errHiddenColumns.add(key))
+  } catch {
+    ERR_DEFAULT_HIDDEN_COLUMNS.forEach((key) => errHiddenColumns.add(key))
+  }
+}
+
+// 列设置下拉按当前 tab 分发
+const currentToggleableColumns = computed(() =>
+  activeTab.value === 'errors' ? errToggleableColumns.value : toggleableColumns.value
+)
+const isCurrentColumnVisible = (key: string) =>
+  activeTab.value === 'errors' ? isErrColumnVisible(key) : isColumnVisible(key)
+const toggleCurrentColumn = (key: string) => {
+  if (activeTab.value === 'errors') toggleErrColumn(key)
+  else toggleColumn(key)
 }
 
 const showColumnDropdown = ref(false)
@@ -795,9 +831,12 @@ const loadErrors = async () => {
       page_size: errorPageSize.value,
       start_date: startDate.value,
       end_date: endDate.value,
-      model: errorFilter.value.model || undefined,
+      model: (errorFilter.value.model ?? '').trim() || undefined,
       category: errorFilter.value.category || undefined,
       api_key_id: errorFilter.value.api_key_id ?? undefined,
+      status_code: errorFilter.value.status_code ?? undefined,
+      sort_by: errorSortBy.value,
+      sort_order: errorSortOrder.value,
     })
     errorRows.value = resp.items
     errorTotal.value = resp.total
@@ -809,8 +848,9 @@ const loadErrors = async () => {
   }
 }
 
-const onErrorFilter = (filter: { model: string; category: string; api_key_id: number | null }) => {
-  errorFilter.value = filter
+const onErrorSort = (sortBy: string, sortOrder: 'asc' | 'desc') => {
+  errorSortBy.value = sortBy
+  errorSortOrder.value = sortOrder
   errorPage.value = 1
   void loadErrors()
 }
@@ -833,6 +873,7 @@ const switchToErrors = () => {
 
 onMounted(() => {
   loadSavedColumns()
+  loadSavedErrColumns()
   document.addEventListener('click', handleColumnClickOutside)
   void loadFilterOptions()
   refreshData()

@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { CRYPTO_PAYMENT_CURRENCY_OPTIONS, PAYMENT_CURRENCY_OPTIONS, PROVIDER_CONFIG_FIELDS } from '@/components/payment/providerConfig'
+import {
+  PAYMENT_CURRENCY_OPTIONS,
+  PROVIDER_CONFIG_FIELDS,
+  isBuiltInAlipayMethod,
+  isBuiltInWxpayMethod,
+  parseEasyPayCustomMethods,
+  serializeEasyPayCustomMethods,
+} from '@/components/payment/providerConfig'
 
 function findField(providerKey: string, key: string) {
   const fields = PROVIDER_CONFIG_FIELDS[providerKey] || []
@@ -51,30 +58,38 @@ describe('PROVIDER_CONFIG_FIELDS.stripe', () => {
   })
 })
 
-describe('PROVIDER_CONFIG_FIELDS creditRateToUsd', () => {
-  it('lets every provider override payment-currency to USD balance credit rate', () => {
-    for (const providerKey of ['easypay', 'alipay', 'wxpay', 'stripe', 'airwallex', 'coinbase']) {
-      const field = findField(providerKey, 'creditRateToUsd')
+describe('EasyPay custom methods config', () => {
+  it('parses customMethods from the JSON string stored in provider config', () => {
+    expect(parseEasyPayCustomMethods(
+      '[{"type":"ldc","upstreamType":"epay","displayName":"LDC"},{"type":"usdt_trc20","upstreamType":"usdt","displayName":"USDT-TRC20"}]',
+    )).toEqual([
+      { type: 'ldc', upstreamType: 'epay', displayName: 'LDC' },
+      { type: 'usdt_trc20', upstreamType: 'usdt', displayName: 'USDT-TRC20' },
+    ])
+  })
 
-      expect(field?.sensitive).toBe(false)
-      expect(field?.optional).toBe(true)
-      expect(field?.hintKey).toBe('admin.settings.payment.field_creditRateToUsdHint')
-    }
+  it('serializes non-empty custom methods into the config string format', () => {
+    expect(serializeEasyPayCustomMethods([
+      { type: 'ldc', upstreamType: 'epay', displayName: 'LDC' },
+      { type: '  ', upstreamType: 'ignored', displayName: 'Ignored' },
+      { type: 'usdt_trc20', upstreamType: 'usdt', displayName: '' },
+    ])).toBe('[{"type":"ldc","upstreamType":"epay","displayName":"LDC"},{"type":"usdt_trc20","upstreamType":"usdt","displayName":""}]')
+  })
+
+  it('returns an empty string for invalid or empty custom methods', () => {
+    expect(parseEasyPayCustomMethods('not-json')).toEqual([])
+    expect(serializeEasyPayCustomMethods([{ type: '', upstreamType: 'epay', displayName: 'LDC' }])).toBe('')
   })
 })
 
-describe('PROVIDER_CONFIG_FIELDS.coinbase', () => {
-  it('uses hosted crypto checkout credentials and crypto currency options', () => {
-    expect(findField('coinbase', 'apiKeyId')?.sensitive).toBe(false)
-    expect(findField('coinbase', 'apiKeySecret')?.sensitive).toBe(true)
-    expect(findField('coinbase', 'webhookSecret')?.sensitive).toBe(true)
-    expect(findField('coinbase', 'apiBase')?.defaultValue).toBe('https://business.coinbase.com/api/v1')
+describe('built-in payment method helpers', () => {
+  it('only treats exact built-in aliases as Alipay or WeChat Pay', () => {
+    expect(isBuiltInAlipayMethod('alipay')).toBe(true)
+    expect(isBuiltInAlipayMethod('alipay_direct')).toBe(true)
+    expect(isBuiltInAlipayMethod('card_alipay')).toBe(false)
 
-    const currency = findField('coinbase', 'currency')
-    expect(currency?.defaultValue).toBe('USDC')
-    expect(currency?.hintKey).toBe('admin.settings.payment.field_coinbaseCurrencyHint')
-    expect(currency?.options).toBe(CRYPTO_PAYMENT_CURRENCY_OPTIONS)
-
-    expect(findField('coinbase', 'creditRateToUsd')?.defaultValue).toBe('1')
+    expect(isBuiltInWxpayMethod('wxpay')).toBe(true)
+    expect(isBuiltInWxpayMethod('wxpay_direct')).toBe(true)
+    expect(isBuiltInWxpayMethod('card_wxpay')).toBe(false)
   })
 })

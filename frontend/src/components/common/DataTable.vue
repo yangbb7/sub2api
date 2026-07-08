@@ -36,12 +36,8 @@
         v-for="(row, index) in sortedData"
         :key="resolveRowKey(row, index)"
         class="rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-900"
-        :class="{ 'cursor-pointer transition-colors hover:bg-gray-50 dark:hover:bg-dark-800': rowClickable }"
-        role="button"
-        :tabindex="rowClickable ? 0 : undefined"
-        @click="handleRowClick(row)"
-        @keydown.enter="handleRowClick(row)"
-        @keydown.space.prevent="handleRowClick(row)"
+        :class="{ 'cursor-pointer': clickableRows }"
+        @click="clickableRows && emit('rowClick', row)"
       >
         <div class="space-y-3">
           <div
@@ -98,7 +94,7 @@
               :sort-key="sortKey"
               :sort-order="sortOrder"
             >
-              <div class="flex items-center space-x-1">
+              <div :class="['flex items-center space-x-1', getHeaderContentAlignmentClass(column)]">
                 <span>{{ column.label }}</span>
                 <span
                   v-if="column.sortable"
@@ -172,12 +168,8 @@
             :data-index="virtualRow.index"
             :ref="measureElement"
             class="hover:bg-gray-50 dark:hover:bg-dark-800"
-            :class="{ 'cursor-pointer': rowClickable }"
-            :role="rowClickable ? 'button' : undefined"
-            :tabindex="rowClickable ? 0 : undefined"
-            @click="handleRowClick(sortedData[virtualRow.index])"
-            @keydown.enter="handleRowClick(sortedData[virtualRow.index])"
-            @keydown.space.prevent="handleRowClick(sortedData[virtualRow.index])"
+            :class="{ 'cursor-pointer': clickableRows }"
+            @click="clickableRows && emit('rowClick', sortedData[virtualRow.index])"
           >
             <td
               v-for="(column, colIndex) in columns"
@@ -226,7 +218,7 @@ const isDesktopViewport = ref(
 
 const emit = defineEmits<{
   sort: [key: string, order: 'asc' | 'desc']
-  'row-click': [row: any]
+  rowClick: [row: any]
 }>()
 
 // 表格容器引用
@@ -264,6 +256,11 @@ const checkScrollable = () => {
 
 // 检查操作列是否需要展开
 const checkActionsColumnWidth = () => {
+  if (!props.expandableActions) {
+    actionsColumnNeedsExpanding.value = false
+    actionsExpanded.value = false
+    return
+  }
   if (!tableWrapperRef.value) return
 
   // 查找第一行的操作列单元格
@@ -394,12 +391,12 @@ interface Props {
    * will emit 'sort' events instead of performing client-side sorting.
    */
   serverSideSort?: boolean
+  /** Emit 'rowClick' on row/card click and show pointer cursor (interactive cells should @click.stop) */
+  clickableRows?: boolean
   /** Estimated row height in px for the virtualizer (default 56) */
   estimateRowHeight?: number
   /** Number of rows to render beyond the visible area (default 5) */
   overscan?: number
-  /** Emit row-click when the user clicks a row */
-  rowClickable?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -491,6 +488,13 @@ const getSortIndicatorClass = (key: string, order: 'asc' | 'desc') => {
 const getColumnAriaSort = (key: string) => {
   if (sortKey.value !== key) return 'none'
   return sortOrder.value === 'asc' ? 'ascending' : 'descending'
+}
+
+const getHeaderContentAlignmentClass = (column: Column) => {
+  const className = column.class || ''
+  if (className.includes('text-center')) return 'justify-center'
+  if (className.includes('text-right')) return 'justify-end'
+  return 'justify-start'
 }
 
 const isNullishOrEmpty = (value: any) => value === null || value === undefined || value === ''
@@ -602,11 +606,6 @@ const handleSort = (key: string) => {
     sortKey.value = key
     sortOrder.value = newOrder
   }
-}
-
-const handleRowClick = (row: any) => {
-  if (!props.rowClickable) return
-  emit('row-click', row)
 }
 
 const sortedData = computed(() => {
