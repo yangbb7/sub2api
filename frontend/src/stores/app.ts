@@ -34,6 +34,7 @@ export const useAppStore = defineStore('app', () => {
   const apiBaseUrl = ref<string>('')
   const docUrl = ref<string>('')
   const cachedPublicSettings = ref<PublicSettings | null>(null)
+  let publicSettingsRequest: Promise<PublicSettings | null> | null = null
 
   // Version cache state
   const versionLoaded = ref<boolean>(false)
@@ -355,38 +356,47 @@ export const useAppStore = defineStore('app', () => {
    * Fetch public settings (uses cache unless force=true)
    * @param force - Force refresh from API
    */
-  async function fetchPublicSettings(force = false): Promise<PublicSettings | null> {
+  function fetchPublicSettings(force = false): Promise<PublicSettings | null> {
+    // An active request always wins so every caller observes the same refresh result.
+    if (publicSettingsRequest) {
+      return publicSettingsRequest
+    }
+
     // Check for injected config from server (eliminates flash)
     if (!publicSettingsLoaded.value && !force && window.__APP_CONFIG__) {
       applySettings(window.__APP_CONFIG__)
-      return window.__APP_CONFIG__
+      return Promise.resolve(window.__APP_CONFIG__)
     }
 
     // Return cached data if available and not forcing refresh
     if (publicSettingsLoaded.value && !force) {
       if (cachedPublicSettings.value) {
-        return { ...cachedPublicSettings.value }
+        return Promise.resolve({ ...cachedPublicSettings.value })
       }
-      return defaultPublicSettings()
-    }
-
-    // Prevent duplicate requests
-    if (publicSettingsLoading.value) {
-      return null
+      return Promise.resolve(defaultPublicSettings())
     }
 
     publicSettingsLoading.value = true
-    try {
-      const data = await fetchPublicSettingsAPI()
-      applySettings(data)
-      return data
-    } catch {
-      const fallback = defaultPublicSettings()
-      applySettings(fallback)
-      return fallback
-    } finally {
-      publicSettingsLoading.value = false
-    }
+    const request = fetchPublicSettingsAPI()
+      .then((data) => {
+        applySettings(data)
+        return data
+      })
+      .catch((error) => {
+        console.error('Failed to fetch public settings:', error)
+        const fallback = defaultPublicSettings()
+        applySettings(fallback)
+        return fallback
+      })
+      .finally(() => {
+        if (publicSettingsRequest === request) {
+          publicSettingsRequest = null
+          publicSettingsLoading.value = false
+        }
+      })
+
+    publicSettingsRequest = request
+    return request
   }
 
   /**
