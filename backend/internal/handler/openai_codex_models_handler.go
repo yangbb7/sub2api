@@ -36,11 +36,13 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 		return
 	}
 
-	manifest, err := h.gatewayService.FetchCodexModelsManifest(c.Request.Context(), account, c.Query("client_version"), c.GetHeader("If-None-Match"))
+	ifNoneMatch := codexModelsIfNoneMatch(apiKey, c.GetHeader("If-None-Match"))
+	manifest, err := h.gatewayService.FetchCodexModelsManifest(c.Request.Context(), account, c.Query("client_version"), ifNoneMatch)
 	if err != nil {
 		h.errorResponse(c, infraerrors.Code(err), "upstream_error", infraerrors.Message(err))
 		return
 	}
+	service.ApplyCodexModelsListConfig(manifest, apiKey.Group.ModelsListConfig)
 
 	if manifest.ETag != "" {
 		c.Header("ETag", manifest.ETag)
@@ -50,4 +52,11 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 		return
 	}
 	c.Data(http.StatusOK, "application/json", manifest.Body)
+}
+
+func codexModelsIfNoneMatch(apiKey *service.APIKey, header string) string {
+	if apiKey != nil && apiKey.Group != nil && apiKey.Group.CustomModelsListEnabled() {
+		return ""
+	}
+	return header
 }

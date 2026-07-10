@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
@@ -10,6 +11,7 @@ import (
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
 
 // chatgptCodexModelsURL is the ChatGPT Codex models manifest endpoint.
@@ -104,4 +106,88 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 		return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_CODEX_MODELS_UPSTREAM_FAILED", "read codex models manifest response: %v", err)
 	}
 	return &CodexModelsManifest{Body: body, ETag: resp.Header.Get("ETag")}, nil
+}
+
+// ApplyCodexModelsListConfig makes the Codex model picker honor the same
+// group-controlled model list as the plain /v1/models endpoint. Without this,
+// Codex clients with client_version bypass the group list and only see the
+// upstream ChatGPT manifest.
+func ApplyCodexModelsListConfig(manifest *CodexModelsManifest, cfg GroupModelsListConfig) {
+	cfg = normalizeGroupModelsListConfig(cfg)
+	if manifest == nil || manifest.NotModified || !cfg.Enabled || len(cfg.Models) == 0 || len(manifest.Body) == 0 {
+		return
+	}
+
+	var root map[string]any
+	if err := json.Unmarshal(manifest.Body, &root); err != nil {
+		return
+	}
+	rawModels, ok := root["models"].([]any)
+	if !ok {
+		return
+	}
+
+	known := make(map[string]map[string]any, len(rawModels))
+	for _, raw := range rawModels {
+		model, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if id := codexManifestModelID(model); id != "" {
+			known[id] = model
+		}
+	}
+
+	next := make([]any, 0, len(cfg.Models))
+	for _, id := range cfg.Models {
+		if model, ok := known[id]; ok {
+			next = append(next, cloneCodexManifestModel(model))
+			continue
+		}
+		next = append(next, synthesizeCodexManifestModel(id))
+	}
+
+	root["models"] = next
+	body, err := json.Marshal(root)
+	if err != nil {
+		return
+	}
+	manifest.Body = body
+	manifest.ETag = ""
+}
+
+func codexManifestModelID(model map[string]any) string {
+	for _, key := range []string{"slug", "id", "model", "name"} {
+		if value, ok := model[key].(string); ok {
+			if value = strings.TrimSpace(value); value != "" {
+				return value
+			}
+		}
+	}
+	return ""
+}
+
+func cloneCodexManifestModel(model map[string]any) map[string]any {
+	clone := make(map[string]any, len(model))
+	for key, value := range model {
+		clone[key] = value
+	}
+	return clone
+}
+
+func synthesizeCodexManifestModel(id string) map[string]any {
+	return map[string]any{
+		"slug":         id,
+		"id":           id,
+		"display_name": openAICodexManifestDisplayName(id),
+	}
+}
+
+func openAICodexManifestDisplayName(id string) string {
+	for _, model := range openai.DefaultModels {
+		if model.ID == id && strings.TrimSpace(model.DisplayName) != "" {
+			return model.DisplayName
+		}
+	}
+	return id
 }
