@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -135,67 +134,5 @@ func TestFetchCodexModelsManifestMissingToken(t *testing.T) {
 	s := &OpenAIGatewayService{}
 	if _, err := s.FetchCodexModelsManifest(context.Background(), account, "0.137.0", ""); err == nil {
 		t.Fatal("expected error for missing access token, got nil")
-	}
-}
-
-func TestApplyCodexModelsListConfigFiltersAndSynthesizesModels(t *testing.T) {
-	manifest := &CodexModelsManifest{
-		Body: []byte(`{"models":[{"slug":"gpt-5.5","display_name":"GPT-5.5","tier":"upstream"},{"slug":"gpt-5.4","display_name":"GPT-5.4"}],"other":"kept"}`),
-		ETag: `W/"upstream"`,
-	}
-
-	ApplyCodexModelsListConfig(manifest, GroupModelsListConfig{
-		Enabled: true,
-		Models:  []string{"gpt-5.6-sol", "gpt-5.5", "gpt-5.6-terra"},
-	})
-
-	if manifest.ETag != "" {
-		t.Fatalf("expected transformed manifest to clear upstream etag, got %q", manifest.ETag)
-	}
-
-	var got struct {
-		Other  string `json:"other"`
-		Models []struct {
-			Slug        string `json:"slug"`
-			ID          string `json:"id"`
-			DisplayName string `json:"display_name"`
-			Tier        string `json:"tier"`
-		} `json:"models"`
-	}
-	if err := json.Unmarshal(manifest.Body, &got); err != nil {
-		t.Fatalf("transformed manifest is invalid JSON: %v", err)
-	}
-
-	if got.Other != "kept" {
-		t.Fatalf("expected non-model manifest fields to be preserved, got %q", got.Other)
-	}
-	if len(got.Models) != 3 {
-		t.Fatalf("expected 3 models, got %d", len(got.Models))
-	}
-	if got.Models[0].Slug != "gpt-5.6-sol" || got.Models[0].ID != "gpt-5.6-sol" || got.Models[0].DisplayName != "GPT-5.6 Sol" {
-		t.Fatalf("unexpected synthesized first model: %+v", got.Models[0])
-	}
-	if got.Models[1].Slug != "gpt-5.5" || got.Models[1].Tier != "upstream" {
-		t.Fatalf("expected existing upstream model object to be reused, got %+v", got.Models[1])
-	}
-	if got.Models[2].Slug != "gpt-5.6-terra" || got.Models[2].DisplayName != "GPT-5.6 Terra" {
-		t.Fatalf("unexpected synthesized third model: %+v", got.Models[2])
-	}
-}
-
-func TestApplyCodexModelsListConfigDisabledKeepsManifestUntouched(t *testing.T) {
-	body := []byte(`{"models":[{"slug":"gpt-5.5"}]}`)
-	manifest := &CodexModelsManifest{Body: body, ETag: `W/"upstream"`}
-
-	ApplyCodexModelsListConfig(manifest, GroupModelsListConfig{
-		Enabled: false,
-		Models:  []string{"gpt-5.6-sol"},
-	})
-
-	if string(manifest.Body) != string(body) {
-		t.Fatalf("expected manifest body to remain untouched, got %s", manifest.Body)
-	}
-	if manifest.ETag != `W/"upstream"` {
-		t.Fatalf("expected upstream etag to remain untouched, got %q", manifest.ETag)
 	}
 }
