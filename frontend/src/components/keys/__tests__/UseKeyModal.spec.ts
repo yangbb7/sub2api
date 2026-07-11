@@ -97,6 +97,7 @@ describe('UseKeyModal', () => {
     expect(configToml).not.toContain('model = "gpt-5.4"')
     expect(configToml).not.toContain('model_context_window')
     expect(configToml).not.toContain('model_auto_compact_token_limit')
+    expect(configToml).not.toContain('requires_openai_auth')
     expect(configToml).toContain('[features]\ngoals = true')
   })
 
@@ -137,7 +138,40 @@ describe('UseKeyModal', () => {
     expect(configToml).not.toContain('model = "gpt-5.4"')
     expect(configToml).not.toContain('model_context_window')
     expect(configToml).not.toContain('model_auto_compact_token_limit')
+    expect(configToml).not.toContain('requires_openai_auth')
     expect(configToml).toContain('[features]\nresponses_websockets_v2 = true\ngoals = true')
+  })
+
+  it('omits OpenAI account auth from the Windows Codex config', async () => {
+    const wrapper = mount(UseKeyModal, {
+      props: {
+        show: true,
+        apiKey: 'sk-test',
+        baseUrl: 'https://example.com/v1',
+        platform: 'openai'
+      },
+      global: {
+        stubs: {
+          BaseDialog: {
+            template: '<div><slot /><slot name="footer" /></div>'
+          },
+          Icon: {
+            template: '<span />'
+          }
+        }
+      }
+    })
+
+    const windowsTab = wrapper.findAll('button').find((button) => button.text().includes('Windows'))
+    expect(windowsTab).toBeDefined()
+    await windowsTab!.trigger('click')
+    await nextTick()
+
+    const codeBlocks = wrapper.findAll('pre code').map((code) => code.text())
+    const configToml = codeBlocks.find((content) => content.includes('model_provider = "OpenAI"'))
+
+    expect(configToml).toBeDefined()
+    expect(configToml).not.toContain('requires_openai_auth')
   })
 
   it('falls back to the current origin with /v1 when API base URL is empty', () => {

@@ -544,7 +544,6 @@ windows_wsl_setup_acknowledged = true
 name = "OpenAI"
 base_url = "${baseUrl}"
 wire_api = "responses"
-requires_openai_auth = true
 
 [features]
 goals = true`
@@ -585,7 +584,6 @@ name = "OpenAI"
 base_url = "${baseUrl}"
 wire_api = "responses"
 supports_websockets = true
-requires_openai_auth = true
 
 [features]
 responses_websockets_v2 = true
