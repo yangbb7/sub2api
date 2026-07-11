@@ -99,7 +99,8 @@ describe('UseKeyModal', () => {
     expect(configToml).not.toContain('model_context_window')
     expect(configToml).not.toContain('model_auto_compact_token_limit')
     expect(configToml).not.toContain('requires_openai_auth')
-    expect(configToml).toContain('[features]\ngoals = true')
+    expect(configToml).not.toContain('goals = true')
+    expect(configToml).not.toContain('[features]')
   })
 
   it('renders GPT-5.6 Terra with medium reasoning and fast tier in OpenAI Codex WebSocket config', async () => {
@@ -141,7 +142,8 @@ describe('UseKeyModal', () => {
     expect(configToml).not.toContain('model_context_window')
     expect(configToml).not.toContain('model_auto_compact_token_limit')
     expect(configToml).not.toContain('requires_openai_auth')
-    expect(configToml).toContain('[features]\nresponses_websockets_v2 = true\ngoals = true')
+    expect(configToml).toContain('[features]\nresponses_websockets_v2 = true')
+    expect(configToml).not.toContain('goals = true')
   })
 
   it('omits OpenAI account auth from the Windows Codex config', async () => {

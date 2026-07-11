@@ -544,10 +544,7 @@ windows_wsl_setup_acknowledged = true
 [model_providers.OpenAI]
 name = "OpenAI"
 base_url = "${baseUrl}"
-wire_api = "responses"
-
-[features]
-goals = true`
+wire_api = "responses"`
 
   // auth.json content
   const authContent = `{
@@ -588,8 +585,7 @@ wire_api = "responses"
 supports_websockets = true
 
 [features]
-responses_websockets_v2 = true
-goals = true`
+responses_websockets_v2 = true`
 
   // auth.json content
   const authContent = `{
