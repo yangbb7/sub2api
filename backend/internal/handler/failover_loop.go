@@ -7,6 +7,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
 
@@ -69,6 +70,10 @@ func (s *FailoverState) HandleFailoverError(
 	platform string,
 	failoverErr *service.UpstreamFailoverError,
 ) FailoverAction {
+	if ctx != nil && ctx.Err() != nil {
+		return FailoverCanceled
+	}
+
 	s.LastFailoverErr = failoverErr
 
 	// 缓存计费判断
@@ -132,6 +137,10 @@ func (s *FailoverState) HandleFailoverError(
 // 返回 FailoverExhausted 时，调用方应返回错误响应。
 // 返回 FailoverCanceled 时，调用方应直接 return。
 func (s *FailoverState) HandleSelectionExhausted(ctx context.Context) FailoverAction {
+	if ctx != nil && ctx.Err() != nil {
+		return FailoverCanceled
+	}
+
 	if s.LastFailoverErr != nil &&
 		s.LastFailoverErr.StatusCode == http.StatusServiceUnavailable &&
 		s.SwitchCount <= s.MaxSwitches {
@@ -158,6 +167,33 @@ func (s *FailoverState) HandleSelectionExhausted(ctx context.Context) FailoverAc
 // 粘性会话切换账号、或上游明确标记时，将 input_tokens 转为 cache_read 计费。
 func needForceCacheBilling(hasBoundSession bool, failoverErr *service.UpstreamFailoverError) bool {
 	return hasBoundSession || (failoverErr != nil && failoverErr.ForceCacheBilling)
+}
+
+// failoverClientGone stops failover after the downstream client disconnects.
+// Detached upstream work may still finish for billing, but no new account attempt
+// should start when no client remains to receive the response.
+func failoverClientGone(c *gin.Context) bool {
+	if c == nil || c.Request == nil || c.Request.Context().Err() == nil {
+		return false
+	}
+	if service.StopOpenAICompactSSEKeepaliveCommitted(c) {
+		return true
+	}
+	if !c.Writer.Written() {
+		c.Status(statusClientClosedRequest)
+	}
+	return true
+}
+
+func sleepFailoverRetry(c *gin.Context, delay time.Duration) bool {
+	if c == nil || c.Request == nil {
+		return false
+	}
+	if sleepWithContext(c.Request.Context(), delay) {
+		return true
+	}
+	failoverClientGone(c)
+	return false
 }
 
 // sleepWithContext 等待指定时长，返回 false 表示 context 已取消。

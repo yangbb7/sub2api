@@ -208,7 +208,38 @@ func TestOpsAlertRuleValidation(t *testing.T) {
 	require.Error(t, err)
 
 	require.True(t, isPercentOrRateMetric("error_rate"))
+	require.True(t, isPercentOrRateMetric("user_concurrency_utilization_percent"))
 	require.False(t, isPercentOrRateMetric("concurrency_queue_depth"))
+
+	raw["metric_type"] = json.RawMessage(`"user_concurrency_utilization_percent"`)
+	raw["threshold"] = json.RawMessage(`80`)
+	_, err = validateOpsAlertRulePayload(raw)
+	require.ErrorContains(t, err, "filters.user_id")
+
+	raw["filters"] = json.RawMessage(`{"user_id":2.5}`)
+	_, err = validateOpsAlertRulePayload(raw)
+	require.ErrorContains(t, err, "positive integer")
+
+	raw["filters"] = json.RawMessage(`{"user_id":2}`)
+	validated, err = validateOpsAlertRulePayload(raw)
+	require.NoError(t, err)
+	require.Equal(t, "user_concurrency_utilization_percent", validated.MetricType)
+
+	rule := &service.OpsAlertRule{
+		MetricType: "user_concurrency_utilization_percent",
+		Filters: map[string]any{
+			"user_id":  float64(2),
+			"group_id": float64(3),
+			"platform": "openai",
+		},
+	}
+	normalizeOpsAlertRuleFilters(rule)
+	require.Equal(t, map[string]any{"user_id": float64(2)}, rule.Filters)
+
+	rule.MetricType = "error_rate"
+	rule.Filters["group_id"] = float64(3)
+	normalizeOpsAlertRuleFilters(rule)
+	require.Equal(t, map[string]any{"group_id": float64(3)}, rule.Filters)
 }
 
 func TestOpsWSHelpers(t *testing.T) {

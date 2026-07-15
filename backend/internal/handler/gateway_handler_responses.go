@@ -176,6 +176,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 			case FailoverContinue:
 				continue
 			case FailoverCanceled:
+				failoverClientGone(c)
 				return
 			default:
 				if fs.LastFailoverErr != nil {
@@ -241,6 +242,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 					h.handleResponsesFailoverExhausted(c, fs.LastFailoverErr, streamStarted)
 					return
 				case FailoverCanceled:
+					failoverClientGone(c)
 					return
 				}
 			}

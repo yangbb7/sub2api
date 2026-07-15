@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -44,7 +44,7 @@ const saving = ref(false)
 const editingId = ref<number | null>(null)
 const draft = ref<AlertRule | null>(null)
 
-type MetricGroup = 'system' | 'group' | 'account'
+type MetricGroup = 'system' | 'user' | 'group' | 'account'
 
 interface MetricDefinition {
   type: MetricType
@@ -62,11 +62,30 @@ const groupMetricTypes = new Set<MetricType>([
   'group_rate_limit_ratio'
 ])
 
+const userMetricTypes = new Set<MetricType>(['user_concurrency_utilization_percent'])
+
+watch(
+  () => draft.value?.metric_type,
+  (metricType) => {
+    if (!draft.value?.filters || !metricType) return
+    if (userMetricTypes.has(metricType)) {
+      delete draft.value.filters.platform
+      delete draft.value.filters.group_id
+      delete draft.value.filters.region
+    } else {
+      delete draft.value.filters.user_id
+    }
+    if (Object.keys(draft.value.filters).length === 0) {
+      delete draft.value.filters
+    }
+  }
+)
+
 function parsePositiveInt(value: unknown): number | null {
   if (value == null) return null
   if (typeof value === 'boolean') return null
-  const n = typeof value === 'number' ? value : Number.parseInt(String(value), 10)
-  return Number.isFinite(n) && n > 0 ? n : null
+  const n = typeof value === 'number' ? value : Number(String(value).trim())
+  return Number.isInteger(n) && n > 0 ? n : null
 }
 
 const groupOptionsBase = ref<SelectOption[]>([])
@@ -84,6 +103,30 @@ async function loadGroups() {
 const isGroupMetricSelected = computed(() => {
   const metricType = draft.value?.metric_type
   return metricType ? groupMetricTypes.has(metricType) : false
+})
+
+const isUserMetricSelected = computed(() => {
+  const metricType = draft.value?.metric_type
+  return metricType ? userMetricTypes.has(metricType) : false
+})
+
+const draftUserId = computed<number | null>({
+  get() {
+    return parsePositiveInt(draft.value?.filters?.user_id)
+  },
+  set(value) {
+    if (!draft.value) return
+    if (value == null) {
+      if (!draft.value.filters) return
+      delete draft.value.filters.user_id
+      if (Object.keys(draft.value.filters).length === 0) {
+        delete draft.value.filters
+      }
+      return
+    }
+    if (!draft.value.filters) draft.value.filters = {}
+    draft.value.filters.user_id = value
+  }
 })
 
 const draftGroupId = computed<number | null>({
@@ -155,6 +198,15 @@ const metricDefinitions = computed(() => {
       label: t('admin.ops.alertRules.metrics.memory'),
       description: t('admin.ops.alertRules.metricDescriptions.memory'),
       recommendedOperator: '>',
+      recommendedThreshold: 80,
+      unit: '%'
+    },
+    {
+      type: 'user_concurrency_utilization_percent',
+      group: 'user',
+      label: t('admin.ops.alertRules.metrics.userConcurrencyUtilization'),
+      description: t('admin.ops.alertRules.metricDescriptions.userConcurrencyUtilization'),
+      recommendedOperator: '>=',
       recommendedThreshold: 80,
       unit: '%'
     },
@@ -262,7 +314,7 @@ const metricOptions = computed(() => {
     ]
   }
 
-  return [...buildGroup('system'), ...buildGroup('group'), ...buildGroup('account')]
+  return [...buildGroup('system'), ...buildGroup('user'), ...buildGroup('group'), ...buildGroup('account')]
 })
 
 const operatorOptions = computed(() => {
@@ -314,6 +366,9 @@ const editorValidation = computed(() => {
   if (!r) return { valid: true, errors }
   if (!r.name || !r.name.trim()) errors.push(t('admin.ops.alertRules.validation.nameRequired'))
   if (!r.metric_type) errors.push(t('admin.ops.alertRules.validation.metricRequired'))
+  if (userMetricTypes.has(r.metric_type) && !parsePositiveInt(r.filters?.user_id)) {
+    errors.push(t('admin.ops.alertRules.validation.userIdRequired'))
+  }
   if (groupMetricTypes.has(r.metric_type) && !parsePositiveInt(r.filters?.group_id)) {
     errors.push(t('admin.ops.alertRules.validation.groupIdRequired'))
   }
@@ -520,7 +575,24 @@ function cancelDelete() {
             <Select v-model="draft!.operator" :options="operatorOptions" />
           </div>
 
-          <div class="md:col-span-2">
+          <div v-if="isUserMetricSelected" class="md:col-span-2">
+            <label class="input-label">
+              {{ t('admin.ops.alertRules.form.userId') }}
+              <span class="ml-1 text-red-500">*</span>
+            </label>
+            <input
+              v-model.number="draftUserId"
+              class="input"
+              type="number"
+              min="1"
+              step="1"
+            />
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.ops.alertRules.hints.userRequired') }}
+            </p>
+          </div>
+
+          <div v-if="!isUserMetricSelected" class="md:col-span-2">
             <label class="input-label">
               {{ t('admin.ops.alertRules.form.groupId') }}
               <span v-if="isGroupMetricSelected" class="ml-1 text-red-500">*</span>

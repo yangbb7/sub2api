@@ -682,6 +682,7 @@ export type MetricType =
   | 'upstream_error_rate'
   | 'cpu_usage_percent'
   | 'memory_usage_percent'
+  | 'user_concurrency_utilization_percent'
   | 'concurrency_queue_depth'
   | 'group_available_accounts'
   | 'group_available_ratio'
@@ -1203,6 +1204,7 @@ export async function deleteAlertRule(id: number): Promise<void> {
 
 export interface AlertEventsQuery {
   limit?: number
+  rule_id?: number
   status?: string
   severity?: string
   email_sent?: boolean
@@ -1213,6 +1215,7 @@ export interface AlertEventsQuery {
   before_id?: number
   platform?: string
   group_id?: number
+  user_id?: number
 }
 
 export async function listAlertEvents(params: AlertEventsQuery = {}): Promise<AlertEvent[]> {

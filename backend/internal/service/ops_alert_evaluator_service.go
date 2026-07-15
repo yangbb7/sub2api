@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -218,6 +219,13 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 		rulesEnabled++
 
 		scopePlatform, scopeGroupID, scopeRegion := parseOpsAlertRuleScope(rule.Filters)
+		var scopeUserID *int64
+		if strings.TrimSpace(rule.MetricType) == "user_concurrency_utilization_percent" {
+			scopePlatform, scopeGroupID, scopeRegion = "", nil, nil
+			if userID, ok := parsePositiveOpsAlertFilterID(rule.Filters["user_id"]); ok {
+				scopeUserID = &userID
+			}
+		}
 
 		windowMinutes := rule.WindowMinutes
 		if windowMinutes <= 0 {
@@ -252,10 +260,8 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 			if s.opsService != nil {
 				platform := strings.TrimSpace(scopePlatform)
 				region := scopeRegion
-				if platform != "" {
-					if ok, err := s.opsService.IsAlertSilenced(ctx, rule.ID, platform, scopeGroupID, region, now); err == nil && ok {
-						continue
-					}
+				if ok, err := s.opsService.IsAlertSilenced(ctx, rule.ID, platform, scopeGroupID, region, now); err == nil && ok {
+					continue
 				}
 			}
 
@@ -276,10 +282,10 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 				Severity:       strings.TrimSpace(rule.Severity),
 				Status:         OpsAlertStatusFiring,
 				Title:          fmt.Sprintf("%s: %s", strings.TrimSpace(rule.Severity), strings.TrimSpace(rule.Name)),
-				Description:    buildOpsAlertDescription(rule, metricValue, windowMinutes, scopePlatform, scopeGroupID),
+				Description:    buildOpsAlertDescription(rule, metricValue, windowMinutes, scopePlatform, scopeGroupID, scopeUserID),
 				MetricValue:    float64Ptr(metricValue),
 				ThresholdValue: float64Ptr(rule.Threshold),
-				Dimensions:     buildOpsAlertDimensions(scopePlatform, scopeGroupID),
+				Dimensions:     buildOpsAlertDimensions(scopePlatform, scopeGroupID, scopeUserID),
 				FiredAt:        now,
 				CreatedAt:      now,
 			}
@@ -455,6 +461,22 @@ func (s *OpsAlertEvaluatorService) computeRuleMetric(
 			return *systemMetrics.MemoryUsagePercent, true
 		}
 		return 0, false
+	case "user_concurrency_utilization_percent":
+		if s == nil || s.opsService == nil {
+			return 0, false
+		}
+		userID, ok := parsePositiveOpsAlertFilterID(rule.Filters["user_id"])
+		if !ok {
+			return 0, false
+		}
+		info, err := s.opsService.GetUserConcurrencyStatStrict(ctx, userID)
+		if err != nil {
+			if errors.Is(err, errOpsUserConcurrencyTargetInactive) {
+				return 0, true
+			}
+			return 0, false
+		}
+		return userConcurrencyUtilizationPercent(info)
 	case "concurrency_queue_depth":
 		if systemMetrics != nil && systemMetrics.ConcurrencyQueueDepth != nil {
 			return float64(*systemMetrics.ConcurrencyQueueDepth), true
@@ -618,6 +640,40 @@ func (s *OpsAlertEvaluatorService) computeRuleMetric(
 	}
 }
 
+func userConcurrencyUtilizationPercent(info *UserConcurrencyInfo) (float64, bool) {
+	if info == nil {
+		return 0, false
+	}
+	if info.MaxCapacity <= 0 {
+		return 0, true
+	}
+	return float64(info.CurrentInUse) / float64(info.MaxCapacity) * 100, true
+}
+
+func parsePositiveOpsAlertFilterID(value any) (int64, bool) {
+	switch v := value.(type) {
+	case float64:
+		id := int64(v)
+		if v > 0 && v == math.Trunc(v) && id > 0 && float64(id) == v {
+			return id, true
+		}
+	case int:
+		if v > 0 {
+			return int64(v), true
+		}
+	case int64:
+		if v > 0 {
+			return v, true
+		}
+	case string:
+		id, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		if err == nil && id > 0 {
+			return id, true
+		}
+	}
+	return 0, false
+}
+
 func compareMetric(value float64, operator string, threshold float64) bool {
 	switch strings.TrimSpace(operator) {
 	case ">":
@@ -637,7 +693,7 @@ func compareMetric(value float64, operator string, threshold float64) bool {
 	}
 }
 
-func buildOpsAlertDimensions(platform string, groupID *int64) map[string]any {
+func buildOpsAlertDimensions(platform string, groupID *int64, userID *int64) map[string]any {
 	dims := map[string]any{}
 	if strings.TrimSpace(platform) != "" {
 		dims["platform"] = strings.TrimSpace(platform)
@@ -645,22 +701,32 @@ func buildOpsAlertDimensions(platform string, groupID *int64) map[string]any {
 	if groupID != nil && *groupID > 0 {
 		dims["group_id"] = *groupID
 	}
+	if userID != nil && *userID > 0 {
+		dims["user_id"] = *userID
+	}
 	if len(dims) == 0 {
 		return nil
 	}
 	return dims
 }
 
-func buildOpsAlertDescription(rule *OpsAlertRule, value float64, windowMinutes int, platform string, groupID *int64) string {
+func buildOpsAlertDescription(rule *OpsAlertRule, value float64, windowMinutes int, platform string, groupID *int64, userID *int64) string {
 	if rule == nil {
 		return ""
 	}
-	scope := "overall"
+	scopeParts := make([]string, 0, 3)
 	if strings.TrimSpace(platform) != "" {
-		scope = fmt.Sprintf("platform=%s", strings.TrimSpace(platform))
+		scopeParts = append(scopeParts, fmt.Sprintf("platform=%s", strings.TrimSpace(platform)))
 	}
 	if groupID != nil && *groupID > 0 {
-		scope = fmt.Sprintf("%s group_id=%d", scope, *groupID)
+		scopeParts = append(scopeParts, fmt.Sprintf("group_id=%d", *groupID))
+	}
+	if userID != nil && *userID > 0 {
+		scopeParts = append(scopeParts, fmt.Sprintf("user_id=%d", *userID))
+	}
+	scope := "overall"
+	if len(scopeParts) > 0 {
+		scope = strings.Join(scopeParts, " ")
 	}
 	if windowMinutes <= 0 {
 		windowMinutes = 1

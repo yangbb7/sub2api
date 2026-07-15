@@ -476,6 +476,7 @@ export default {
         deleteConfirmMessage: 'This will remove the rule and its related events. Continue?',
         metricGroups: {
           system: 'System Metrics',
+          user: 'User-level Metrics (requires user_id)',
           group: 'Group-level Metrics (requires group_id)',
           account: 'Account-level Metrics'
         },
@@ -487,6 +488,7 @@ export default {
           p99: 'P99 Latency (ms)',
           cpu: 'CPU Usage (%)',
           memory: 'Memory Usage (%)',
+          userConcurrencyUtilization: 'User Concurrency Utilization (%)',
           queueDepth: 'Concurrency Queue Depth',
           groupAvailableAccounts: 'Group Available Accounts',
           groupAvailableRatio: 'Group Available Ratio (%)',
@@ -505,6 +507,7 @@ export default {
           p99: 'P99 request latency within the window (ms).',
           cpu: 'Current instance CPU usage (0-100).',
           memory: 'Current instance memory usage (0-100).',
+          userConcurrencyUtilization: 'Current concurrency use relative to the selected user limit (requires user_id).',
           queueDepth: 'Concurrency queue depth within the window (queued requests).',
           groupAvailableAccounts: 'Number of available accounts in the selected group (requires group_id).',
           groupAvailableRatio: 'Available account ratio in the selected group (0-100, requires group_id).',
@@ -517,6 +520,7 @@ export default {
         },
         hints: {
           recommended: 'Recommended: operator {operator}, threshold {threshold}{unit}',
+          userRequired: 'A target user (user_id) is required for this metric.',
           groupRequired: 'This is a group-level metric; selecting a group (group_id) is required.',
           groupOptional: 'Optional: limit the rule to a specific group via group_id.'
         },
@@ -532,6 +536,7 @@ export default {
           description: 'Description',
           metric: 'Metric',
           operator: 'Operator',
+          userId: 'User ID (user_id)',
           groupId: 'Group (group_id)',
           groupPlaceholder: 'Select a group',
           allGroups: 'All groups',
@@ -548,6 +553,7 @@ export default {
           invalid: 'Invalid rule',
           nameRequired: 'Name is required',
           metricRequired: 'Metric is required',
+          userIdRequired: 'A positive integer user_id is required for user concurrency metrics',
           groupIdRequired: 'group_id is required for group-level metrics',
           operatorRequired: 'Operator is required',
           thresholdRequired: 'Threshold must be a number',

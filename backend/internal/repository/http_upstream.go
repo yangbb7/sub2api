@@ -20,6 +20,7 @@ import (
 
 	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/zstd"
+	"golang.org/x/net/http2"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
@@ -57,6 +58,8 @@ const (
 	defaultOpenAIHTTP2FallbackErrorThreshold = 2
 	defaultOpenAIHTTP2FallbackWindow         = 60 * time.Second
 	defaultOpenAIHTTP2FallbackTTL            = 10 * time.Minute
+	openAIHTTP2ReadIdleTimeout               = 15 * time.Second
+	openAIHTTP2PingTimeout                   = 15 * time.Second
 )
 
 const (
@@ -1080,6 +1083,9 @@ func buildUpstreamTransport(settings poolSettings, proxyURL *url.URL, protocolMo
 	switch protocolMode {
 	case upstreamProtocolModeOpenAIH2:
 		transport.ForceAttemptHTTP2 = true
+		if _, err := enableOpenAIHTTP2KeepAlive(transport); err != nil {
+			return nil, err
+		}
 	case upstreamProtocolModeOpenAIH1:
 		transport.ForceAttemptHTTP2 = false
 		transport.TLSNextProto = make(map[string]func(string, *tls.Conn) http.RoundTripper)
@@ -1092,6 +1098,20 @@ func buildUpstreamTransport(settings poolSettings, proxyURL *url.URL, protocolMo
 		return nil, err
 	}
 	return transport, nil
+}
+
+// enableOpenAIHTTP2KeepAlive actively evicts pooled H2 connections that a proxy
+// or NAT silently dropped instead of waiting for a request to hit TCP timeout.
+func enableOpenAIHTTP2KeepAlive(transport *http.Transport) (*http2.Transport, error) {
+	h2, err := http2.ConfigureTransports(transport)
+	if err != nil {
+		return nil, err
+	}
+	if h2 != nil {
+		h2.ReadIdleTimeout = openAIHTTP2ReadIdleTimeout
+		h2.PingTimeout = openAIHTTP2PingTimeout
+	}
+	return h2, nil
 }
 
 // buildUpstreamTransportWithTLSFingerprint 构建带 TLS 指纹伪装的 Transport

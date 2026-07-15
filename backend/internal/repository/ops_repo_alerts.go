@@ -639,9 +639,6 @@ func (r *opsRepository) CreateAlertSilence(ctx context.Context, input *service.O
 		return nil, fmt.Errorf("invalid rule_id")
 	}
 	platform := strings.TrimSpace(input.Platform)
-	if platform == "" {
-		return nil, fmt.Errorf("invalid platform")
-	}
 	if input.Until.IsZero() {
 		return nil, fmt.Errorf("invalid until")
 	}
@@ -715,9 +712,6 @@ func (r *opsRepository) IsAlertSilenced(ctx context.Context, ruleID int64, platf
 		return false, fmt.Errorf("invalid rule id")
 	}
 	platform = strings.TrimSpace(platform)
-	if platform == "" {
-		return false, nil
-	}
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
@@ -800,6 +794,10 @@ func buildOpsAlertEventsWhere(filter *service.OpsAlertEventFilter) (string, []an
 		args = append(args, status)
 		clauses = append(clauses, "status = $"+itoa(len(args)))
 	}
+	if filter.RuleID != nil && *filter.RuleID > 0 {
+		args = append(args, *filter.RuleID)
+		clauses = append(clauses, "rule_id = $"+itoa(len(args)))
+	}
 	if severity := strings.TrimSpace(filter.Severity); severity != "" {
 		args = append(args, severity)
 		clauses = append(clauses, "severity = $"+itoa(len(args)))
@@ -833,6 +831,10 @@ func buildOpsAlertEventsWhere(filter *service.OpsAlertEventFilter) (string, []an
 	if filter.GroupID != nil && *filter.GroupID > 0 {
 		args = append(args, fmt.Sprintf("%d", *filter.GroupID))
 		clauses = append(clauses, "(dimensions->>'group_id') = $"+itoa(len(args)))
+	}
+	if filter.UserID != nil && *filter.UserID > 0 {
+		args = append(args, fmt.Sprintf("%d", *filter.UserID))
+		clauses = append(clauses, "(dimensions->>'user_id') = $"+itoa(len(args)))
 	}
 
 	return "WHERE " + strings.Join(clauses, " AND "), args

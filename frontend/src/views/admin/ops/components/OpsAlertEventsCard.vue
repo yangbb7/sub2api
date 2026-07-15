@@ -179,6 +179,8 @@ function formatDurationLabel(event: AlertEvent): string {
 
 function formatDimensionsSummary(event: AlertEvent): string {
   const parts: string[] = []
+  const userId = event.dimensions?.user_id
+  if (userId != null && userId !== '') parts.push(`user_id=${String(userId)}`)
   const platform = getDimensionString(event, 'platform')
   if (platform) parts.push(`platform=${platform}`)
   const groupId = event.dimensions?.group_id
@@ -226,12 +228,16 @@ async function loadHistory() {
     const platform = getDimensionString(ev, 'platform')
     const groupIdRaw = ev.dimensions?.group_id
     const groupId = typeof groupIdRaw === 'number' ? groupIdRaw : undefined
+    const userIdRaw = Number(getDimensionString(ev, 'user_id'))
+    const userId = Number.isSafeInteger(userIdRaw) && userIdRaw > 0 ? userIdRaw : undefined
 
     const items = await opsAPI.listAlertEvents({
       limit: 20,
+      rule_id: ev.rule_id,
       time_range: historyRange.value,
       platform: platform || undefined,
       group_id: groupId,
+      user_id: userId,
       status: ''
     })
 
@@ -243,7 +249,10 @@ async function loadHistory() {
       if ((p1 || '') !== (p2 || '')) return false
       const g1 = it.dimensions?.group_id
       const g2 = ev.dimensions?.group_id
-      return (g1 ?? null) === (g2 ?? null)
+      if ((g1 ?? null) !== (g2 ?? null)) return false
+      const u1 = getDimensionString(it, 'user_id')
+      const u2 = getDimensionString(ev, 'user_id')
+      return (u1 || '') === (u2 || '')
     })
   } catch (err: any) {
     console.error('[OpsAlertEventsCard] Failed to load alert history', err)
@@ -590,6 +599,7 @@ const empty = computed(() => events.value.length === 0 && !loading.value)
             <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
               <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.alertEvents.detail.dimensions') }}</div>
               <div class="mt-1 text-sm text-gray-900 dark:text-white">
+                <div v-if="selected.dimensions?.user_id">user_id={{ selected.dimensions.user_id }}</div>
                 <div v-if="getDimensionString(selected, 'platform')">platform={{ getDimensionString(selected, 'platform') }}</div>
                 <div v-if="selected.dimensions?.group_id">group_id={{ selected.dimensions.group_id }}</div>
                 <div v-if="getDimensionString(selected, 'region')">region={{ getDimensionString(selected, 'region') }}</div>
@@ -645,4 +655,3 @@ const empty = computed(() => events.value.length === 0 && !loading.value)
     </BaseDialog>
   </div>
 </template>
-

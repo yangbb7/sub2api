@@ -2,11 +2,14 @@ package handler
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -407,7 +410,28 @@ func TestHandleFailoverError_ContextCanceled(t *testing.T) {
 		err := newTestFailoverErr(400, true, false)
 
 		ctx, cancel := context.WithCancel(context.Background())
-		cancel() // 立即取消
+		go func() {
+			time.Sleep(30 * time.Millisecond)
+			cancel()
+		}()
+
+		start := time.Now()
+		action := fs.HandleFailoverError(ctx, mock, 100, "openai", err)
+		elapsed := time.Since(start)
+
+		require.Equal(t, FailoverCanceled, action)
+		require.Less(t, elapsed, 400*time.Millisecond, "sleep 应被取消打断")
+		// 进入重试分支后才取消，重试计数已经递增。
+		require.Equal(t, 1, fs.SameAccountRetryCount[100])
+	})
+
+	t.Run("入口即已取消_不改动任何failover状态", func(t *testing.T) {
+		mock := &mockTempUnscheduler{}
+		fs := NewFailoverState(3, false)
+		err := newTestFailoverErr(520, false, false)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
 
 		start := time.Now()
 		action := fs.HandleFailoverError(ctx, mock, 100, "openai", err)
@@ -415,8 +439,11 @@ func TestHandleFailoverError_ContextCanceled(t *testing.T) {
 
 		require.Equal(t, FailoverCanceled, action)
 		require.Less(t, elapsed, 100*time.Millisecond, "应立即返回")
-		// 重试计数仍应递增
-		require.Equal(t, 1, fs.SameAccountRetryCount[100])
+		require.Equal(t, 0, fs.SwitchCount, "取消的请求不应计入切换")
+		require.Equal(t, 0, fs.SameAccountRetryCount[100], "取消的请求不应改动重试计数")
+		require.NotContains(t, fs.FailedAccountIDs, int64(100))
+		require.Nil(t, fs.LastFailoverErr)
+		require.Empty(t, mock.calls, "不应触发 TempUnschedule")
 	})
 
 	t.Run("Antigravity延迟期间context取消", func(t *testing.T) {
@@ -718,6 +745,27 @@ func TestHandleSelectionExhausted(t *testing.T) {
 		require.Less(t, elapsed, 100*time.Millisecond, "应立即返回")
 	})
 
+	t.Run("context已取消_非503也返回Canceled而非Exhausted", func(t *testing.T) {
+		fs := NewFailoverState(3, false)
+		fs.LastFailoverErr = newTestFailoverErr(520, false, false)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		action := fs.HandleSelectionExhausted(ctx)
+		require.Equal(t, FailoverCanceled, action)
+	})
+
+	t.Run("context已取消_无LastFailoverErr也返回Canceled", func(t *testing.T) {
+		fs := NewFailoverState(3, false)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		action := fs.HandleSelectionExhausted(ctx)
+		require.Equal(t, FailoverCanceled, action)
+	})
+
 	t.Run("503且SwitchCount等于MaxSwitches_仍可重试", func(t *testing.T) {
 		fs := NewFailoverState(2, false)
 		fs.LastFailoverErr = newTestFailoverErr(503, false, false)
@@ -726,4 +774,60 @@ func TestHandleSelectionExhausted(t *testing.T) {
 		action := fs.HandleSelectionExhausted(context.Background())
 		require.Equal(t, FailoverContinue, action)
 	})
+}
+
+func TestFailoverClientGone(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("活跃请求返回false", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+		require.False(t, failoverClientGone(c))
+		require.Equal(t, http.StatusOK, c.Writer.Status())
+	})
+
+	t.Run("客户端已断开_返回true并标记499", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
+
+		require.True(t, failoverClientGone(c))
+		require.Equal(t, statusClientClosedRequest, c.Writer.Status())
+	})
+
+	t.Run("响应已提交_不改状态码", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
+		c.String(http.StatusOK, "partial")
+
+		require.True(t, failoverClientGone(c))
+		require.Equal(t, http.StatusOK, c.Writer.Status())
+	})
+
+	t.Run("nil安全", func(t *testing.T) {
+		require.False(t, failoverClientGone(nil))
+	})
+}
+
+func TestSleepFailoverRetry_ContextCanceledMarks499(t *testing.T) {
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	ctx, cancel := context.WithCancel(context.Background())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		cancel()
+	}()
+
+	start := time.Now()
+	require.False(t, sleepFailoverRetry(c, 5*time.Second))
+	require.Less(t, time.Since(start), 400*time.Millisecond)
+	require.Equal(t, statusClientClosedRequest, c.Writer.Status())
 }

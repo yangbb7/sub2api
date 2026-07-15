@@ -334,6 +334,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	var lastFailoverErr *service.UpstreamFailoverError
 
 	for {
+		if failoverClientGone(c) {
+			return
+		}
 		// Select account supporting the requested model
 		reqLog.Debug("openai.account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
 		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForCapability(
@@ -350,6 +353,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			requestPlatform,
 		)
 		if err != nil {
+			if failoverClientGone(c) {
+				reqLog.Info("openai.account_select_aborted_client_disconnected", zap.Error(err))
+				return
+			}
 			reqLog.Warn("openai.account_select_failed",
 				zap.Error(err),
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
@@ -444,10 +451,20 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
 					if service.OpenAICompactKeepaliveAdjustedWrittenSize(c) != writerSizeBeforeForward {
+						if failoverClientGone(c) {
+							return
+						}
 						h.handleFailoverExhausted(c, failoverErr, true)
 						return
 					}
 					h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
+					if failoverClientGone(c) {
+						reqLog.Info("openai.failover_aborted_client_disconnected",
+							zap.Int64("account_id", account.ID),
+							zap.Int("upstream_status", failoverErr.StatusCode),
+						)
+						return
+					}
 					// 池模式：同账号重试
 					if failoverErr.RetryableOnSameAccount {
 						retryLimit := account.GetPoolModeRetryCount()
@@ -459,10 +476,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 								zap.Int("retry_limit", retryLimit),
 								zap.Int("retry_count", sameAccountRetryCount[account.ID]),
 							)
-							select {
-							case <-c.Request.Context().Done():
+							if !sleepFailoverRetry(c, sameAccountRetryDelay) {
 								return
-							case <-time.After(sameAccountRetryDelay):
 							}
 							continue
 						}
@@ -823,6 +838,9 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	effectiveMappedModel := preferredMappedModel
 
 	for {
+		if failoverClientGone(c) {
+			return
+		}
 		currentRoutingModel := routingModel
 		if effectiveMappedModel != "" {
 			currentRoutingModel = effectiveMappedModel
@@ -842,6 +860,10 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			requestPlatform,
 		)
 		if err != nil {
+			if failoverClientGone(c) {
+				reqLog.Info("openai_messages.account_select_aborted_client_disconnected", zap.Error(err))
+				return
+			}
 			reqLog.Warn("openai_messages.account_select_failed",
 				zap.Error(err),
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
@@ -924,10 +946,20 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
 					if c.Writer.Size() != writerSizeBeforeForward {
+						if failoverClientGone(c) {
+							return
+						}
 						h.handleAnthropicFailoverExhausted(c, failoverErr, true)
 						return
 					}
 					h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
+					if failoverClientGone(c) {
+						reqLog.Info("openai_messages.failover_aborted_client_disconnected",
+							zap.Int64("account_id", account.ID),
+							zap.Int("upstream_status", failoverErr.StatusCode),
+						)
+						return
+					}
 					// 池模式：同账号重试
 					if failoverErr.RetryableOnSameAccount {
 						retryLimit := account.GetPoolModeRetryCount()
@@ -939,10 +971,8 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 								zap.Int("retry_limit", retryLimit),
 								zap.Int("retry_count", sameAccountRetryCount[account.ID]),
 							)
-							select {
-							case <-c.Request.Context().Done():
+							if !sleepFailoverRetry(c, sameAccountRetryDelay) {
 								return
-							case <-time.After(sameAccountRetryDelay):
 							}
 							continue
 						}
@@ -1963,6 +1993,8 @@ func (h *OpenAIGatewayHandler) handleStreamingAwareError(c *gin.Context, status 
 		streamStarted = true
 	}
 	if streamStarted {
+		service.MarkOpsStreamError(c, errType, message, status)
+
 		// /v1/responses 的严格 SDK（Codex CLI）要求终止事件必须属于
 		// response.completed/failed/incomplete/cancelled 集合。
 		// 通用 `event: error` 帧不被识别为终止事件，会导致

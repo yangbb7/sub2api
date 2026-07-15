@@ -476,6 +476,7 @@ export default {
         manage: '预警规则',
         metricGroups: {
           system: '系统指标',
+          user: '用户级别指标（需 user_id）',
           group: '分组级别指标（需 group_id）',
           account: '账号级别指标'
         },
@@ -487,6 +488,7 @@ export default {
           p99: 'P99 请求时长 (ms)',
           cpu: 'CPU 使用率 (%)',
           memory: '内存使用率 (%)',
+          userConcurrencyUtilization: '用户并发利用率 (%)',
           queueDepth: '并发排队深度',
           groupAvailableAccounts: '分组可用账号数',
           groupAvailableRatio: '分组可用比例 (%)',
@@ -505,6 +507,7 @@ export default {
           p99: '统计窗口内 P99 请求耗时（毫秒）。',
           cpu: '当前实例 CPU 使用率（0~100）。',
           memory: '当前实例内存使用率（0~100）。',
+          userConcurrencyUtilization: '指定用户当前占用并发数相对其并发上限的比例（需要 user_id）。',
           queueDepth: '统计窗口内并发队列排队深度（等待中的请求数）。',
           groupAvailableAccounts: '指定分组中当前可用账号数量（需要 group_id 过滤）。',
           groupAvailableRatio: '指定分组中可用账号占比（0~100，需要 group_id 过滤）。',
@@ -517,6 +520,7 @@ export default {
         },
         hints: {
           recommended: '推荐：运算符 {operator}，阈值 {threshold}{unit}',
+          userRequired: '该指标必须指定目标用户（user_id）。',
           groupRequired: '该指标为分组级别指标，必须选择分组（group_id）。',
           groupOptional: '可选：通过 group_id 将规则限定到某个分组。'
         },
@@ -532,6 +536,7 @@ export default {
           description: '描述',
           metric: '指标',
           operator: '运算符',
+          userId: '用户 ID（user_id）',
           groupId: '分组（group_id）',
           groupPlaceholder: '请选择分组',
           allGroups: '全部分组',
@@ -548,6 +553,7 @@ export default {
           invalid: '规则不合法',
           nameRequired: '名称不能为空',
           metricRequired: '指标不能为空',
+          userIdRequired: '用户并发指标必须指定正整数 user_id',
           groupIdRequired: '分组级别指标必须指定 group_id',
           operatorRequired: '运算符不能为空',
           thresholdRequired: '阈值必须为数字',

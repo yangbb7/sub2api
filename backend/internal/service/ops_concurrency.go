@@ -2,9 +2,12 @@ package service
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
 	"time"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 )
 
@@ -12,6 +15,8 @@ const (
 	opsAccountsPageSize          = 100
 	opsConcurrencyBatchChunkSize = 200
 )
+
+var errOpsUserConcurrencyTargetInactive = errors.New("ops user concurrency target inactive")
 
 type opsAccountStatsRepository interface {
 	ListOpsAccountsForStats(ctx context.Context, platformFilter string, groupIDFilter *int64) ([]Account, error)
@@ -405,4 +410,80 @@ func (s *OpsService) GetUserConcurrencyStats(ctx context.Context) (map[int64]*Us
 	}
 
 	return result, &collectedAt, nil
+}
+
+// GetUserConcurrencyStatStrict returns one user's current concurrency without
+// converting repository or Redis failures into a misleading zero value.
+func (s *OpsService) GetUserConcurrencyStatStrict(ctx context.Context, userID int64) (*UserConcurrencyInfo, error) {
+	if s == nil {
+		return nil, fmt.Errorf("ops service unavailable")
+	}
+	if err := s.RequireMonitoringEnabled(ctx); err != nil {
+		return nil, err
+	}
+	if userID <= 0 {
+		return nil, fmt.Errorf("invalid user_id: %d", userID)
+	}
+	if s.userRepo == nil {
+		return nil, fmt.Errorf("user repository unavailable")
+	}
+	if s.concurrencyService == nil || s.concurrencyService.cache == nil {
+		return nil, fmt.Errorf("concurrency cache unavailable")
+	}
+
+	user, err := s.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, ErrUserNotFound) {
+			return nil, errOpsUserConcurrencyTargetInactive
+		}
+		return nil, fmt.Errorf("get user %d: %w", userID, err)
+	}
+	if user == nil || !user.IsActive() {
+		return nil, errOpsUserConcurrencyTargetInactive
+	}
+
+	loads, err := s.concurrencyService.GetUsersLoadBatch(ctx, []UserWithConcurrency{{
+		ID:             user.ID,
+		MaxConcurrency: user.Concurrency,
+	}})
+	if err != nil {
+		return nil, fmt.Errorf("get user %d concurrency: %w", userID, err)
+	}
+	load := loads[user.ID]
+	if load == nil {
+		return nil, fmt.Errorf("user %d concurrency result missing", userID)
+	}
+
+	info := &UserConcurrencyInfo{
+		UserID:         user.ID,
+		UserEmail:      user.Email,
+		Username:       user.Username,
+		CurrentInUse:   int64(load.CurrentConcurrency),
+		MaxCapacity:    int64(user.Concurrency),
+		WaitingInQueue: int64(load.WaitingCount),
+	}
+	if info.MaxCapacity > 0 {
+		info.LoadPercentage = float64(info.CurrentInUse) / float64(info.MaxCapacity) * 100
+	}
+	return info, nil
+}
+
+func (s *OpsService) ValidateUserConcurrencyAlertTarget(ctx context.Context, userID int64) error {
+	if s == nil || s.userRepo == nil {
+		return infraerrors.ServiceUnavailable("OPS_USER_REPO_UNAVAILABLE", "user repository unavailable")
+	}
+	if userID <= 0 {
+		return infraerrors.BadRequest("OPS_ALERT_USER_INVALID", "user_id must be a positive integer")
+	}
+	user, err := s.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if user == nil || !user.IsActive() {
+		return infraerrors.BadRequest("OPS_ALERT_USER_INACTIVE", "target user must be active")
+	}
+	if user.Concurrency <= 0 {
+		return infraerrors.BadRequest("OPS_ALERT_USER_UNLIMITED", "target user must have a positive concurrency limit")
+	}
+	return nil
 }

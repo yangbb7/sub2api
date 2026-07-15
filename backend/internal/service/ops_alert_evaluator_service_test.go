@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -16,6 +17,69 @@ type stubOpsRepo struct {
 	OpsRepository
 	overview *OpsDashboardOverview
 	err      error
+}
+
+type alertUserRepoStub struct {
+	UserRepository
+	user *User
+	err  error
+}
+
+func (s *alertUserRepoStub) GetByID(_ context.Context, _ int64) (*User, error) {
+	return s.user, s.err
+}
+
+type alertConcurrencyCacheStub struct {
+	ConcurrencyCache
+	loads map[int64]*UserLoadInfo
+	err   error
+}
+
+type silencedUserAlertOpsRepoStub struct {
+	OpsRepository
+	rules             []*OpsAlertRule
+	silenceCalled     bool
+	silencePlatform   string
+	silenceGroupID    *int64
+	silenceRegion     *string
+	createdEventCount int
+}
+
+func (s *alertConcurrencyCacheStub) GetUsersLoadBatch(_ context.Context, _ []UserWithConcurrency) (map[int64]*UserLoadInfo, error) {
+	return s.loads, s.err
+}
+
+func (s *silencedUserAlertOpsRepoStub) ListAlertRules(context.Context) ([]*OpsAlertRule, error) {
+	return s.rules, nil
+}
+
+func (s *silencedUserAlertOpsRepoStub) GetLatestSystemMetrics(context.Context, int) (*OpsSystemMetricsSnapshot, error) {
+	return nil, nil
+}
+
+func (s *silencedUserAlertOpsRepoStub) GetActiveAlertEvent(context.Context, int64) (*OpsAlertEvent, error) {
+	return nil, nil
+}
+
+func (s *silencedUserAlertOpsRepoStub) IsAlertSilenced(_ context.Context, _ int64, platform string, groupID *int64, region *string, _ time.Time) (bool, error) {
+	s.silenceCalled = true
+	s.silencePlatform = platform
+	s.silenceGroupID = groupID
+	s.silenceRegion = region
+	return true, nil
+}
+
+func (s *silencedUserAlertOpsRepoStub) GetLatestAlertEvent(context.Context, int64) (*OpsAlertEvent, error) {
+	return nil, nil
+}
+
+func (s *silencedUserAlertOpsRepoStub) CreateAlertEvent(_ context.Context, event *OpsAlertEvent) (*OpsAlertEvent, error) {
+	s.createdEventCount++
+	return event, nil
+}
+
+func (s *silencedUserAlertOpsRepoStub) UpsertJobHeartbeat(context.Context, *OpsUpsertJobHeartbeatInput) error {
+	return nil
 }
 
 func (s *stubOpsRepo) GetDashboardOverview(ctx context.Context, filter *OpsDashboardFilter) (*OpsDashboardOverview, error) {
@@ -60,6 +124,156 @@ func TestComputeGroupAvailableRatio(t *testing.T) {
 		})
 		require.Equal(t, 0.0, got)
 	})
+}
+
+func TestUserConcurrencyUtilizationPercent(t *testing.T) {
+	t.Parallel()
+
+	got, ok := userConcurrencyUtilizationPercent(&UserConcurrencyInfo{UserID: 2, CurrentInUse: 8, MaxCapacity: 10})
+	require.True(t, ok)
+	require.InDelta(t, 80.0, got, 0.0001)
+
+	got, ok = userConcurrencyUtilizationPercent(&UserConcurrencyInfo{UserID: 2, MaxCapacity: 10})
+	require.True(t, ok)
+	require.Equal(t, 0.0, got)
+
+	_, ok = userConcurrencyUtilizationPercent(nil)
+	require.False(t, ok)
+}
+
+func TestComputeUserConcurrencyUtilizationPercent(t *testing.T) {
+	user := &User{ID: 2, Email: "user@example.com", Concurrency: 10, Status: StatusActive}
+	newEvaluator := func(cache *alertConcurrencyCacheStub) *OpsAlertEvaluatorService {
+		return &OpsAlertEvaluatorService{opsService: &OpsService{
+			userRepo:           &alertUserRepoStub{user: user},
+			concurrencyService: NewConcurrencyService(cache),
+		}}
+	}
+	rule := &OpsAlertRule{
+		MetricType: "user_concurrency_utilization_percent",
+		Filters:    map[string]any{"user_id": float64(2)},
+	}
+
+	t.Run("8 of 10", func(t *testing.T) {
+		evaluator := newEvaluator(&alertConcurrencyCacheStub{loads: map[int64]*UserLoadInfo{
+			2: {UserID: 2, CurrentConcurrency: 8},
+		}})
+		got, ok := evaluator.computeRuleMetric(context.Background(), rule, nil, time.Time{}, time.Time{}, "", nil)
+		require.True(t, ok)
+		require.InDelta(t, 80.0, got, 0.0001)
+	})
+
+	t.Run("idle is zero", func(t *testing.T) {
+		evaluator := newEvaluator(&alertConcurrencyCacheStub{loads: map[int64]*UserLoadInfo{
+			2: {UserID: 2, CurrentConcurrency: 0},
+		}})
+		got, ok := evaluator.computeRuleMetric(context.Background(), rule, nil, time.Time{}, time.Time{}, "", nil)
+		require.True(t, ok)
+		require.Equal(t, 0.0, got)
+	})
+
+	t.Run("redis failure is not evaluated", func(t *testing.T) {
+		evaluator := newEvaluator(&alertConcurrencyCacheStub{err: errors.New("redis unavailable")})
+		_, ok := evaluator.computeRuleMetric(context.Background(), rule, nil, time.Time{}, time.Time{}, "", nil)
+		require.False(t, ok)
+	})
+
+	t.Run("missing load is not evaluated", func(t *testing.T) {
+		evaluator := newEvaluator(&alertConcurrencyCacheStub{loads: map[int64]*UserLoadInfo{}})
+		_, ok := evaluator.computeRuleMetric(context.Background(), rule, nil, time.Time{}, time.Time{}, "", nil)
+		require.False(t, ok)
+	})
+
+	t.Run("deleted user resolves as zero", func(t *testing.T) {
+		evaluator := &OpsAlertEvaluatorService{opsService: &OpsService{
+			userRepo: &alertUserRepoStub{err: ErrUserNotFound},
+			concurrencyService: NewConcurrencyService(&alertConcurrencyCacheStub{
+				loads: map[int64]*UserLoadInfo{},
+			}),
+		}}
+		got, ok := evaluator.computeRuleMetric(context.Background(), rule, nil, time.Time{}, time.Time{}, "", nil)
+		require.True(t, ok)
+		require.Equal(t, 0.0, got)
+	})
+
+	t.Run("database failure is not evaluated", func(t *testing.T) {
+		evaluator := &OpsAlertEvaluatorService{opsService: &OpsService{
+			userRepo: &alertUserRepoStub{err: errors.New("database unavailable")},
+			concurrencyService: NewConcurrencyService(&alertConcurrencyCacheStub{
+				loads: map[int64]*UserLoadInfo{},
+			}),
+		}}
+		_, ok := evaluator.computeRuleMetric(context.Background(), rule, nil, time.Time{}, time.Time{}, "", nil)
+		require.False(t, ok)
+	})
+}
+
+func TestValidateUserConcurrencyAlertTarget(t *testing.T) {
+	t.Run("active limited user", func(t *testing.T) {
+		ops := &OpsService{userRepo: &alertUserRepoStub{user: &User{
+			ID: 2, Concurrency: 10, Status: StatusActive,
+		}}}
+		require.NoError(t, ops.ValidateUserConcurrencyAlertTarget(context.Background(), 2))
+	})
+
+	t.Run("unlimited user rejected", func(t *testing.T) {
+		ops := &OpsService{userRepo: &alertUserRepoStub{user: &User{
+			ID: 2, Concurrency: 0, Status: StatusActive,
+		}}}
+		require.Error(t, ops.ValidateUserConcurrencyAlertTarget(context.Background(), 2))
+	})
+
+	t.Run("repository failure propagated", func(t *testing.T) {
+		wantErr := errors.New("database unavailable")
+		ops := &OpsService{userRepo: &alertUserRepoStub{err: wantErr}}
+		require.ErrorIs(t, ops.ValidateUserConcurrencyAlertTarget(context.Background(), 2), wantErr)
+	})
+}
+
+func TestUserConcurrencyAlertDimensions(t *testing.T) {
+	userID := int64(2)
+	dims := buildOpsAlertDimensions("", nil, &userID)
+	require.Equal(t, map[string]any{"user_id": int64(2)}, dims)
+
+	description := buildOpsAlertDescription(&OpsAlertRule{
+		MetricType: "user_concurrency_utilization_percent",
+		Operator:   ">=",
+		Threshold:  80,
+	}, 90, 1, "", nil, &userID)
+	require.Contains(t, description, "user_id=2")
+}
+
+func TestOpsAlertEvaluator_UserConcurrencyRuleScopedSilence(t *testing.T) {
+	repo := &silencedUserAlertOpsRepoStub{rules: []*OpsAlertRule{{
+		ID:               7,
+		Name:             "user concurrency",
+		Enabled:          true,
+		Severity:         "P1",
+		MetricType:       "user_concurrency_utilization_percent",
+		Operator:         ">=",
+		Threshold:        80,
+		WindowMinutes:    1,
+		SustainedMinutes: 1,
+		Filters:          map[string]any{"user_id": float64(2)},
+	}}}
+	ops := &OpsService{
+		opsRepo: repo,
+		userRepo: &alertUserRepoStub{user: &User{
+			ID: 2, Concurrency: 10, Status: StatusActive,
+		}},
+		concurrencyService: NewConcurrencyService(&alertConcurrencyCacheStub{loads: map[int64]*UserLoadInfo{
+			2: {UserID: 2, CurrentConcurrency: 8},
+		}}),
+	}
+	evaluator := NewOpsAlertEvaluatorService(ops, repo, nil, nil, nil, nil)
+
+	evaluator.evaluateOnce(time.Minute)
+
+	require.True(t, repo.silenceCalled)
+	require.Empty(t, repo.silencePlatform)
+	require.Nil(t, repo.silenceGroupID)
+	require.Nil(t, repo.silenceRegion)
+	require.Zero(t, repo.createdEventCount)
 }
 
 func TestCountAccountsByCondition(t *testing.T) {

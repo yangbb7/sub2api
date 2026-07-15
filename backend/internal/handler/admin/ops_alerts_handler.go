@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -22,6 +23,7 @@ var validOpsAlertMetricTypes = []string{
 	"upstream_error_rate",
 	"cpu_usage_percent",
 	"memory_usage_percent",
+	"user_concurrency_utilization_percent",
 	"concurrency_queue_depth",
 	"group_available_accounts",
 	"group_available_ratio",
@@ -93,6 +95,7 @@ func isPercentOrRateMetric(metricType string) bool {
 		"upstream_error_rate",
 		"cpu_usage_percent",
 		"memory_usage_percent",
+		"user_concurrency_utilization_percent",
 		"group_available_ratio",
 		"group_rate_limit_ratio",
 		"account_error_ratio":
@@ -151,6 +154,16 @@ func validateOpsAlertRulePayload(raw map[string]json.RawMessage) (*opsAlertRuleV
 		}
 	} else if threshold < 0 {
 		return nil, fmt.Errorf("threshold must be >= 0")
+	}
+	if metricType == "user_concurrency_utilization_percent" {
+		var filters map[string]any
+		filtersRaw, ok := raw["filters"]
+		if !ok || json.Unmarshal(filtersRaw, &filters) != nil {
+			return nil, fmt.Errorf("filters.user_id is required for metric_type %s", metricType)
+		}
+		if _, ok := parsePositiveOpsAlertFilterID(filters["user_id"]); !ok {
+			return nil, fmt.Errorf("filters.user_id must be a positive integer for metric_type %s", metricType)
+		}
 	}
 
 	validated := &opsAlertRuleValidatedInput{
@@ -237,6 +250,57 @@ func validateOpsAlertRulePayload(raw map[string]json.RawMessage) (*opsAlertRuleV
 	return validated, nil
 }
 
+func parsePositiveOpsAlertFilterID(value any) (int64, bool) {
+	switch v := value.(type) {
+	case float64:
+		id := int64(v)
+		if v > 0 && v == math.Trunc(v) && id > 0 && float64(id) == v {
+			return id, true
+		}
+	case int:
+		if v > 0 {
+			return int64(v), true
+		}
+	case int64:
+		if v > 0 {
+			return v, true
+		}
+	case string:
+		id, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		if err == nil && id > 0 {
+			return id, true
+		}
+	}
+	return 0, false
+}
+
+func normalizeOpsAlertRuleFilters(rule *service.OpsAlertRule) {
+	if rule == nil || len(rule.Filters) == 0 {
+		return
+	}
+	if rule.MetricType == "user_concurrency_utilization_percent" {
+		delete(rule.Filters, "platform")
+		delete(rule.Filters, "group_id")
+		delete(rule.Filters, "region")
+	} else {
+		delete(rule.Filters, "user_id")
+	}
+	if len(rule.Filters) == 0 {
+		rule.Filters = nil
+	}
+}
+
+func validateOpsAlertRuleTarget(ctx context.Context, opsService *service.OpsService, rule *service.OpsAlertRule) error {
+	if opsService == nil || rule == nil || rule.MetricType != "user_concurrency_utilization_percent" {
+		return nil
+	}
+	userID, ok := parsePositiveOpsAlertFilterID(rule.Filters["user_id"])
+	if !ok {
+		return fmt.Errorf("filters.user_id must be a positive integer")
+	}
+	return opsService.ValidateUserConcurrencyAlertTarget(ctx, userID)
+}
+
 // ListAlertRules returns all ops alert rules.
 // GET /api/v1/admin/ops/alert-rules
 func (h *OpsHandler) ListAlertRules(c *gin.Context) {
@@ -296,6 +360,11 @@ func (h *OpsHandler) CreateAlertRule(c *gin.Context) {
 	rule.Severity = validated.Severity
 	rule.Enabled = validated.Enabled
 	rule.NotifyEmail = validated.NotifyEmail
+	normalizeOpsAlertRuleFilters(&rule)
+	if err := validateOpsAlertRuleTarget(c.Request.Context(), h.opsService, &rule); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 
 	created, err := h.opsService.CreateAlertRule(c.Request.Context(), &rule)
 	if err != nil {
@@ -351,6 +420,13 @@ func (h *OpsHandler) UpdateAlertRule(c *gin.Context) {
 	rule.Severity = validated.Severity
 	rule.Enabled = validated.Enabled
 	rule.NotifyEmail = validated.NotifyEmail
+	normalizeOpsAlertRuleFilters(&rule)
+	if rule.Enabled {
+		if err := validateOpsAlertRuleTarget(c.Request.Context(), h.opsService, &rule); err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+	}
 
 	updated, err := h.opsService.UpdateAlertRule(c.Request.Context(), &rule)
 	if err != nil {
@@ -539,6 +615,14 @@ func (h *OpsHandler) ListAlertEvents(c *gin.Context) {
 		Status:   strings.TrimSpace(c.Query("status")),
 		Severity: strings.TrimSpace(c.Query("severity")),
 	}
+	if v := strings.TrimSpace(c.Query("rule_id")); v != "" {
+		id, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || id <= 0 {
+			response.BadRequest(c, "Invalid rule_id")
+			return
+		}
+		filter.RuleID = &id
+	}
 
 	if v := strings.TrimSpace(c.Query("email_sent")); v != "" {
 		vv := strings.ToLower(v)
@@ -583,7 +667,7 @@ func (h *OpsHandler) ListAlertEvents(c *gin.Context) {
 		filter.BeforeID = &id
 	}
 
-	// Optional global filter support (platform/group/time range).
+	// Optional global filter support (platform/group/user/time range).
 	if platform := strings.TrimSpace(c.Query("platform")); platform != "" {
 		filter.Platform = platform
 	}
@@ -594,6 +678,14 @@ func (h *OpsHandler) ListAlertEvents(c *gin.Context) {
 			return
 		}
 		filter.GroupID = &id
+	}
+	if v := strings.TrimSpace(c.Query("user_id")); v != "" {
+		id, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || id <= 0 {
+			response.BadRequest(c, "Invalid user_id")
+			return
+		}
+		filter.UserID = &id
 	}
 	if startTime, endTime, err := parseOpsTimeRange(c, "24h"); err == nil {
 		// Only apply when explicitly provided to avoid surprising default narrowing.

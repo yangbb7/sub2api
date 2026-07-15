@@ -82,6 +82,7 @@ type OpsAlertEventFilter struct {
 	BeforeID      *int64
 
 	// Optional filters.
+	RuleID    *int64
 	Status    string
 	Severity  string
 	EmailSent *bool
@@ -92,4 +93,5 @@ type OpsAlertEventFilter struct {
 	// Dimensions filters (best-effort).
 	Platform string
 	GroupID  *int64
+	UserID   *int64
 }
