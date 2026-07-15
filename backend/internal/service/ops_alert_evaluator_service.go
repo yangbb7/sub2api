@@ -218,9 +218,10 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 		}
 		rulesEnabled++
 
+		metricType := strings.TrimSpace(rule.MetricType)
 		scopePlatform, scopeGroupID, scopeRegion := parseOpsAlertRuleScope(rule.Filters)
 		var scopeUserID *int64
-		if strings.TrimSpace(rule.MetricType) == "user_concurrency_utilization_percent" {
+		if metricType == "user_concurrency_utilization_percent" {
 			scopePlatform, scopeGroupID, scopeRegion = "", nil, nil
 			if userID, ok := parsePositiveOpsAlertFilterID(rule.Filters["user_id"]); ok {
 				scopeUserID = &userID
@@ -234,12 +235,36 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 		windowStart := safeEnd.Add(-time.Duration(windowMinutes) * time.Minute)
 		windowEnd := safeEnd
 
-		metricValue, ok := s.computeRuleMetric(ctx, rule, systemMetrics, windowStart, windowEnd, scopePlatform, scopeGroupID)
+		var metricValue float64
+		var ok bool
+		targetInactive := false
+		if metricType == "user_concurrency_utilization_percent" {
+			metricValue, ok, targetInactive = s.computeUserConcurrencyRuleMetric(ctx, rule)
+		} else {
+			metricValue, ok = s.computeRuleMetric(ctx, rule, systemMetrics, windowStart, windowEnd, scopePlatform, scopeGroupID)
+		}
 		if !ok {
 			s.resetRuleState(rule.ID, now)
 			continue
 		}
 		rulesEvaluated++
+		if targetInactive {
+			s.resetRuleState(rule.ID, now)
+			activeEvent, err := s.opsRepo.GetActiveAlertEvent(ctx, rule.ID)
+			if err != nil {
+				logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] get active event for inactive target failed (rule=%d): %v", rule.ID, err)
+				continue
+			}
+			if activeEvent != nil {
+				resolvedAt := now
+				if err := s.opsRepo.UpdateAlertEventStatus(ctx, activeEvent.ID, OpsAlertStatusResolved, &resolvedAt); err != nil {
+					logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] resolve inactive-target event failed (event=%d): %v", activeEvent.ID, err)
+				} else {
+					eventsResolved++
+				}
+			}
+			continue
+		}
 
 		breachedNow := compareMetric(metricValue, rule.Operator, rule.Threshold)
 		required := requiredSustainedBreaches(rule.SustainedMinutes, interval)
@@ -260,7 +285,7 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 			if s.opsService != nil {
 				platform := strings.TrimSpace(scopePlatform)
 				region := scopeRegion
-				if ok, err := s.opsService.IsAlertSilenced(ctx, rule.ID, platform, scopeGroupID, region, now); err == nil && ok {
+				if ok, err := s.opsService.IsAlertSilenced(ctx, rule.ID, platform, scopeGroupID, scopeUserID, region, now); err == nil && ok {
 					continue
 				}
 			}
@@ -461,22 +486,6 @@ func (s *OpsAlertEvaluatorService) computeRuleMetric(
 			return *systemMetrics.MemoryUsagePercent, true
 		}
 		return 0, false
-	case "user_concurrency_utilization_percent":
-		if s == nil || s.opsService == nil {
-			return 0, false
-		}
-		userID, ok := parsePositiveOpsAlertFilterID(rule.Filters["user_id"])
-		if !ok {
-			return 0, false
-		}
-		info, err := s.opsService.GetUserConcurrencyStatStrict(ctx, userID)
-		if err != nil {
-			if errors.Is(err, errOpsUserConcurrencyTargetInactive) {
-				return 0, true
-			}
-			return 0, false
-		}
-		return userConcurrencyUtilizationPercent(info)
 	case "concurrency_queue_depth":
 		if systemMetrics != nil && systemMetrics.ConcurrencyQueueDepth != nil {
 			return float64(*systemMetrics.ConcurrencyQueueDepth), true
@@ -638,6 +647,25 @@ func (s *OpsAlertEvaluatorService) computeRuleMetric(
 	default:
 		return 0, false
 	}
+}
+
+func (s *OpsAlertEvaluatorService) computeUserConcurrencyRuleMetric(ctx context.Context, rule *OpsAlertRule) (float64, bool, bool) {
+	if s == nil || s.opsService == nil || rule == nil {
+		return 0, false, false
+	}
+	userID, ok := parsePositiveOpsAlertFilterID(rule.Filters["user_id"])
+	if !ok {
+		return 0, false, false
+	}
+	info, err := s.opsService.GetUserConcurrencyStatStrict(ctx, userID)
+	if err != nil {
+		if errors.Is(err, errOpsUserConcurrencyTargetInactive) {
+			return 0, true, true
+		}
+		return 0, false, false
+	}
+	value, ok := userConcurrencyUtilizationPercent(info)
+	return value, ok, false
 }
 
 func userConcurrencyUtilizationPercent(info *UserConcurrencyInfo) (float64, bool) {

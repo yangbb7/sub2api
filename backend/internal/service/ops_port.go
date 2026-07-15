@@ -54,7 +54,7 @@ type OpsRepository interface {
 
 	// Alert silences
 	CreateAlertSilence(ctx context.Context, input *OpsAlertSilence) (*OpsAlertSilence, error)
-	IsAlertSilenced(ctx context.Context, ruleID int64, platform string, groupID *int64, region *string, now time.Time) (bool, error)
+	IsAlertSilenced(ctx context.Context, ruleID int64, platform string, groupID *int64, userID *int64, region *string, now time.Time) (bool, error)
 
 	// Pre-aggregation (hourly/daily) used for long-window dashboard performance.
 	UpsertHourlyMetrics(ctx context.Context, startTime, endTime time.Time) error

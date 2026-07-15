@@ -22,16 +22,18 @@ func TestCreateAlertSilence_AllowsEmptyPlatform(t *testing.T) {
 	repo, mock := newOpsAlertSilenceRepoMock(t)
 	until := time.Date(2026, time.July, 15, 12, 0, 0, 0, time.UTC)
 	createdAt := until.Add(-time.Minute)
+	userID := int64(2)
 
 	mock.ExpectQuery("INSERT INTO ops_alert_silences").
-		WithArgs(int64(7), "", sqlmock.AnyArg(), sqlmock.AnyArg(), until, sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs(int64(7), "", sqlmock.AnyArg(), userID, sqlmock.AnyArg(), until, sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "rule_id", "platform", "group_id", "region", "until", "reason", "created_by", "created_at",
-		}).AddRow(int64(11), int64(7), "", nil, nil, until, "rule scoped", nil, createdAt))
+			"id", "rule_id", "platform", "group_id", "user_id", "region", "until", "reason", "created_by", "created_at",
+		}).AddRow(int64(11), int64(7), "", nil, userID, nil, until, "rule scoped", nil, createdAt))
 
 	created, err := repo.CreateAlertSilence(context.Background(), &service.OpsAlertSilence{
 		RuleID:   7,
 		Platform: "   ",
+		UserID:   &userID,
 		Until:    until,
 		Reason:   "rule scoped",
 	})
@@ -39,18 +41,21 @@ func TestCreateAlertSilence_AllowsEmptyPlatform(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(11), created.ID)
 	require.Empty(t, created.Platform)
+	require.NotNil(t, created.UserID)
+	require.Equal(t, userID, *created.UserID)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestIsAlertSilenced_QueriesEmptyPlatform(t *testing.T) {
 	repo, mock := newOpsAlertSilenceRepoMock(t)
 	now := time.Date(2026, time.July, 15, 12, 0, 0, 0, time.UTC)
+	userID := int64(2)
 
 	mock.ExpectQuery("SELECT 1\\s+FROM ops_alert_silences").
-		WithArgs(int64(7), "", sqlmock.AnyArg(), sqlmock.AnyArg(), now).
+		WithArgs(int64(7), "", sqlmock.AnyArg(), userID, sqlmock.AnyArg(), now).
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(1))
 
-	silenced, err := repo.IsAlertSilenced(context.Background(), 7, "   ", nil, nil, now)
+	silenced, err := repo.IsAlertSilenced(context.Background(), 7, "   ", nil, &userID, nil, now)
 
 	require.NoError(t, err)
 	require.True(t, silenced)

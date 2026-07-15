@@ -438,7 +438,7 @@ func (s *OpsService) GetUserConcurrencyStatStrict(ctx context.Context, userID in
 		}
 		return nil, fmt.Errorf("get user %d: %w", userID, err)
 	}
-	if user == nil || !user.IsActive() {
+	if user == nil || !user.IsActive() || user.Concurrency <= 0 {
 		return nil, errOpsUserConcurrencyTargetInactive
 	}
 

@@ -65,6 +65,7 @@ type OpsAlertSilence struct {
 	RuleID   int64   `json:"rule_id"`
 	Platform string  `json:"platform"`
 	GroupID  *int64  `json:"group_id,omitempty"`
+	UserID   *int64  `json:"user_id,omitempty"`
 	Region   *string `json:"region,omitempty"`
 
 	Until  time.Time `json:"until"`

@@ -170,7 +170,7 @@ func (m *opsRepoMock) CreateAlertSilence(ctx context.Context, input *OpsAlertSil
 	return input, nil
 }
 
-func (m *opsRepoMock) IsAlertSilenced(ctx context.Context, ruleID int64, platform string, groupID *int64, region *string, now time.Time) (bool, error) {
+func (m *opsRepoMock) IsAlertSilenced(ctx context.Context, ruleID int64, platform string, groupID *int64, userID *int64, region *string, now time.Time) (bool, error) {
 	return false, nil
 }
 

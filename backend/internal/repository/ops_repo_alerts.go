@@ -648,15 +648,16 @@ INSERT INTO ops_alert_silences (
   rule_id,
   platform,
   group_id,
+  user_id,
   region,
   until,
   reason,
   created_by,
   created_at
 ) VALUES (
-  $1,$2,$3,$4,$5,$6,$7,NOW()
+  $1,$2,$3,$4,$5,$6,$7,$8,NOW()
 )
-RETURNING id, rule_id, platform, group_id, region, until, COALESCE(reason,''), created_by, created_at`
+RETURNING id, rule_id, platform, group_id, user_id, region, until, COALESCE(reason,''), created_by, created_at`
 
 	row := r.db.QueryRowContext(
 		ctx,
@@ -664,6 +665,7 @@ RETURNING id, rule_id, platform, group_id, region, until, COALESCE(reason,''), c
 		input.RuleID,
 		platform,
 		opsNullInt64(input.GroupID),
+		opsNullInt64(input.UserID),
 		opsNullString(input.Region),
 		input.Until,
 		opsNullString(input.Reason),
@@ -672,6 +674,7 @@ RETURNING id, rule_id, platform, group_id, region, until, COALESCE(reason,''), c
 
 	var out service.OpsAlertSilence
 	var groupID sql.NullInt64
+	var userID sql.NullInt64
 	var region sql.NullString
 	var createdBy sql.NullInt64
 	if err := row.Scan(
@@ -679,6 +682,7 @@ RETURNING id, rule_id, platform, group_id, region, until, COALESCE(reason,''), c
 		&out.RuleID,
 		&out.Platform,
 		&groupID,
+		&userID,
 		&region,
 		&out.Until,
 		&out.Reason,
@@ -690,6 +694,10 @@ RETURNING id, rule_id, platform, group_id, region, until, COALESCE(reason,''), c
 	if groupID.Valid {
 		v := groupID.Int64
 		out.GroupID = &v
+	}
+	if userID.Valid {
+		v := userID.Int64
+		out.UserID = &v
 	}
 	if region.Valid {
 		v := strings.TrimSpace(region.String)
@@ -704,7 +712,7 @@ RETURNING id, rule_id, platform, group_id, region, until, COALESCE(reason,''), c
 	return &out, nil
 }
 
-func (r *opsRepository) IsAlertSilenced(ctx context.Context, ruleID int64, platform string, groupID *int64, region *string, now time.Time) (bool, error) {
+func (r *opsRepository) IsAlertSilenced(ctx context.Context, ruleID int64, platform string, groupID *int64, userID *int64, region *string, now time.Time) (bool, error) {
 	if r == nil || r.db == nil {
 		return false, fmt.Errorf("nil ops repository")
 	}
@@ -722,12 +730,13 @@ FROM ops_alert_silences
 WHERE rule_id = $1
   AND platform = $2
   AND (group_id IS NOT DISTINCT FROM $3)
-  AND (region IS NOT DISTINCT FROM $4)
-  AND until > $5
+  AND (user_id IS NOT DISTINCT FROM $4)
+  AND (region IS NOT DISTINCT FROM $5)
+  AND until > $6
 LIMIT 1`
 
 	var dummy int
-	err := r.db.QueryRowContext(ctx, q, ruleID, platform, opsNullInt64(groupID), opsNullString(region), now).Scan(&dummy)
+	err := r.db.QueryRowContext(ctx, q, ruleID, platform, opsNullInt64(groupID), opsNullInt64(userID), opsNullString(region), now).Scan(&dummy)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return false, nil

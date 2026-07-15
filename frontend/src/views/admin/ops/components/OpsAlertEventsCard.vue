@@ -279,12 +279,15 @@ async function silenceAlert() {
     const platform = getDimensionString(ev, 'platform')
     const groupIdRaw = ev.dimensions?.group_id
     const groupId = typeof groupIdRaw === 'number' ? groupIdRaw : null
+    const userIdRaw = Number(getDimensionString(ev, 'user_id'))
+    const userId = Number.isSafeInteger(userIdRaw) && userIdRaw > 0 ? userIdRaw : null
     const region = getDimensionString(ev, 'region') || null
 
     await opsAPI.createAlertSilence({
       rule_id: ev.rule_id,
       platform: platform || '',
       group_id: groupId ?? undefined,
+      user_id: userId ?? undefined,
       region: region ?? undefined,
       until: durationToUntilRFC3339(silenceDuration.value),
       reason: `silence from UI (${silenceDuration.value})`

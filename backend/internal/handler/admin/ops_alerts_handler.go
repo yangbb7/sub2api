@@ -552,6 +552,7 @@ func (h *OpsHandler) CreateAlertSilence(c *gin.Context) {
 		RuleID   int64   `json:"rule_id"`
 		Platform string  `json:"platform"`
 		GroupID  *int64  `json:"group_id"`
+		UserID   *int64  `json:"user_id"`
 		Region   *string `json:"region"`
 		Until    string  `json:"until"`
 		Reason   string  `json:"reason"`
@@ -576,6 +577,7 @@ func (h *OpsHandler) CreateAlertSilence(c *gin.Context) {
 		RuleID:    payload.RuleID,
 		Platform:  strings.TrimSpace(payload.Platform),
 		GroupID:   payload.GroupID,
+		UserID:    payload.UserID,
 		Region:    payload.Region,
 		Until:     until,
 		Reason:    strings.TrimSpace(payload.Reason),

@@ -150,7 +150,7 @@ func (s *OpsService) CreateAlertSilence(ctx context.Context, input *OpsAlertSile
 	return created, nil
 }
 
-func (s *OpsService) IsAlertSilenced(ctx context.Context, ruleID int64, platform string, groupID *int64, region *string, now time.Time) (bool, error) {
+func (s *OpsService) IsAlertSilenced(ctx context.Context, ruleID int64, platform string, groupID *int64, userID *int64, region *string, now time.Time) (bool, error) {
 	if err := s.RequireMonitoringEnabled(ctx); err != nil {
 		return false, err
 	}
@@ -160,7 +160,7 @@ func (s *OpsService) IsAlertSilenced(ctx context.Context, ruleID int64, platform
 	if ruleID <= 0 {
 		return false, infraerrors.BadRequest("INVALID_RULE_ID", "invalid rule id")
 	}
-	return s.opsRepo.IsAlertSilenced(ctx, ruleID, strings.TrimSpace(platform), groupID, region, now)
+	return s.opsRepo.IsAlertSilenced(ctx, ruleID, strings.TrimSpace(platform), groupID, userID, region, now)
 }
 
 func (s *OpsService) GetLatestAlertEvent(ctx context.Context, ruleID int64) (*OpsAlertEvent, error) {

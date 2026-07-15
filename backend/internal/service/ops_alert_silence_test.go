@@ -12,6 +12,7 @@ type alertSilenceRepoStub struct {
 	OpsRepository
 	createInput       *OpsAlertSilence
 	isPlatform        string
+	isUserID          *int64
 	isAlertSilenced   bool
 	isAlertSilenceErr error
 }
@@ -21,8 +22,9 @@ func (s *alertSilenceRepoStub) CreateAlertSilence(_ context.Context, input *OpsA
 	return input, nil
 }
 
-func (s *alertSilenceRepoStub) IsAlertSilenced(_ context.Context, _ int64, platform string, _ *int64, _ *string, _ time.Time) (bool, error) {
+func (s *alertSilenceRepoStub) IsAlertSilenced(_ context.Context, _ int64, platform string, _ *int64, userID *int64, _ *string, _ time.Time) (bool, error) {
 	s.isPlatform = platform
+	s.isUserID = userID
 	return s.isAlertSilenced, s.isAlertSilenceErr
 }
 
@@ -47,9 +49,12 @@ func TestOpsServiceIsAlertSilenced_ForwardsRuleScopedSilence(t *testing.T) {
 	repo := &alertSilenceRepoStub{isAlertSilenced: true}
 	svc := &OpsService{opsRepo: repo}
 
-	silenced, err := svc.IsAlertSilenced(context.Background(), 7, "   ", nil, nil, time.Now().UTC())
+	userID := int64(2)
+	silenced, err := svc.IsAlertSilenced(context.Background(), 7, "   ", nil, &userID, nil, time.Now().UTC())
 
 	require.NoError(t, err)
 	require.True(t, silenced)
 	require.Empty(t, repo.isPlatform)
+	require.NotNil(t, repo.isUserID)
+	require.Equal(t, int64(2), *repo.isUserID)
 }

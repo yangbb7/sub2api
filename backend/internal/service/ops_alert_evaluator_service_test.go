@@ -38,11 +38,16 @@ type alertConcurrencyCacheStub struct {
 type silencedUserAlertOpsRepoStub struct {
 	OpsRepository
 	rules             []*OpsAlertRule
+	silenced          bool
 	silenceCalled     bool
 	silencePlatform   string
 	silenceGroupID    *int64
+	silenceUserID     *int64
 	silenceRegion     *string
+	activeEvent       *OpsAlertEvent
 	createdEventCount int
+	resolvedEventID   int64
+	resolvedStatus    string
 }
 
 func (s *alertConcurrencyCacheStub) GetUsersLoadBatch(_ context.Context, _ []UserWithConcurrency) (map[int64]*UserLoadInfo, error) {
@@ -58,15 +63,16 @@ func (s *silencedUserAlertOpsRepoStub) GetLatestSystemMetrics(context.Context, i
 }
 
 func (s *silencedUserAlertOpsRepoStub) GetActiveAlertEvent(context.Context, int64) (*OpsAlertEvent, error) {
-	return nil, nil
+	return s.activeEvent, nil
 }
 
-func (s *silencedUserAlertOpsRepoStub) IsAlertSilenced(_ context.Context, _ int64, platform string, groupID *int64, region *string, _ time.Time) (bool, error) {
+func (s *silencedUserAlertOpsRepoStub) IsAlertSilenced(_ context.Context, _ int64, platform string, groupID *int64, userID *int64, region *string, _ time.Time) (bool, error) {
 	s.silenceCalled = true
 	s.silencePlatform = platform
 	s.silenceGroupID = groupID
+	s.silenceUserID = userID
 	s.silenceRegion = region
-	return true, nil
+	return s.silenced, nil
 }
 
 func (s *silencedUserAlertOpsRepoStub) GetLatestAlertEvent(context.Context, int64) (*OpsAlertEvent, error) {
@@ -76,6 +82,12 @@ func (s *silencedUserAlertOpsRepoStub) GetLatestAlertEvent(context.Context, int6
 func (s *silencedUserAlertOpsRepoStub) CreateAlertEvent(_ context.Context, event *OpsAlertEvent) (*OpsAlertEvent, error) {
 	s.createdEventCount++
 	return event, nil
+}
+
+func (s *silencedUserAlertOpsRepoStub) UpdateAlertEventStatus(_ context.Context, eventID int64, status string, _ *time.Time) error {
+	s.resolvedEventID = eventID
+	s.resolvedStatus = status
+	return nil
 }
 
 func (s *silencedUserAlertOpsRepoStub) UpsertJobHeartbeat(context.Context, *OpsUpsertJobHeartbeatInput) error {
@@ -158,8 +170,9 @@ func TestComputeUserConcurrencyUtilizationPercent(t *testing.T) {
 		evaluator := newEvaluator(&alertConcurrencyCacheStub{loads: map[int64]*UserLoadInfo{
 			2: {UserID: 2, CurrentConcurrency: 8},
 		}})
-		got, ok := evaluator.computeRuleMetric(context.Background(), rule, nil, time.Time{}, time.Time{}, "", nil)
+		got, ok, inactive := evaluator.computeUserConcurrencyRuleMetric(context.Background(), rule)
 		require.True(t, ok)
+		require.False(t, inactive)
 		require.InDelta(t, 80.0, got, 0.0001)
 	})
 
@@ -167,32 +180,49 @@ func TestComputeUserConcurrencyUtilizationPercent(t *testing.T) {
 		evaluator := newEvaluator(&alertConcurrencyCacheStub{loads: map[int64]*UserLoadInfo{
 			2: {UserID: 2, CurrentConcurrency: 0},
 		}})
-		got, ok := evaluator.computeRuleMetric(context.Background(), rule, nil, time.Time{}, time.Time{}, "", nil)
+		got, ok, inactive := evaluator.computeUserConcurrencyRuleMetric(context.Background(), rule)
 		require.True(t, ok)
+		require.False(t, inactive)
 		require.Equal(t, 0.0, got)
 	})
 
 	t.Run("redis failure is not evaluated", func(t *testing.T) {
 		evaluator := newEvaluator(&alertConcurrencyCacheStub{err: errors.New("redis unavailable")})
-		_, ok := evaluator.computeRuleMetric(context.Background(), rule, nil, time.Time{}, time.Time{}, "", nil)
+		_, ok, inactive := evaluator.computeUserConcurrencyRuleMetric(context.Background(), rule)
 		require.False(t, ok)
+		require.False(t, inactive)
 	})
 
 	t.Run("missing load is not evaluated", func(t *testing.T) {
 		evaluator := newEvaluator(&alertConcurrencyCacheStub{loads: map[int64]*UserLoadInfo{}})
-		_, ok := evaluator.computeRuleMetric(context.Background(), rule, nil, time.Time{}, time.Time{}, "", nil)
+		_, ok, inactive := evaluator.computeUserConcurrencyRuleMetric(context.Background(), rule)
 		require.False(t, ok)
+		require.False(t, inactive)
 	})
 
-	t.Run("deleted user resolves as zero", func(t *testing.T) {
+	t.Run("deleted user is inactive", func(t *testing.T) {
 		evaluator := &OpsAlertEvaluatorService{opsService: &OpsService{
 			userRepo: &alertUserRepoStub{err: ErrUserNotFound},
 			concurrencyService: NewConcurrencyService(&alertConcurrencyCacheStub{
 				loads: map[int64]*UserLoadInfo{},
 			}),
 		}}
-		got, ok := evaluator.computeRuleMetric(context.Background(), rule, nil, time.Time{}, time.Time{}, "", nil)
+		got, ok, inactive := evaluator.computeUserConcurrencyRuleMetric(context.Background(), rule)
 		require.True(t, ok)
+		require.True(t, inactive)
+		require.Equal(t, 0.0, got)
+	})
+
+	t.Run("unlimited user is inactive", func(t *testing.T) {
+		evaluator := &OpsAlertEvaluatorService{opsService: &OpsService{
+			userRepo: &alertUserRepoStub{user: &User{ID: 2, Concurrency: 0, Status: StatusActive}},
+			concurrencyService: NewConcurrencyService(&alertConcurrencyCacheStub{
+				loads: map[int64]*UserLoadInfo{},
+			}),
+		}}
+		got, ok, inactive := evaluator.computeUserConcurrencyRuleMetric(context.Background(), rule)
+		require.True(t, ok)
+		require.True(t, inactive)
 		require.Equal(t, 0.0, got)
 	})
 
@@ -203,8 +233,9 @@ func TestComputeUserConcurrencyUtilizationPercent(t *testing.T) {
 				loads: map[int64]*UserLoadInfo{},
 			}),
 		}}
-		_, ok := evaluator.computeRuleMetric(context.Background(), rule, nil, time.Time{}, time.Time{}, "", nil)
+		_, ok, inactive := evaluator.computeUserConcurrencyRuleMetric(context.Background(), rule)
 		require.False(t, ok)
+		require.False(t, inactive)
 	})
 }
 
@@ -244,7 +275,7 @@ func TestUserConcurrencyAlertDimensions(t *testing.T) {
 }
 
 func TestOpsAlertEvaluator_UserConcurrencyRuleScopedSilence(t *testing.T) {
-	repo := &silencedUserAlertOpsRepoStub{rules: []*OpsAlertRule{{
+	repo := &silencedUserAlertOpsRepoStub{silenced: true, rules: []*OpsAlertRule{{
 		ID:               7,
 		Name:             "user concurrency",
 		Enabled:          true,
@@ -272,8 +303,57 @@ func TestOpsAlertEvaluator_UserConcurrencyRuleScopedSilence(t *testing.T) {
 	require.True(t, repo.silenceCalled)
 	require.Empty(t, repo.silencePlatform)
 	require.Nil(t, repo.silenceGroupID)
+	require.NotNil(t, repo.silenceUserID)
+	require.Equal(t, int64(2), *repo.silenceUserID)
 	require.Nil(t, repo.silenceRegion)
 	require.Zero(t, repo.createdEventCount)
+}
+
+func TestOpsAlertEvaluator_InactiveUserTargetDoesNotFire(t *testing.T) {
+	newRepo := func(activeEvent *OpsAlertEvent) *silencedUserAlertOpsRepoStub {
+		return &silencedUserAlertOpsRepoStub{
+			activeEvent: activeEvent,
+			rules: []*OpsAlertRule{{
+				ID:               7,
+				Name:             "inactive user concurrency",
+				Enabled:          true,
+				Severity:         "P1",
+				MetricType:       "user_concurrency_utilization_percent",
+				Operator:         "<",
+				Threshold:        10,
+				WindowMinutes:    1,
+				SustainedMinutes: 1,
+				Filters:          map[string]any{"user_id": float64(2)},
+			}},
+		}
+	}
+	newEvaluator := func(repo *silencedUserAlertOpsRepoStub) *OpsAlertEvaluatorService {
+		ops := &OpsService{
+			opsRepo:  repo,
+			userRepo: &alertUserRepoStub{err: ErrUserNotFound},
+			concurrencyService: NewConcurrencyService(&alertConcurrencyCacheStub{
+				loads: map[int64]*UserLoadInfo{},
+			}),
+		}
+		return NewOpsAlertEvaluatorService(ops, repo, nil, nil, nil, nil)
+	}
+
+	t.Run("does not create a low utilization alert", func(t *testing.T) {
+		repo := newRepo(nil)
+		newEvaluator(repo).evaluateOnce(time.Minute)
+
+		require.Zero(t, repo.createdEventCount)
+		require.False(t, repo.silenceCalled)
+	})
+
+	t.Run("resolves an existing alert", func(t *testing.T) {
+		repo := newRepo(&OpsAlertEvent{ID: 99, RuleID: 7, Status: OpsAlertStatusFiring})
+		newEvaluator(repo).evaluateOnce(time.Minute)
+
+		require.Zero(t, repo.createdEventCount)
+		require.Equal(t, int64(99), repo.resolvedEventID)
+		require.Equal(t, OpsAlertStatusResolved, repo.resolvedStatus)
+	})
 }
 
 func TestCountAccountsByCondition(t *testing.T) {
