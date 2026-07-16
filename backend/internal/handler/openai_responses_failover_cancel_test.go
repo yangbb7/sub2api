@@ -19,48 +19,13 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+// openAIResponsesFailoverCancelUpstream 固定返回 HTTP 520，可在首次上游调用时
+// 触发回调（用于模拟“上游在途期间客户端断开”）。
 type openAIResponsesFailoverCancelUpstream struct {
 	service.HTTPUpstream
 	mu         sync.Mutex
 	accountIDs []int64
 	onFirstDo  func()
-}
-
-type openAIResponsesFailoverAccountRepo struct {
-	service.AccountRepository
-	accounts []service.Account
-}
-
-func (r openAIResponsesFailoverAccountRepo) GetByID(_ context.Context, id int64) (*service.Account, error) {
-	for i := range r.accounts {
-		if r.accounts[i].ID == id {
-			account := r.accounts[i]
-			return &account, nil
-		}
-	}
-	return nil, service.ErrNoAvailableAccounts
-}
-
-func (r openAIResponsesFailoverAccountRepo) ListSchedulableByGroupIDAndPlatform(_ context.Context, _ int64, platform string) ([]service.Account, error) {
-	return r.accountsForPlatform(platform), nil
-}
-
-func (r openAIResponsesFailoverAccountRepo) ListSchedulableByPlatform(_ context.Context, platform string) ([]service.Account, error) {
-	return r.accountsForPlatform(platform), nil
-}
-
-func (r openAIResponsesFailoverAccountRepo) ListSchedulableUngroupedByPlatform(_ context.Context, platform string) ([]service.Account, error) {
-	return r.accountsForPlatform(platform), nil
-}
-
-func (r openAIResponsesFailoverAccountRepo) accountsForPlatform(platform string) []service.Account {
-	out := make([]service.Account, 0, len(r.accounts))
-	for _, account := range r.accounts {
-		if account.Platform == platform {
-			out = append(out, account)
-		}
-	}
-	return out
 }
 
 func (u *openAIResponsesFailoverCancelUpstream) Do(_ *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
@@ -110,7 +75,7 @@ func newOpenAIResponsesFailoverTestHandler(t *testing.T, upstream service.HTTPUp
 			Credentials: map[string]any{"access_token": "token-2"},
 		},
 	}
-	accountRepo := openAIResponsesFailoverAccountRepo{accounts: accounts}
+	accountRepo := openAIImagesFailoverAccountRepo{accounts: accounts}
 	cfg := &config.Config{RunMode: config.RunModeSimple}
 	gatewayService := service.NewOpenAIGatewayService(
 		accountRepo,
@@ -179,6 +144,10 @@ func newOpenAIResponsesFailoverTestContext(t *testing.T, ctx context.Context) (*
 	return c, rec
 }
 
+// TestOpenAIGatewayHandlerResponses_FailoverAbortsWhenClientDisconnected 复现
+// #4257：客户端在上游请求在途期间断开，上游随后返回可 failover 的 520。
+// 期望：不再用已取消的 context 重新选号（不触达账号 2）、不把取消误报成
+// 502 账号耗尽、请求按 499 归类。
 func TestOpenAIGatewayHandlerResponses_FailoverAbortsWhenClientDisconnected(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -190,13 +159,14 @@ func TestOpenAIGatewayHandlerResponses_FailoverAbortsWhenClientDisconnected(t *t
 
 	handler.Responses(c)
 
-	require.Equal(t, []int64{1}, upstream.calls())
-	require.Equal(t, statusClientClosedRequest, c.Writer.Status())
-	require.Zero(t, rec.Body.Len())
+	require.Equal(t, []int64{1}, upstream.calls(), "客户端断开后不应再切换到账号 2")
+	require.Equal(t, statusClientClosedRequest, c.Writer.Status(), "应按 499 归类")
+	require.Zero(t, rec.Body.Len(), "不应写入 502 错误响应体")
 
 	_, hasFinalUpstreamErr := c.Get(service.OpsUpstreamStatusCodeKey)
-	require.False(t, hasFinalUpstreamErr)
+	require.False(t, hasFinalUpstreamErr, "不应记录 failover 耗尽的上游错误终态")
 
+	// 真实发生过的 520 应保留 failover 事件（service 层在返回 failover 错误前记录）
 	rawEvents, ok := c.Get(service.OpsUpstreamErrorsKey)
 	require.True(t, ok)
 	events, ok := rawEvents.([]*service.OpsUpstreamErrorEvent)
@@ -206,6 +176,9 @@ func TestOpenAIGatewayHandlerResponses_FailoverAbortsWhenClientDisconnected(t *t
 	require.Equal(t, 520, events[0].UpstreamStatusCode)
 }
 
+// TestOpenAIGatewayHandlerResponses_FailoverContinuesForConnectedClient 回归
+// 守卫：客户端在线时 failover 行为不变——切换到账号 2，两个账号都 520 后按
+// 耗尽返回 502。
 func TestOpenAIGatewayHandlerResponses_FailoverContinuesForConnectedClient(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -215,7 +188,7 @@ func TestOpenAIGatewayHandlerResponses_FailoverContinuesForConnectedClient(t *te
 
 	handler.Responses(c)
 
-	require.Equal(t, []int64{1, 2}, upstream.calls())
+	require.Equal(t, []int64{1, 2}, upstream.calls(), "在线客户端应正常切换账号")
 	require.Equal(t, http.StatusBadGateway, rec.Code)
 	require.Equal(t, "upstream_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
 }

@@ -39,6 +39,7 @@ var gatewayCompatibilityMetricsLogCounter atomic.Uint64
 // GatewayHandler handles API gateway requests
 type GatewayHandler struct {
 	gatewayService            *service.GatewayService
+	openAIGatewayService      *service.OpenAIGatewayService
 	geminiCompatService       *service.GeminiMessagesCompatService
 	antigravityGatewayService *service.AntigravityGatewayService
 	userService               *service.UserService
@@ -59,6 +60,7 @@ type GatewayHandler struct {
 // NewGatewayHandler creates a new GatewayHandler
 func NewGatewayHandler(
 	gatewayService *service.GatewayService,
+	openAIGatewayService *service.OpenAIGatewayService,
 	geminiCompatService *service.GeminiMessagesCompatService,
 	antigravityGatewayService *service.AntigravityGatewayService,
 	userService *service.UserService,
@@ -94,6 +96,7 @@ func NewGatewayHandler(
 
 	return &GatewayHandler{
 		gatewayService:            gatewayService,
+		openAIGatewayService:      openAIGatewayService,
 		geminiCompatService:       geminiCompatService,
 		antigravityGatewayService: antigravityGatewayService,
 		userService:               userService,
@@ -450,7 +453,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						h.handleFailoverExhausted(c, failoverErr, service.PlatformGemini, true)
 						return
 					}
-					action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, failoverErr)
+					action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, account.GetPoolModeRetryCount(), failoverErr)
 					switch action {
 					case FailoverContinue:
 						continue
@@ -876,7 +879,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						h.handleFailoverExhausted(c, failoverErr, account.Platform, true)
 						return
 					}
-					action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, failoverErr)
+					action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, account.GetPoolModeRetryCount(), failoverErr)
 					switch action {
 					case FailoverContinue:
 						continue
@@ -1467,13 +1470,14 @@ func (h *GatewayHandler) usageUnrestricted(c *gin.Context, ctx context.Context, 
 			remaining := h.calculateSubscriptionRemaining(apiKey.Group, subscription)
 			resp["remaining"] = remaining
 			resp["subscription"] = gin.H{
-				"daily_usage_usd":   subscription.DailyUsageUSD,
-				"weekly_usage_usd":  subscription.WeeklyUsageUSD,
-				"monthly_usage_usd": subscription.MonthlyUsageUSD,
-				"daily_limit_usd":   apiKey.Group.DailyLimitUSD,
-				"weekly_limit_usd":  apiKey.Group.WeeklyLimitUSD,
-				"monthly_limit_usd": apiKey.Group.MonthlyLimitUSD,
-				"expires_at":        subscription.ExpiresAt,
+				"daily_usage_usd":     subscription.DailyUsageUSD,
+				"weekly_usage_usd":    subscription.WeeklyUsageUSD,
+				"monthly_usage_usd":   subscription.MonthlyUsageUSD,
+				"daily_limit_usd":     apiKey.Group.DailyLimitUSD,
+				"weekly_limit_usd":    apiKey.Group.WeeklyLimitUSD,
+				"monthly_limit_usd":   apiKey.Group.MonthlyLimitUSD,
+				"weekly_window_start": subscription.WeeklyWindowStart,
+				"expires_at":          subscription.ExpiresAt,
 			}
 		}
 

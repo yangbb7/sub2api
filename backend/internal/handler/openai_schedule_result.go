@@ -12,11 +12,11 @@ func reportOpenAIForwardErrorScheduleResult(gatewayService *service.OpenAIGatewa
 	if err != nil && service.IsOpenAIContextWindowError(err.Error(), nil) {
 		service.MarkOpsContextWindowExceeded(c)
 		if result != nil {
-			gatewayService.ReportOpenAIAccountScheduleResult(accountID, true, result.FirstTokenMs)
+			gatewayService.ReportOpenAIAccountScheduleResult(accountID, "", true, result.FirstTokenMs)
 			return
 		}
-		gatewayService.ReportOpenAIAccountScheduleResult(accountID, true, nil)
+		gatewayService.ReportOpenAIAccountScheduleResult(accountID, "", true, nil)
 		return
 	}
-	gatewayService.ReportOpenAIAccountScheduleResult(accountID, false, nil)
+	gatewayService.ReportOpenAIAccountScheduleResult(accountID, "", false, nil)
 }

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	servermiddleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -326,7 +327,7 @@ func (h *OpsHandler) QPSWSHandler(c *gin.Context) {
 	// If realtime monitoring is disabled, prefer a successful WS upgrade followed by a clean close
 	// with a deterministic close code. This prevents clients from spinning on 404/1006 reconnect loops.
 	if !h.opsService.IsRealtimeMonitoringEnabled(c.Request.Context()) {
-		conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+		conn, err := upgrader.Upgrade(c.Writer, c.Request, servermiddleware.ServerTimingResponseHeader(c))
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "ops realtime monitoring is disabled"})
 			return
@@ -361,7 +362,7 @@ func (h *OpsHandler) QPSWSHandler(c *gin.Context) {
 		defer releaseOpsWSIPSlot(clientIP)
 	}
 
-	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	conn, err := upgrader.Upgrade(c.Writer, c.Request, servermiddleware.ServerTimingResponseHeader(c))
 	if err != nil {
 		logger.LegacyPrintf("handler.admin.ops_ws", "[OpsWS] upgrade failed: %v", err)
 		return

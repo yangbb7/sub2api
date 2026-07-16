@@ -121,6 +121,8 @@ backend/.installed
 gateway-dashboard-*.png
 gateway-preview-*.png
 tests
+!deploy/tests/
+!deploy/tests/**
 CLAUDE.md
 .claude
 scripts
