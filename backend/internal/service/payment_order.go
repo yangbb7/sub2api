@@ -866,6 +866,24 @@ func (s *PaymentService) GetUserOrders(ctx context.Context, userID int64, p Orde
 
 // AdminListOrders returns a paginated list of orders. If userID > 0, filters by user.
 func (s *PaymentService) AdminListOrders(ctx context.Context, userID int64, p OrderListParams) ([]*dbent.PaymentOrder, int, error) {
+	q := s.buildAdminOrderQuery(userID, p)
+	total, err := q.Clone().Count(ctx)
+	if err != nil {
+		return nil, 0, fmt.Errorf("count admin orders: %w", err)
+	}
+	ps, pg := applyPagination(p.PageSize, p.Page)
+	orders, err := q.
+		Order(dbent.Desc(paymentorder.FieldCreatedAt), dbent.Desc(paymentorder.FieldID)).
+		Limit(ps).
+		Offset((pg - 1) * ps).
+		All(ctx)
+	if err != nil {
+		return nil, 0, fmt.Errorf("query admin orders: %w", err)
+	}
+	return orders, total, nil
+}
+
+func (s *PaymentService) buildAdminOrderQuery(userID int64, p OrderListParams) *dbent.PaymentOrderQuery {
 	q := s.entClient.PaymentOrder.Query()
 	if userID > 0 {
 		q = q.Where(paymentorder.UserIDEQ(userID))
@@ -886,14 +904,60 @@ func (s *PaymentService) AdminListOrders(ctx context.Context, userID int64, p Or
 			paymentorder.UserNameContainsFold(p.Keyword),
 		))
 	}
-	total, err := q.Clone().Count(ctx)
-	if err != nil {
-		return nil, 0, fmt.Errorf("count admin orders: %w", err)
+	if p.StartTime != nil {
+		q = q.Where(paymentorder.CreatedAtGTE(*p.StartTime))
 	}
-	ps, pg := applyPagination(p.PageSize, p.Page)
-	orders, err := q.Order(dbent.Desc(paymentorder.FieldCreatedAt)).Limit(ps).Offset((pg - 1) * ps).All(ctx)
-	if err != nil {
-		return nil, 0, fmt.Errorf("query admin orders: %w", err)
+	if p.EndTime != nil {
+		q = q.Where(paymentorder.CreatedAtLT(*p.EndTime))
 	}
-	return orders, total, nil
+	return q
+}
+
+// IterateAdminOrders reads all matching orders in stable keyset-paginated batches.
+func (s *PaymentService) IterateAdminOrders(
+	ctx context.Context,
+	userID int64,
+	p OrderListParams,
+	batchSize int,
+	consume func([]*dbent.PaymentOrder) error,
+) error {
+	if batchSize <= 0 {
+		batchSize = 500
+	}
+
+	var cursorCreatedAt *time.Time
+	var cursorID int64
+	for {
+		q := s.buildAdminOrderQuery(userID, p)
+		if cursorCreatedAt != nil {
+			q = q.Where(paymentorder.Or(
+				paymentorder.CreatedAtLT(*cursorCreatedAt),
+				paymentorder.And(
+					paymentorder.CreatedAtEQ(*cursorCreatedAt),
+					paymentorder.IDLT(cursorID),
+				),
+			))
+		}
+
+		orders, err := q.
+			Order(dbent.Desc(paymentorder.FieldCreatedAt), dbent.Desc(paymentorder.FieldID)).
+			Limit(batchSize).
+			All(ctx)
+		if err != nil {
+			return fmt.Errorf("query admin orders for export: %w", err)
+		}
+		if len(orders) == 0 {
+			return nil
+		}
+		if err := consume(orders); err != nil {
+			return err
+		}
+		if len(orders) < batchSize {
+			return nil
+		}
+
+		last := orders[len(orders)-1]
+		cursorCreatedAt = &last.CreatedAt
+		cursorID = last.ID
+	}
 }

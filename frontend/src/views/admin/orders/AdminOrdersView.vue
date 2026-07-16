@@ -7,10 +7,31 @@
           <div class="flex-1 sm:max-w-64">
             <input v-model="orderSearch" type="text" :placeholder="t('payment.admin.searchOrders')" class="input" @input="debounceLoadOrders" />
           </div>
-          <Select v-model="orderFilters.status" :options="statusFilterOptions" class="w-36" @change="loadOrders" />
-          <Select v-model="orderFilters.payment_type" :options="paymentTypeFilterOptions" class="w-40" @change="loadOrders" />
-          <Select v-model="orderFilters.order_type" :options="orderTypeFilterOptions" class="w-36" @change="loadOrders" />
+          <Select v-model="orderFilters.status" :options="statusFilterOptions" class="w-36" @change="handleOrderFiltersChange" />
+          <Select v-model="orderFilters.payment_type" :options="paymentTypeFilterOptions" class="w-40" @change="handleOrderFiltersChange" />
+          <Select v-model="orderFilters.order_type" :options="orderTypeFilterOptions" class="w-36" @change="handleOrderFiltersChange" />
+          <DateRangePicker
+            v-model:start-date="startDate"
+            v-model:end-date="endDate"
+            allow-clear
+            @change="handleDateRangeChange"
+          />
           <div class="flex flex-1 flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              data-testid="export-orders"
+              class="btn btn-primary"
+              :disabled="exportingOrders || ordersLoading"
+              @click="exportOrders"
+            >
+              <Icon
+                :name="exportingOrders ? 'refresh' : 'download'"
+                size="md"
+                class="mr-1.5"
+                :class="exportingOrders ? 'animate-spin' : ''"
+              />
+              {{ exportingOrders ? t('payment.admin.exportingOrders') : t('payment.admin.exportOrders') }}
+            </button>
             <button @click="loadOrders" :disabled="ordersLoading" class="btn btn-secondary" :title="t('common.refresh')">
               <Icon name="refresh" size="md" :class="ordersLoading ? 'animate-spin' : ''" />
             </button>
@@ -119,67 +140,169 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
-import { adminPaymentAPI } from '@/api/admin/payment'
+import {
+  adminPaymentAPI,
+  type AdminPaymentAuditLog,
+  type AdminPaymentOrderExportParams,
+} from '@/api/admin/payment'
 import { extractI18nErrorMessage } from '@/utils/apiError'
 import { formatOrderDateTime } from '@/components/payment/orderUtils'
-import type { PaymentOrder } from '@/types/payment'
+import type { AdminPaymentOrder } from '@/types/payment'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
+import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import Icon from '@/components/icons/Icon.vue'
 import AdminRefundDialog from '@/components/admin/payment/AdminRefundDialog.vue'
 import OrderStatusBadge from '@/components/payment/OrderStatusBadge.vue'
 import OrderTable from '@/components/payment/OrderTable.vue'
 import { currencySymbol } from '@/components/payment/currency'
 
-interface AuditLog {
-  id: number
-  action: string
-  detail: string | null
-  operator: string | null
-  created_at: string
-}
-
 const { t } = useI18n()
 const appStore = useAppStore()
 
 const ordersLoading = ref(false)
-const orders = ref<PaymentOrder[]>([])
+const exportingOrders = ref(false)
+const orders = ref<AdminPaymentOrder[]>([])
 const orderSearch = ref('')
+const startDate = ref('')
+const endDate = ref('')
 const orderFilters = reactive({ status: '', payment_type: '', order_type: '' })
 const orderPagination = reactive({ page: 1, page_size: 20, total: 0 })
-const selectedOrder = ref<PaymentOrder | null>(null)
+const selectedOrder = ref<AdminPaymentOrder | null>(null)
 const showDetailDialog = ref(false)
 const showRefundDialog = ref(false)
 const refundSubmitting = ref(false)
 const refundQueryingIds = ref(new Set<number>())
-const orderAuditLogs = ref<AuditLog[]>([])
+const orderAuditLogs = ref<AdminPaymentAuditLog[]>([])
 const creditedAmountSymbol = currencySymbol('USD')
 
-function paymentAmountSymbol(order: PaymentOrder | null | undefined): string {
+function paymentAmountSymbol(order: AdminPaymentOrder | null | undefined): string {
   return currencySymbol(order?.currency)
 }
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
+let ordersRequestSequence = 0
 function debounceLoadOrders() {
   if (debounceTimer) clearTimeout(debounceTimer)
-  debounceTimer = setTimeout(() => loadOrders(), 300)
+  debounceTimer = setTimeout(() => {
+    orderPagination.page = 1
+    loadOrders()
+  }, 300)
+}
+
+function buildOrderFilters(): AdminPaymentOrderExportParams {
+  return {
+    keyword: orderSearch.value || undefined,
+    status: orderFilters.status || undefined,
+    payment_type: orderFilters.payment_type || undefined,
+    order_type: orderFilters.order_type || undefined,
+    start_date: startDate.value || undefined,
+    end_date: endDate.value || undefined,
+  }
 }
 
 async function loadOrders() {
+  const requestSequence = ++ordersRequestSequence
   ordersLoading.value = true
   try {
     const res = await adminPaymentAPI.getOrders({
-      page: orderPagination.page, page_size: orderPagination.page_size,
-      keyword: orderSearch.value || undefined, status: orderFilters.status || undefined,
-      payment_type: orderFilters.payment_type || undefined, order_type: orderFilters.order_type || undefined,
+      page: orderPagination.page,
+      page_size: orderPagination.page_size,
+      ...buildOrderFilters(),
     })
+    if (requestSequence !== ordersRequestSequence) return
     orders.value = res.data.items || []
     orderPagination.total = res.data.total || 0
   } catch (err: unknown) {
+    if (requestSequence !== ordersRequestSequence) return
     appStore.showError(extractI18nErrorMessage(err, t, 'payment.errors', t('common.error')))
-  } finally { ordersLoading.value = false }
+  } finally {
+    if (requestSequence === ordersRequestSequence) ordersLoading.value = false
+  }
+}
+
+function handleDateRangeChange(range: { startDate: string; endDate: string }) {
+  startDate.value = range.startDate
+  endDate.value = range.endDate
+  orderPagination.page = 1
+  loadOrders()
+}
+
+function handleOrderFiltersChange() {
+  orderPagination.page = 1
+  loadOrders()
+}
+
+function getExportFilename(contentDisposition: string): string {
+  const encoded = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1]
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded).replace(/[\\/]/g, '_')
+    } catch {
+      // Fall back to the plain filename or generated name below.
+    }
+  }
+
+  const plain = contentDisposition.match(/filename="?([^";]+)"?/i)?.[1]
+  if (plain) return plain.trim().replace(/[\\/]/g, '_')
+
+  const suffix = startDate.value || endDate.value
+    ? `${startDate.value || 'all'}_to_${endDate.value || 'all'}`
+    : 'all'
+  return `orders_${suffix}.csv`
+}
+
+function getResponseHeader(headers: unknown, name: string): string {
+  if (!headers || typeof headers !== 'object') return ''
+  const value = headers as Record<string, unknown> & { get?: (name: string) => unknown }
+  if (typeof value.get === 'function') {
+    return String(value.get(name) || '')
+  }
+  const entry = Object.entries(value).find(([key]) => key.toLowerCase() === name.toLowerCase())
+  return String(entry?.[1] || '')
+}
+
+async function exportOrders() {
+  if (exportingOrders.value) return
+
+  exportingOrders.value = true
+  try {
+    const res = await adminPaymentAPI.exportOrders(buildOrderFilters())
+    const exportCount = Number.parseInt(getResponseHeader(res.headers, 'x-export-count'), 10)
+    if (exportCount === 0) {
+      appStore.showWarning(t('payment.admin.noOrdersToExport'))
+      return
+    }
+    if (!(res.data instanceof Blob) || res.data.size === 0) {
+      throw new Error('empty order export')
+    }
+
+    const url = URL.createObjectURL(res.data)
+    try {
+      const link = document.createElement('a')
+      link.href = url
+      link.download = getExportFilename(getResponseHeader(res.headers, 'content-disposition'))
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+    } finally {
+      URL.revokeObjectURL(url)
+    }
+    appStore.showSuccess(t('payment.admin.exportOrdersSuccess'))
+  } catch (err: unknown) {
+    appStore.showError(
+      extractI18nErrorMessage(
+        err,
+        t,
+        'payment.errors',
+        t('payment.admin.exportOrdersFailed'),
+      ),
+    )
+  } finally {
+    exportingOrders.value = false
+  }
 }
 
 function handleOrderPageChange(page: number) { orderPagination.page = page; loadOrders() }
@@ -214,29 +337,28 @@ const orderTypeFilterOptions = computed(() => [
   { value: 'subscription', label: t('payment.admin.subscriptionOrder') },
 ])
 
-async function showOrderDetail(order: PaymentOrder) {
+async function showOrderDetail(order: AdminPaymentOrder) {
   selectedOrder.value = order
   orderAuditLogs.value = []
   showDetailDialog.value = true
   try {
     const res = await adminPaymentAPI.getOrder(order.id)
-    const data = res.data as unknown as Record<string, unknown>
-    if (data.order) selectedOrder.value = data.order as PaymentOrder
-    orderAuditLogs.value = ((data.auditLogs || data.audit_logs || []) as unknown) as AuditLog[]
+    selectedOrder.value = res.data.order
+    orderAuditLogs.value = res.data.auditLogs || res.data.audit_logs || []
   } catch (_err: unknown) { /* keep cached order data */ }
 }
 
-async function handleCancelOrder(order: PaymentOrder) {
+async function handleCancelOrder(order: AdminPaymentOrder) {
   try { await adminPaymentAPI.cancelOrder(order.id); appStore.showSuccess(t('payment.admin.orderCancelled')); loadOrders() }
   catch (err: unknown) { appStore.showError(extractI18nErrorMessage(err, t, 'payment.errors', t('common.error'))) }
 }
 
-async function handleRetryOrder(order: PaymentOrder) {
+async function handleRetryOrder(order: AdminPaymentOrder) {
   try { await adminPaymentAPI.retryRecharge(order.id); appStore.showSuccess(t('payment.admin.retrySuccess')); loadOrders() }
   catch (err: unknown) { appStore.showError(extractI18nErrorMessage(err, t, 'payment.errors', t('common.error'))) }
 }
 
-function openRefundDialog(order: PaymentOrder) { selectedOrder.value = order; showRefundDialog.value = true }
+function openRefundDialog(order: AdminPaymentOrder) { selectedOrder.value = order; showRefundDialog.value = true }
 
 function isRefundPendingWarning(warning: string | undefined): boolean {
   return /pending|处理中|待/.test(String(warning || '').toLowerCase())
@@ -264,7 +386,7 @@ async function handleRefund(data: { amount: number; reason: string; deduct_balan
   finally { refundSubmitting.value = false }
 }
 
-async function handleQueryRefund(order: PaymentOrder) {
+async function handleQueryRefund(order: AdminPaymentOrder) {
   refundQueryingIds.value = new Set(refundQueryingIds.value).add(order.id)
   try {
     const res = await adminPaymentAPI.queryRefund(order.id)

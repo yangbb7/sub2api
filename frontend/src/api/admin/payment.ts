@@ -6,7 +6,7 @@
 import { apiClient } from '../client'
 import type {
   DashboardStats,
-  PaymentOrder,
+  AdminPaymentOrder,
   PaymentChannel,
   SubscriptionPlan,
   ProviderInstance
@@ -61,6 +61,40 @@ export interface RefundResult {
   subscription_days_deducted?: number
 }
 
+export interface PaymentDateRangeParams {
+  start_date?: string
+  end_date?: string
+}
+
+export interface AdminPaymentOrderQueryParams extends PaymentDateRangeParams {
+  page?: number
+  page_size?: number
+  status?: string
+  payment_type?: string
+  user_id?: number
+  keyword?: string
+  order_type?: string
+}
+
+export type AdminPaymentOrderExportParams = Omit<
+  AdminPaymentOrderQueryParams,
+  'page' | 'page_size'
+>
+
+export interface AdminPaymentAuditLog {
+  id: number
+  action: string
+  detail: string | null
+  operator: string | null
+  created_at: string
+}
+
+export interface AdminPaymentOrderDetailResponse {
+  order: AdminPaymentOrder
+  auditLogs?: AdminPaymentAuditLog[]
+  audit_logs?: AdminPaymentAuditLog[]
+}
+
 export const adminPaymentAPI = {
   // ==================== Config ====================
 
@@ -77,32 +111,30 @@ export const adminPaymentAPI = {
   // ==================== Dashboard ====================
 
   /** Get payment dashboard statistics */
-  getDashboard(days?: number) {
+  getDashboard(params?: PaymentDateRangeParams) {
     return apiClient.get<DashboardStats>('/admin/payment/dashboard', {
-      params: days ? { days } : undefined
+      params
     })
   },
 
   // ==================== Orders ====================
 
   /** Get all orders (paginated, with filters) */
-  getOrders(params?: {
-    page?: number
-    page_size?: number
-    status?: string
-    payment_type?: string
-    user_id?: number
-    keyword?: string
-    start_date?: string
-    end_date?: string
-    order_type?: string
-  }) {
-    return apiClient.get<BasePaginationResponse<PaymentOrder>>('/admin/payment/orders', { params })
+  getOrders(params?: AdminPaymentOrderQueryParams) {
+    return apiClient.get<BasePaginationResponse<AdminPaymentOrder>>('/admin/payment/orders', { params })
+  },
+
+  /** Export every order matching the current filters as CSV. */
+  exportOrders(params?: AdminPaymentOrderExportParams) {
+    return apiClient.get<Blob>('/admin/payment/orders/export', {
+      params,
+      responseType: 'blob'
+    })
   },
 
   /** Get a specific order by ID */
   getOrder(id: number) {
-    return apiClient.get<PaymentOrder>(`/admin/payment/orders/${id}`)
+    return apiClient.get<AdminPaymentOrderDetailResponse>(`/admin/payment/orders/${id}`)
   },
 
   /** Cancel an order (admin) */

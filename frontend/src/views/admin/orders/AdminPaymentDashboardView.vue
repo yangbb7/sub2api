@@ -1,23 +1,14 @@
 <template>
   <AppLayout>
     <div class="space-y-6">
-      <!-- Header with Day Switcher -->
+      <!-- Header with date range -->
       <div class="flex items-center justify-end">
         <div class="flex items-center gap-2">
-          <div class="flex rounded-lg border border-gray-200 dark:border-dark-600">
-            <button
-              v-for="d in DAYS_OPTIONS"
-              :key="d"
-              type="button"
-              class="px-3 py-1.5 text-xs font-medium transition-colors first:rounded-l-lg last:rounded-r-lg"
-              :class="days === d
-                ? 'bg-primary-600 text-white'
-                : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700'"
-              @click="days = d"
-            >
-              {{ d }}{{ t('payment.admin.daySuffix') }}
-            </button>
-          </div>
+          <DateRangePicker
+            v-model:start-date="startDate"
+            v-model:end-date="endDate"
+            @change="onDateRangeChange"
+          />
           <button @click="loadDashboard" :disabled="loading" class="btn btn-secondary" :title="t('common.refresh')">
             <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
           </button>
@@ -68,7 +59,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminPaymentAPI } from '@/api/admin/payment'
@@ -76,17 +67,24 @@ import { extractI18nErrorMessage } from '@/utils/apiError'
 import type { DashboardStats } from '@/types/payment'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import Icon from '@/components/icons/Icon.vue'
 import OrderStatsCards from '@/components/admin/payment/OrderStatsCards.vue'
 import DailyRevenueChart from '@/components/admin/payment/DailyRevenueChart.vue'
+import { formatDateLocalInput } from '@/utils/format'
 
 const { t } = useI18n()
 const appStore = useAppStore()
 
-const DAYS_OPTIONS = [7, 30, 90] as const
-const days = ref<number>(30)
+const defaultEndDate = new Date()
+const defaultStartDate = new Date(defaultEndDate)
+defaultStartDate.setDate(defaultStartDate.getDate() - 29)
+
+const startDate = ref(formatDateLocalInput(defaultStartDate))
+const endDate = ref(formatDateLocalInput(defaultEndDate))
 const loading = ref(false)
 const stats = ref<DashboardStats | null>(null)
+let dashboardRequestSequence = 0
 
 function methodColor(type: string): string {
   const c: Record<string, string> = {
@@ -106,17 +104,28 @@ function rankClass(idx: number): string {
 }
 
 async function loadDashboard() {
+  const requestSequence = ++dashboardRequestSequence
   loading.value = true
   try {
-    const res = await adminPaymentAPI.getDashboard(days.value)
+    const res = await adminPaymentAPI.getDashboard({
+      start_date: startDate.value,
+      end_date: endDate.value,
+    })
+    if (requestSequence !== dashboardRequestSequence) return
     stats.value = res.data
   } catch (err: unknown) {
+    if (requestSequence !== dashboardRequestSequence) return
     appStore.showError(extractI18nErrorMessage(err, t, 'payment.errors', t('common.error')))
   } finally {
-    loading.value = false
+    if (requestSequence === dashboardRequestSequence) loading.value = false
   }
 }
 
-watch(days, () => loadDashboard())
+function onDateRangeChange(range: { startDate: string; endDate: string }) {
+  startDate.value = range.startDate
+  endDate.value = range.endDate
+  loadDashboard()
+}
+
 onMounted(() => loadDashboard())
 </script>

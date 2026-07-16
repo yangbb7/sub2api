@@ -89,6 +89,7 @@ interface DatePreset {
 interface Props {
   startDate: string
   endDate: string
+  allowClear?: boolean
 }
 
 interface Emits {
@@ -97,7 +98,9 @@ interface Emits {
   (e: 'change', range: { startDate: string; endDate: string; preset: string | null }): void
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  allowClear: false
+})
 const emit = defineEmits<Emits>()
 
 const { t, locale } = useI18n()
@@ -133,7 +136,7 @@ const formatDateToString = (date: Date): string => {
   return `${year}-${month}-${day}`
 }
 
-const presets: DatePreset[] = [
+const datePresets: DatePreset[] = [
   {
     labelKey: 'dates.today',
     value: 'today',
@@ -218,9 +221,21 @@ const presets: DatePreset[] = [
   }
 ]
 
+const presets = computed<DatePreset[]>(() => {
+  if (!props.allowClear) return datePresets
+  return [
+    {
+      labelKey: 'dates.allTime',
+      value: 'allTime',
+      getRange: () => ({ start: '', end: '' })
+    },
+    ...datePresets
+  ]
+})
+
 const displayValue = computed(() => {
   if (activePreset.value) {
-    const preset = presets.find((p) => p.value === activePreset.value)
+    const preset = presets.value.find((p) => p.value === activePreset.value)
     if (preset) return t(preset.labelKey)
   }
 
@@ -254,7 +269,7 @@ const selectPreset = (preset: DatePreset) => {
 const onDateChange = () => {
   // Check if current dates match any preset
   activePreset.value = null
-  for (const preset of presets) {
+  for (const preset of presets.value) {
     const range = preset.getRange()
     if (range.start === localStartDate.value && range.end === localEndDate.value) {
       activePreset.value = preset.value

@@ -819,6 +819,7 @@ export default {
 
   // Dates
   dates: {
+    allTime: 'All Time',
     today: 'Today',
     yesterday: 'Yesterday',
     thisWeek: 'This Week',

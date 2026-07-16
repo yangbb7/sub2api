@@ -98,10 +98,32 @@ export interface PaymentOrder {
   refund_amount: number
   refund_reason?: string
   refund_requested_at?: string
-  refund_requested_by?: number
+  refund_requested_by?: number | string
   refund_request_reason?: string
   plan_id?: number
   provider_instance_id?: string
+}
+
+export interface AdminPaymentOrder extends PaymentOrder {
+  user_email?: string
+  user_name?: string
+  user_notes?: string
+  recharge_code?: string
+  payment_trade_no?: string
+  pay_url?: string
+  qr_code?: string
+  qr_code_img?: string
+  subscription_group_id?: number
+  subscription_days?: number
+  provider_key?: string
+  refund_at?: string
+  force_refund?: boolean
+  failed_at?: string
+  failed_reason?: string
+  client_ip?: string
+  src_host?: string
+  src_url?: string
+  updated_at: string
 }
 
 // ==================== Plans & Channels ====================
@@ -225,6 +247,7 @@ export interface DashboardStats {
   today_count: number
   total_count: number
   avg_amount: number
+  pending_orders: number
   daily_series: { date: string; amount: number; count: number }[]
   payment_methods: { type: string; amount: number; count: number }[]
   top_users: { user_id: number; email: string; amount: number }[]

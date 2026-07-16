@@ -5,6 +5,7 @@ import { ref } from 'vue'
 import DateRangePicker from '../DateRangePicker.vue'
 
 const messages: Record<string, string> = {
+  'dates.allTime': 'All Time',
   'dates.today': 'Today',
   'dates.yesterday': 'Yesterday',
   'dates.last24Hours': 'Last 24 Hours',
@@ -34,6 +35,37 @@ const formatLocalDate = (date: Date): string => {
 }
 
 describe('DateRangePicker', () => {
+  it('only offers all-time clearing when explicitly enabled', async () => {
+    const today = formatLocalDate(new Date())
+    const defaultWrapper = mount(DateRangePicker, {
+      props: { startDate: today, endDate: today },
+      global: { stubs: { Icon: true } }
+    })
+
+    await defaultWrapper.find('.date-picker-trigger').trigger('click')
+    expect(defaultWrapper.text()).not.toContain('All Time')
+
+    const clearableWrapper = mount(DateRangePicker, {
+      props: { startDate: today, endDate: today, allowClear: true },
+      global: { stubs: { Icon: true } }
+    })
+
+    await clearableWrapper.find('.date-picker-trigger').trigger('click')
+    const allTimeButton = clearableWrapper.findAll('.date-picker-preset').find((node) =>
+      node.text().includes('All Time')
+    )
+    expect(allTimeButton).toBeDefined()
+
+    await allTimeButton!.trigger('click')
+    await clearableWrapper.find('.date-picker-apply').trigger('click')
+
+    expect(clearableWrapper.emitted('update:startDate')?.[0]).toEqual([''])
+    expect(clearableWrapper.emitted('update:endDate')?.[0]).toEqual([''])
+    expect(clearableWrapper.emitted('change')?.[0]).toEqual([
+      { startDate: '', endDate: '', preset: 'allTime' }
+    ])
+  })
+
   it('uses last 24 hours as the default recognized preset', () => {
     const now = new Date()
     const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000)

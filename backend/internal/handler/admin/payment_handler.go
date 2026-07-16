@@ -36,7 +36,16 @@ func (h *PaymentHandler) GetDashboard(c *gin.Context) {
 			days = v
 		}
 	}
-	stats, err := h.paymentService.GetDashboardStats(c.Request.Context(), days)
+	dateRange, err := parseAdminPaymentDateRange(c, days)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	stats, err := h.paymentService.GetDashboardStats(c.Request.Context(), service.PaymentDateRange{
+		StartTime: *dateRange.StartTime,
+		EndTime:   *dateRange.EndTime,
+		Location:  dateRange.Location,
+	})
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -50,20 +59,14 @@ func (h *PaymentHandler) GetDashboard(c *gin.Context) {
 // GET /api/v1/admin/payment/orders
 func (h *PaymentHandler) ListOrders(c *gin.Context) {
 	page, pageSize := response.ParsePagination(c)
-	var userID int64
-	if uid := c.Query("user_id"); uid != "" {
-		if v, err := strconv.ParseInt(uid, 10, 64); err == nil {
-			userID = v
-		}
+	userID, params, _, err := parseAdminOrderFilters(c)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
 	}
-	orders, total, err := h.paymentService.AdminListOrders(c.Request.Context(), userID, service.OrderListParams{
-		Page:        page,
-		PageSize:    pageSize,
-		Status:      c.Query("status"),
-		OrderType:   c.Query("order_type"),
-		PaymentType: c.Query("payment_type"),
-		Keyword:     c.Query("keyword"),
-	})
+	params.Page = page
+	params.PageSize = pageSize
+	orders, total, err := h.paymentService.AdminListOrders(c.Request.Context(), userID, params)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

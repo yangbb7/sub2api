@@ -824,6 +824,7 @@ export default {
 
   // Dates
   dates: {
+    allTime: '全部时间',
     today: '今天',
     yesterday: '昨天',
     thisWeek: '本周',
