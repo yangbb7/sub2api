@@ -21,7 +21,11 @@
     </button>
 
     <Transition name="date-picker-dropdown">
-      <div v-if="isOpen" class="date-picker-dropdown">
+      <div
+        v-if="isOpen"
+        class="date-picker-dropdown"
+        :style="{ left: `${dropdownOffsetX}px` }"
+      >
         <!-- Quick presets -->
         <div class="date-picker-presets">
           <button
@@ -76,7 +80,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 
@@ -107,9 +111,13 @@ const { t, locale } = useI18n()
 
 const isOpen = ref(false)
 const containerRef = ref<HTMLElement | null>(null)
+const dropdownOffsetX = ref(0)
 const localStartDate = ref(props.startDate)
 const localEndDate = ref(props.endDate)
 const activePreset = ref<string | null>('last24Hours')
+
+const DROPDOWN_WIDTH = 320
+const VIEWPORT_GUTTER = 12
 
 const today = computed(() => {
   // Use local timezone to avoid UTC timezone issues
@@ -278,8 +286,33 @@ const onDateChange = () => {
   }
 }
 
-const toggle = () => {
+const updateDropdownPosition = () => {
+  if (!isOpen.value || !containerRef.value) return
+
+  const triggerRect = containerRef.value.getBoundingClientRect()
+  const viewportWidth = document.documentElement.clientWidth || window.innerWidth
+  const dropdownWidth = Math.min(
+    DROPDOWN_WIDTH,
+    Math.max(0, viewportWidth - VIEWPORT_GUTTER * 2)
+  )
+  const maxViewportLeft = Math.max(
+    VIEWPORT_GUTTER,
+    viewportWidth - VIEWPORT_GUTTER - dropdownWidth
+  )
+  const viewportLeft = Math.min(
+    Math.max(triggerRect.left, VIEWPORT_GUTTER),
+    maxViewportLeft
+  )
+
+  dropdownOffsetX.value = viewportLeft - triggerRect.left
+}
+
+const toggle = async () => {
   isOpen.value = !isOpen.value
+  if (isOpen.value) {
+    await nextTick()
+    updateDropdownPosition()
+  }
 }
 
 const apply = () => {
@@ -325,6 +358,7 @@ watch(
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
   document.addEventListener('keydown', handleEscape)
+  window.addEventListener('resize', updateDropdownPosition)
   // Initialize active preset detection
   onDateChange()
 })
@@ -332,6 +366,7 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
   document.removeEventListener('keydown', handleEscape)
+  window.removeEventListener('resize', updateDropdownPosition)
 })
 </script>
 
@@ -365,13 +400,14 @@ onUnmounted(() => {
 }
 
 .date-picker-dropdown {
-  @apply absolute left-0 z-[100] mt-2;
+  @apply absolute z-[100] mt-2;
   @apply bg-white dark:bg-dark-800;
   @apply rounded-xl;
   @apply border border-gray-200 dark:border-dark-700;
   @apply shadow-lg shadow-black/10 dark:shadow-black/30;
   @apply overflow-hidden;
-  @apply min-w-[320px];
+  width: min(320px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
 }
 
 .date-picker-presets {
@@ -399,7 +435,7 @@ onUnmounted(() => {
 }
 
 .date-picker-field {
-  @apply flex-1;
+  @apply min-w-0 flex-1;
 }
 
 .date-picker-label {
@@ -407,7 +443,7 @@ onUnmounted(() => {
 }
 
 .date-picker-input {
-  @apply w-full rounded-md px-2 py-1.5 text-sm;
+  @apply min-w-0 w-full max-w-full rounded-md px-2 py-1.5 text-sm;
   @apply bg-gray-50 dark:bg-dark-700;
   @apply border border-gray-200 dark:border-dark-600;
   @apply text-gray-900 dark:text-gray-100;
@@ -436,6 +472,16 @@ onUnmounted(() => {
   @apply bg-primary-600 text-white;
   @apply hover:bg-primary-700;
   @apply transition-colors duration-150;
+}
+
+@media (max-width: 359px) {
+  .date-picker-custom {
+    @apply flex-col items-stretch;
+  }
+
+  .date-picker-separator {
+    @apply hidden;
+  }
 }
 
 /* Dropdown animation */
