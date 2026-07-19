@@ -638,6 +638,42 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 	}
 	setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, upstreamDetail)
 	logOpenAIInstructionsRequiredDebug(ctx, c, account, resp.StatusCode, upstreamMsg, requestBody, body)
+	if _, matched := parseOpenAIInvalidJSONSchemaClientError(resp.StatusCode, body); matched {
+		if status, errType, errMsg, ruleMatched := applyErrorPassthroughRule(
+			c,
+			account.Platform,
+			resp.StatusCode,
+			body,
+			http.StatusBadGateway,
+			"upstream_error",
+			"Upstream request failed",
+		); ruleMatched {
+			MarkResponseCommitted(c)
+			c.JSON(status, gin.H{
+				"error": gin.H{
+					"type":    errType,
+					"message": errMsg,
+				},
+			})
+			return fmt.Errorf("upstream error: %d (passthrough rule matched)", resp.StatusCode)
+		}
+	}
+	if writeOpenAIInvalidJSONSchemaClientError(c, resp.StatusCode, body) {
+		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			Platform:             account.Platform,
+			AccountID:            account.ID,
+			AccountName:          account.Name,
+			UpstreamStatusCode:   resp.StatusCode,
+			UpstreamRequestID:    resp.Header.Get("x-request-id"),
+			Passthrough:          true,
+			Kind:                 "http_error",
+			Reason:               OpsClientBusinessLimitedReasonUpstreamInvalidRequest,
+			Message:              upstreamMsg,
+			Detail:               upstreamDetail,
+			UpstreamResponseBody: upstreamDetail,
+		})
+		return fmt.Errorf("upstream invalid JSON schema: %d", resp.StatusCode)
+	}
 	// 错误体虽不会原样透传，运行态账号状态仍需更新，避免粘性路由继续复用
 	// 刚被限流的账号。cyber 例外：不冷却账号。
 	if !cyberHit {

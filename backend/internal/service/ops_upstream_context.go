@@ -61,6 +61,7 @@ const (
 	OpsClientBusinessLimitedReasonLocalFeatureGate       = "local_feature_gate"
 	OpsClientBusinessLimitedReasonLocalPolicyDenied      = "local_policy_denied"
 	OpsClientBusinessLimitedReasonContextWindowExceeded  = "context_window_exceeded"
+	OpsClientBusinessLimitedReasonUpstreamInvalidRequest = "upstream_invalid_request"
 )
 
 type OpsLatencyLogField struct {

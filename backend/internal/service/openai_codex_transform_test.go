@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -1566,6 +1567,35 @@ func TestApplyCodexOAuthTransform_JsonObjectKeepsJsonInstructionInInput(t *testi
 	user, ok := input[1].(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, "user", user["role"])
+}
+
+func TestApplyCodexOAuthTransform_PreservesValidStrictJSONSchema(t *testing.T) {
+	strictFormat := map[string]any{
+		"type":   "json_schema",
+		"name":   "codex_output_schema",
+		"strict": true,
+		"schema": map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"answer": map[string]any{"type": "string"},
+			},
+			"required": []any{"answer"},
+		},
+	}
+	reqBody := map[string]any{
+		"model": "gpt-5.4",
+		"input": []any{map[string]any{"role": "user", "content": "answer"}},
+		"text":  map[string]any{"format": strictFormat},
+	}
+	expected, err := json.Marshal(strictFormat)
+	require.NoError(t, err)
+
+	applyCodexOAuthTransform(reqBody, true, false)
+
+	actual, err := json.Marshal(reqBody["text"].(map[string]any)["format"])
+	require.NoError(t, err)
+	require.JSONEq(t, string(expected), string(actual))
 }
 
 func TestIsInstructionsEmpty(t *testing.T) {

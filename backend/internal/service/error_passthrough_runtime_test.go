@@ -89,6 +89,47 @@ func TestOpenAIHandleErrorResponse_NoRuleKeepsDefault(t *testing.T) {
 	assert.Equal(t, "Upstream request failed", errField["message"])
 }
 
+func TestOpenAIHandleErrorResponse_InvalidJSONSchemaReturnsSafeClientError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	svc := &OpenAIGatewayService{}
+	respBody := []byte(`{"error":{"message":"Invalid schema for response_format 'codex_output_schema': extra key\nsecret-token","type":"invalid_request_error","param":"text.format.schema","code":"invalid_json_schema","internal":"must-not-leak"}}`)
+	resp := &http.Response{
+		StatusCode: http.StatusUnprocessableEntity,
+		Body:       io.NopCloser(bytes.NewReader(respBody)),
+		Header:     http.Header{"X-Request-Id": []string{"upstream-schema-1"}},
+	}
+	account := &Account{ID: 15, Name: "schema-account", Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+
+	_, err := svc.handleErrorResponse(context.Background(), resp, c, account, nil)
+	require.Error(t, err)
+	var failoverErr *UpstreamFailoverError
+	require.False(t, errors.As(err, &failoverErr))
+	require.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+	require.True(t, IsResponseCommitted(c))
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
+	require.Equal(t, map[string]any{
+		"error": map[string]any{
+			"type":    "invalid_request_error",
+			"code":    "invalid_json_schema",
+			"message": "Invalid schema for response_format 'codex_output_schema': extra key secret-token",
+			"param":   "text.format.schema",
+		},
+	}, payload)
+
+	events, ok := c.Get(OpsUpstreamErrorsKey)
+	require.True(t, ok)
+	require.Len(t, events, 1)
+	event := events.([]*OpsUpstreamErrorEvent)[0]
+	require.Equal(t, "http_error", event.Kind)
+	require.Equal(t, "upstream_invalid_request", event.Reason)
+}
+
 func TestOpenAIHandleErrorResponse_ContextWindow502KeepsMessageWithoutFailover(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
@@ -179,7 +220,7 @@ func TestOpenAIHandleErrorResponse_AppliesRuleFor422(t *testing.T) {
 	BindErrorPassthroughService(c, ruleSvc)
 
 	svc := &OpenAIGatewayService{}
-	respBody := []byte(`{"error":{"message":"Invalid schema for field messages"}}`)
+	respBody := []byte(`{"error":{"message":"Invalid schema for field messages","type":"invalid_request_error","code":"invalid_json_schema"}}`)
 	resp := &http.Response{
 		StatusCode: http.StatusUnprocessableEntity,
 		Body:       io.NopCloser(bytes.NewReader(respBody)),
@@ -197,6 +238,7 @@ func TestOpenAIHandleErrorResponse_AppliesRuleFor422(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "upstream_error", errField["type"])
 	assert.Equal(t, "OpenAI上游失败", errField["message"])
+	assert.NotEqual(t, OpsClientBusinessLimitedReasonUpstreamInvalidRequest, OpsClientBusinessLimitedReason(c))
 }
 
 func TestGeminiWriteGeminiMappedError_AppliesRuleFor422(t *testing.T) {

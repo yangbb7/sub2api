@@ -308,6 +308,28 @@ func TestClassifyOpsNoAvailableAccountsExcludedFromSLA(t *testing.T) {
 	require.Equal(t, "gateway", errorSource)
 }
 
+func TestClassifyOpsUpstreamInvalidRequestAsClientBusinessLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	service.SetOpsUpstreamError(c, http.StatusUnprocessableEntity, "Invalid schema", "")
+	service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonUpstreamInvalidRequest)
+
+	phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(
+		c,
+		"invalid_request_error",
+		"Invalid schema",
+		"invalid_json_schema",
+		http.StatusUnprocessableEntity,
+	)
+
+	require.Equal(t, "request", phase)
+	require.True(t, isBusinessLimited)
+	require.Equal(t, "client", errorOwner)
+	require.Equal(t, "client_request", errorSource)
+}
+
 func TestClassifyOpsRoutingCapacityMarkerExcludesMaskedSelectionFailureFromSLA(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()

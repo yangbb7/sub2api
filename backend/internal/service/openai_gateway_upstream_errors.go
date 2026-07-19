@@ -241,6 +241,72 @@ const OpenAIRequestBodyTooLargeClientMessage = "Request payload is too large"
 
 const openAIRequestBodyTooLargeReason = GatewayFailureReason("openai_request_body_too_large")
 
+const (
+	openAIInvalidJSONSchemaErrorType  = "invalid_request_error"
+	openAIInvalidJSONSchemaErrorCode  = "invalid_json_schema"
+	openAIInvalidJSONSchemaMaxMessage = 2048
+	openAIInvalidJSONSchemaMaxParam   = 256
+)
+
+type openAIInvalidJSONSchemaClientError struct {
+	Message string
+	Param   string
+}
+
+func parseOpenAIInvalidJSONSchemaClientError(statusCode int, body []byte) (openAIInvalidJSONSchemaClientError, bool) {
+	if statusCode != http.StatusBadRequest && statusCode != http.StatusUnprocessableEntity {
+		return openAIInvalidJSONSchemaClientError{}, false
+	}
+	if !gjson.ValidBytes(body) || !gjson.GetBytes(body, "error").IsObject() {
+		return openAIInvalidJSONSchemaClientError{}, false
+	}
+	if strings.TrimSpace(gjson.GetBytes(body, "error.type").String()) != openAIInvalidJSONSchemaErrorType ||
+		strings.TrimSpace(gjson.GetBytes(body, "error.code").String()) != openAIInvalidJSONSchemaErrorCode {
+		return openAIInvalidJSONSchemaClientError{}, false
+	}
+
+	messageResult := gjson.GetBytes(body, "error.message")
+	message := "Invalid JSON schema"
+	if messageResult.Type == gjson.String {
+		if sanitized := sanitizeOpenAIInvalidJSONSchemaClientField(messageResult.String(), openAIInvalidJSONSchemaMaxMessage); sanitized != "" {
+			message = sanitized
+		}
+	}
+
+	param := ""
+	paramResult := gjson.GetBytes(body, "error.param")
+	if paramResult.Type == gjson.String {
+		param = sanitizeOpenAIInvalidJSONSchemaClientField(paramResult.String(), openAIInvalidJSONSchemaMaxParam)
+	}
+	return openAIInvalidJSONSchemaClientError{Message: message, Param: param}, true
+}
+
+func sanitizeOpenAIInvalidJSONSchemaClientField(value string, maxBytes int) string {
+	value = strings.Join(strings.Fields(value), " ")
+	value = sanitizeUpstreamErrorMessage(value)
+	return truncateString(value, maxBytes)
+}
+
+func writeOpenAIInvalidJSONSchemaClientError(c *gin.Context, statusCode int, body []byte) bool {
+	clientErr, ok := parseOpenAIInvalidJSONSchemaClientError(statusCode, body)
+	if !ok {
+		return false
+	}
+
+	MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonUpstreamInvalidRequest)
+	MarkResponseCommitted(c)
+	errorPayload := gin.H{
+		"type":    openAIInvalidJSONSchemaErrorType,
+		"code":    openAIInvalidJSONSchemaErrorCode,
+		"message": clientErr.Message,
+	}
+	if clientErr.Param != "" {
+		errorPayload["param"] = clientErr.Param
+	}
+	c.JSON(statusCode, gin.H{"error": errorPayload})
+	return true
+}
+
 func isOpenAIRequestBodyTooLargeError(statusCode int, upstreamMsg string, upstreamBody []byte) bool {
 	return statusCode == http.StatusRequestEntityTooLarge && !isOpenAIContextWindowError(upstreamMsg, upstreamBody)
 }
@@ -419,6 +485,21 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 			return nil, fmt.Errorf("upstream error: %d (passthrough rule matched)", resp.StatusCode)
 		}
 		return nil, fmt.Errorf("upstream error: %d (passthrough rule matched) message=%s", resp.StatusCode, upstreamMsg)
+	}
+
+	if writeOpenAIInvalidJSONSchemaClientError(c, resp.StatusCode, body) {
+		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			Platform:           account.Platform,
+			AccountID:          account.ID,
+			AccountName:        account.Name,
+			UpstreamStatusCode: resp.StatusCode,
+			UpstreamRequestID:  resp.Header.Get("x-request-id"),
+			Kind:               "http_error",
+			Reason:             OpsClientBusinessLimitedReasonUpstreamInvalidRequest,
+			Message:            upstreamMsg,
+			Detail:             upstreamDetail,
+		})
+		return nil, fmt.Errorf("upstream invalid JSON schema: %d", resp.StatusCode)
 	}
 
 	// Check custom error codes
