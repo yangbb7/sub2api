@@ -77,6 +77,34 @@ func TestCompositeTargetPlatformResolvedAllowsConcreteGroupWithoutResolution(t *
 	require.True(t, compositeTargetPlatformResolved(c, apiKey, "llama-4-maverick"))
 }
 
+func TestGatewayRequestPlatformUsesCompositeTargetForAnthropicEndpoints(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	apiKey := &service.APIKey{Group: &service.Group{Platform: service.PlatformComposite}}
+
+	for _, path := range []string{"/v1/messages", "/v1/messages/count_tokens"} {
+		for _, targetPlatform := range []string{service.PlatformAntigravity, service.PlatformGemini} {
+			t.Run(path+"/"+targetPlatform, func(t *testing.T) {
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				c.Request = httptest.NewRequest("POST", path, nil)
+				c.Request = c.Request.WithContext(service.WithResolvedTargetPlatform(c.Request.Context(), targetPlatform))
+
+				require.Equal(t, targetPlatform, gatewayRequestPlatform(c, apiKey))
+			})
+		}
+	}
+}
+
+func TestGatewayRequestPlatformForcePlatformOverridesCompositeTarget(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/antigravity/v1/messages", nil)
+	c.Request = c.Request.WithContext(service.WithResolvedTargetPlatform(c.Request.Context(), service.PlatformGemini))
+	c.Set(string(middleware2.ContextKeyForcePlatform), service.PlatformAntigravity)
+	apiKey := &service.APIKey{Group: &service.Group{Platform: service.PlatformComposite}}
+
+	require.Equal(t, service.PlatformAntigravity, gatewayRequestPlatform(c, apiKey))
+}
+
 func TestClientRequestedModelUsesCompositePublicModel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())

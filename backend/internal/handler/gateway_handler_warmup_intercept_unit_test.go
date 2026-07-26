@@ -18,6 +18,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 // 目标：严格验证“antigravity 账号通过 /v1/messages 提供 Claude 服务时”，
@@ -155,7 +156,29 @@ func (f *fakeConcurrencyCache) CleanupExpiredAccountSlots(context.Context, int64
 func (f *fakeConcurrencyCache) CleanupExpiredAccountSlotKeys(context.Context) error     { return nil }
 func (f *fakeConcurrencyCache) CleanupStaleProcessSlots(context.Context, string) error  { return nil }
 
+type recordingGatewayCache struct {
+	getSessionHashes []string
+}
+
+func (f *recordingGatewayCache) GetSessionAccountID(_ context.Context, _ int64, sessionHash string) (int64, error) {
+	f.getSessionHashes = append(f.getSessionHashes, sessionHash)
+	return 0, nil
+}
+func (f *recordingGatewayCache) SetSessionAccountID(context.Context, int64, string, int64, time.Duration) error {
+	return nil
+}
+func (f *recordingGatewayCache) RefreshSessionTTL(context.Context, int64, string, time.Duration) error {
+	return nil
+}
+func (f *recordingGatewayCache) DeleteSessionAccountID(context.Context, int64, string) error {
+	return nil
+}
+
 func newTestGatewayHandler(t *testing.T, group *service.Group, accounts []*service.Account) (*GatewayHandler, func()) {
+	return newTestGatewayHandlerWithCache(t, group, accounts, nil)
+}
+
+func newTestGatewayHandlerWithCache(t *testing.T, group *service.Group, accounts []*service.Account, cache service.GatewayCache) (*GatewayHandler, func()) {
 	t.Helper()
 
 	schedulerCache := &fakeSchedulerCache{accounts: accounts}
@@ -169,7 +192,7 @@ func newTestGatewayHandler(t *testing.T, group *service.Group, accounts []*servi
 		nil, // userRepo
 		nil, // userSubRepo
 		nil, // userGroupRateRepo
-		nil, // cache (disable sticky)
+		cache,
 		nil, // cfg
 		schedulerSnapshot,
 		nil, // concurrencyService (disable load-aware; tryAcquire always acquired)
@@ -212,6 +235,78 @@ func newTestGatewayHandler(t *testing.T, group *service.Group, accounts []*servi
 		billingCacheSvc.Stop()
 	}
 	return h, cleanup
+}
+
+func TestGatewayHandlerMessages_CompositeAntigravityNormalizesDisplayModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	groupID := int64(2101)
+	accountID := int64(1101)
+	group := &service.Group{ID: groupID, Hydrated: true, Platform: service.PlatformComposite, Status: service.StatusActive}
+	account := &service.Account{
+		ID:            accountID,
+		Name:          "ag-composite",
+		Platform:      service.PlatformAntigravity,
+		Type:          service.AccountTypeOAuth,
+		Credentials:   map[string]any{"access_token": "tok_xxx", "intercept_warmup_requests": true},
+		Concurrency:   1,
+		Priority:      1,
+		Status:        service.StatusActive,
+		Schedulable:   true,
+		AccountGroups: []service.AccountGroup{{AccountID: accountID, GroupID: groupID}},
+	}
+	h, cleanup := newTestGatewayHandler(t, group, []*service.Account{account})
+	defer cleanup()
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"model":"claude-opus-4.7","max_tokens":256,"messages":[{"role":"user","content":[{"type":"text","text":"Warmup"}]}]}`)
+	req := httptest.NewRequest("POST", "/v1/messages", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	ctx := context.WithValue(req.Context(), ctxkey.Group, group)
+	ctx = service.WithResolvedTargetPlatform(ctx, service.PlatformAntigravity)
+	c.Request = req.WithContext(ctx)
+	apiKey := &service.APIKey{
+		ID: 3101, UserID: 4101, GroupID: &groupID, Status: service.StatusActive,
+		User: &service.User{ID: 4101, Concurrency: 10, Balance: 100}, Group: group,
+	}
+	c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.UserID, Concurrency: 10})
+
+	h.Messages(c)
+
+	require.Equal(t, 200, rec.Code)
+	require.Equal(t, "claude-opus-4-7", gjson.GetBytes(rec.Body.Bytes(), "model").String())
+}
+
+func TestGatewayHandlerMessages_CompositeGeminiNamespacesSessionKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	groupID := int64(2102)
+	group := &service.Group{ID: groupID, Hydrated: true, Platform: service.PlatformComposite, Status: service.StatusActive}
+	cache := &recordingGatewayCache{}
+	h, cleanup := newTestGatewayHandlerWithCache(t, group, nil, cache)
+	defer cleanup()
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"model":"gemini-2.5-pro","max_tokens":64,"messages":[{"role":"user","content":"hello"}]}`)
+	req := httptest.NewRequest("POST", "/v1/messages", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	ctx := context.WithValue(req.Context(), ctxkey.Group, group)
+	ctx = service.WithResolvedTargetPlatform(ctx, service.PlatformGemini)
+	c.Request = req.WithContext(ctx)
+	apiKey := &service.APIKey{
+		ID: 3102, UserID: 4102, GroupID: &groupID, Status: service.StatusActive,
+		User: &service.User{ID: 4102, Concurrency: 10, Balance: 100}, Group: group,
+	}
+	c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.UserID, Concurrency: 10})
+
+	h.Messages(c)
+
+	require.NotEmpty(t, cache.getSessionHashes)
+	require.Contains(t, cache.getSessionHashes[0], "gemini:")
 }
 
 func TestGatewayHandlerMessages_InterceptWarmup_AntigravityAccount_MixedSchedulingV1(t *testing.T) {

@@ -166,6 +166,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return
 	}
+	ensureCompositeTargetPlatform(c, apiKey, parsedReq.Model)
 	platform := gatewayRequestPlatform(c, apiKey)
 	if platform == service.PlatformAntigravity {
 		body, err = normalizeAntigravityClaudeModelRequest(body, parsedReq)
@@ -178,8 +179,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	}
 	reqModel := parsedReq.Model
 	reqStream := parsedReq.Stream
-	ensureCompositeTargetPlatform(c, apiKey, reqModel)
-	platform = gatewayRequestPlatform(c, apiKey)
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 
 	// 解析渠道级模型映射
@@ -1963,6 +1962,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return
 	}
+	ensureCompositeTargetPlatform(c, apiKey, parsedReq.Model)
 	platform := gatewayRequestPlatform(c, apiKey)
 	if platform == service.PlatformAntigravity {
 		body, err = normalizeAntigravityClaudeModelRequest(body, parsedReq)
@@ -1975,7 +1975,6 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	}
 	// count_tokens 走 messages 严格校验时，复用已解析请求，避免二次反序列化。
 	SetClaudeCodeClientContext(c, body, parsedReq)
-	ensureCompositeTargetPlatform(c, apiKey, parsedReq.Model)
 	reqLog = reqLog.With(zap.String("model", parsedReq.Model), zap.Bool("stream", parsedReq.Stream))
 	// 在请求上下文中记录 thinking 状态，供 Antigravity 最终模型 key 推导/模型维度限流使用
 	c.Request = c.Request.WithContext(service.WithThinkingEnabled(c.Request.Context(), parsedReq.ThinkingEnabled, h.metadataBridgeEnabled()))
@@ -2019,7 +2018,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	account, err := h.gatewayService.SelectAccountForModel(c.Request.Context(), apiKey.GroupID, sessionHash, parsedReq.Model)
 	if err != nil {
 		reqLog.Warn("gateway.count_tokens_select_account_failed", zap.Error(err))
-		cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, parsedReq.Model, parsedReq.Model, service.PlatformAnthropic)
+		cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, parsedReq.Model, parsedReq.Model, platform)
 		if !cls.ModelNotFound {
 			markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 		}
@@ -2039,6 +2038,11 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 func gatewayRequestPlatform(c *gin.Context, apiKey *service.APIKey) string {
 	if forcePlatform, ok := middleware2.GetForcePlatformFromContext(c); ok {
 		return forcePlatform
+	}
+	if c != nil && c.Request != nil {
+		if resolvedPlatform, ok := service.ResolvedTargetPlatformFromContext(c.Request.Context()); ok {
+			return resolvedPlatform
+		}
 	}
 	if apiKey != nil && apiKey.Group != nil {
 		return apiKey.Group.Platform
