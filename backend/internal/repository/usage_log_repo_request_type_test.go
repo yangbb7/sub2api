@@ -98,6 +98,7 @@ func TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields(t *testing.T) {
 			sqlmock.AnyArg(), // account_stats_cost
 			sqlmock.AnyArg(), // request_snapshot
 			sqlmock.AnyArg(), // response_snapshot
+			sqlmock.AnyArg(), // session_id
 			createdAt,
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(99), createdAt))
@@ -189,6 +190,7 @@ func TestUsageLogRepositoryCreate_PersistsServiceTier(t *testing.T) {
 			sqlmock.AnyArg(), // account_stats_cost
 			sqlmock.AnyArg(), // request_snapshot
 			sqlmock.AnyArg(), // response_snapshot
+			sqlmock.AnyArg(), // session_id
 			createdAt,
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(100), createdAt))
@@ -263,11 +265,11 @@ func TestPrepareUsageLogInsert_PersistsCallSnapshots(t *testing.T) {
 	prepared := prepareUsageLogInsert(log)
 
 	require.Len(t, prepared.args, len(usageLogInsertArgTypes))
-	requestSnapshotValue, ok := prepared.args[len(prepared.args)-3].(string)
+	requestSnapshotValue, ok := prepared.args[len(prepared.args)-4].(string)
 	require.True(t, ok)
 	require.JSONEq(t, `{"content":"{\"model\":\"gpt-5.5\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}","truncated":false}`, requestSnapshotValue)
 
-	responseSnapshotValue, ok := prepared.args[len(prepared.args)-2].(string)
+	responseSnapshotValue, ok := prepared.args[len(prepared.args)-3].(string)
 	require.True(t, ok)
 	require.JSONEq(t, `{"content":"{\"output_text\":\"world\"}","truncated":true}`, responseSnapshotValue)
 }
@@ -802,14 +804,14 @@ type usageLogScannerStub struct {
 
 func usageLogScanValues(values ...any) []any {
 	// Keep older tests focused on their target fields while matching usageLogSelectColumns.
-	// request_snapshot and response_snapshot live immediately before created_at.
-	if len(values) == 0 {
+	// request_snapshot and response_snapshot live immediately before session_id and created_at.
+	if len(values) < 2 {
 		return values
 	}
 	out := make([]any, 0, len(values)+2)
-	out = append(out, values[:len(values)-1]...)
+	out = append(out, values[:len(values)-2]...)
 	out = append(out, sql.NullString{}, sql.NullString{})
-	out = append(out, values[len(values)-1])
+	out = append(out, values[len(values)-2:]...)
 	return out
 }
 
@@ -875,6 +877,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},
 			sql.NullString{},
 			sql.NullFloat64{},
+			sql.NullString{},
 			now,
 		)})
 		require.NoError(t, err)
@@ -949,6 +952,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},  // billing_tier
 			sql.NullString{},  // billing_mode
 			sql.NullFloat64{}, // account_stats_cost
+			sql.NullString{},  // session_id
 			now,
 		)})
 		require.NoError(t, err)
@@ -1006,6 +1010,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},  // billing_tier
 			sql.NullString{},  // billing_mode
 			sql.NullFloat64{}, // account_stats_cost
+			sql.NullString{},  // session_id
 			now,
 		)})
 		require.NoError(t, err)
@@ -1063,6 +1068,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},  // billing_tier
 			sql.NullString{},  // billing_mode
 			sql.NullFloat64{}, // account_stats_cost
+			sql.NullString{},  // session_id
 			now,
 		)})
 		require.NoError(t, err)

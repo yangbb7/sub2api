@@ -178,9 +178,11 @@
           :server-side-sort="true"
           :show-account-billing="false"
           :show-upstream-endpoint="false"
+          :row-clickable="true"
           default-sort-key="created_at"
           default-sort-order="desc"
           @sort="handleSort"
+          @rowClick="openCallDetails"
           @ipGeoBatchFailed="handleIpGeoBatchFailed"
         />
 
@@ -210,6 +212,71 @@
     </div>
   </AppLayout>
 
+  <BaseDialog
+    :show="callDetailsVisible"
+    :title="t('usage.callDetails')"
+    width="wide"
+    @close="closeCallDetails"
+  >
+    <div v-if="selectedUsageLog" class="space-y-5">
+      <div class="grid gap-3 text-sm text-gray-600 dark:text-gray-300 sm:grid-cols-2">
+        <div>
+          <div class="text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
+            {{ t('usage.requestId') }}
+          </div>
+          <div class="mt-1 break-all font-mono text-gray-900 dark:text-white">
+            {{ selectedUsageLog.request_id || '-' }}
+          </div>
+        </div>
+        <div>
+          <div class="text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
+            {{ t('usage.model') }}
+          </div>
+          <div class="mt-1 font-medium text-gray-900 dark:text-white">
+            {{ selectedUsageLog.model }}
+          </div>
+        </div>
+      </div>
+
+      <div class="grid gap-4 lg:grid-cols-2">
+        <section class="space-y-2">
+          <div class="flex items-center justify-between">
+            <h4 class="text-sm font-semibold text-gray-900 dark:text-white">
+              {{ t('usage.requestSnapshot') }}
+            </h4>
+            <span
+              v-if="selectedUsageLog.request_snapshot?.truncated"
+              class="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-500/20 dark:text-amber-300"
+            >
+              {{ t('usage.truncated') }}
+            </span>
+          </div>
+          <pre class="max-h-[420px] overflow-auto rounded border border-gray-200 bg-gray-50 p-3 text-xs leading-relaxed text-gray-800 dark:border-dark-700 dark:bg-dark-900 dark:text-dark-100">{{ formatSnapshot(selectedUsageLog.request_snapshot) }}</pre>
+        </section>
+
+        <section class="space-y-2">
+          <div class="flex items-center justify-between">
+            <h4 class="text-sm font-semibold text-gray-900 dark:text-white">
+              {{ t('usage.responseSnapshot') }}
+            </h4>
+            <span
+              v-if="selectedUsageLog.response_snapshot?.truncated"
+              class="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-500/20 dark:text-amber-300"
+            >
+              {{ t('usage.truncated') }}
+            </span>
+          </div>
+          <pre class="max-h-[420px] overflow-auto rounded border border-gray-200 bg-gray-50 p-3 text-xs leading-relaxed text-gray-800 dark:border-dark-700 dark:bg-dark-900 dark:text-dark-100">{{ formatSnapshot(selectedUsageLog.response_snapshot) }}</pre>
+        </section>
+      </div>
+    </div>
+
+    <template #footer>
+      <button type="button" class="btn btn-secondary" @click="closeCallDetails">
+        {{ t('common.close') }}
+      </button>
+    </template>
+  </BaseDialog>
 </template>
 
 <script setup lang="ts">
@@ -221,6 +288,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import DateRangePicker from '@/components/common/DateRangePicker.vue'
+import BaseDialog from '@/components/common/BaseDialog.vue'
 import UsageStatsCards from '@/components/admin/usage/UsageStatsCards.vue'
 import UsageTable from '@/components/admin/usage/UsageTable.vue'
 import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'
@@ -241,6 +309,7 @@ import type {
   ModelStat,
   TrendDataPoint,
   UsageLog,
+  UsageCallSnapshot,
   UsageQueryParams,
   UsageStatsResponse,
   UserErrorRequest,
@@ -256,6 +325,8 @@ type EndpointSource = 'inbound' | 'upstream' | 'path'
 
 const usageStats = ref<UsageStatsResponse | null>(null)
 const usageLogs = ref<UsageLog[]>([])
+const callDetailsVisible = ref(false)
+const selectedUsageLog = ref<UsageLog | null>(null)
 const trendData = ref<TrendDataPoint[]>([])
 const requestedModelStats = ref<ModelStat[]>([])
 const groupStats = ref<GroupStat[]>([])
@@ -376,6 +447,7 @@ const granularityOptions = computed<SelectOption[]>(() => [
 const requestTypeOptions = computed<SelectOption[]>(() => [
   { value: null, label: t('admin.usage.allTypes') },
   { value: 'ws_v2', label: t('usage.ws') },
+  { value: 'live', label: t('usage.live') },
   { value: 'stream', label: t('usage.stream') },
   { value: 'sync', label: t('usage.sync') },
 ])
@@ -595,6 +667,7 @@ const handleIpGeoBatchFailed = () => {
 const getRequestTypeExportText = (log: UsageLog): string => {
   const requestType = resolveUsageRequestType(log)
   if (requestType === 'cyber') return 'Cyber'
+  if (requestType === 'live') return 'Live'
   if (requestType === 'ws_v2') return 'WS'
   if (requestType === 'stream') return 'Stream'
   if (requestType === 'sync') return 'Sync'
@@ -869,6 +942,27 @@ const onErrorPageSize = (pageSize: number) => {
 const switchToErrors = () => {
   activeTab.value = 'errors'
   if (errorRows.value.length === 0) void loadErrors()
+}
+
+const formatSnapshot = (snapshot: UsageCallSnapshot | null | undefined): string => {
+  const content = snapshot?.content?.trim()
+  return content || t('usage.snapshotUnavailable')
+}
+
+const openCallDetails = async (row: UsageLog) => {
+  selectedUsageLog.value = row
+  callDetailsVisible.value = true
+  try {
+    selectedUsageLog.value = await usageAPI.getById(row.id)
+  } catch (error) {
+    appStore.showError(t('usage.failedToLoadCallDetails'))
+    console.error('Failed to load usage call details:', error)
+  }
+}
+
+const closeCallDetails = () => {
+  callDetailsVisible.value = false
+  selectedUsageLog.value = null
 }
 
 onMounted(() => {

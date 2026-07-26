@@ -1,4 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
 import { describe, expect, it, vi } from 'vitest'
 import LegalDocumentView from '@/views/public/LegalDocumentView.vue'
 
@@ -34,6 +35,8 @@ vi.mock('@/api/auth', async () => {
 
 describe('LegalDocumentView security statement', () => {
   it('renders the security privacy document as a public security statement', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
     getPublicSettingsMock.mockResolvedValue({
       site_name: 'AI Gateway',
       site_logo: '',
@@ -49,6 +52,7 @@ describe('LegalDocumentView security statement', () => {
 
     const wrapper = mount(LegalDocumentView, {
       global: {
+        plugins: [pinia],
         stubs: {
           RouterLink: {
             props: ['to'],
