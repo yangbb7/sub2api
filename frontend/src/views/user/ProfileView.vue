@@ -93,6 +93,7 @@
       />
 
       <ProfileTotpCard />
+      <ProfilePasskeyCard :enabled="passkeyEnabled" />
     </div>
   </AppLayout>
 </template>
@@ -107,6 +108,7 @@ import ProfileBalanceNotifyCard from '@/components/user/profile/ProfileBalanceNo
 import ProfileInfoCard from '@/components/user/profile/ProfileInfoCard.vue'
 import ProfilePasswordForm from '@/components/user/profile/ProfilePasswordForm.vue'
 import ProfileTotpCard from '@/components/user/profile/ProfileTotpCard.vue'
+import ProfilePasskeyCard from '@/components/user/profile/ProfilePasskeyCard.vue'
 import { isWeChatWebOAuthEnabled } from '@/api/auth'
 import userAPI from '@/api/user'
 import { useClipboard } from '@/composables/useClipboard'
@@ -134,6 +136,7 @@ const wechatOAuthOpenEnabled = ref<boolean | undefined>(undefined)
 const wechatOAuthMPEnabled = ref<boolean | undefined>(undefined)
 const oidcOAuthEnabled = ref(false)
 const oidcOAuthProviderName = ref('OIDC')
+const passkeyEnabled = ref(false)
 
 const affiliateInviteLink = computed(() => {
   if (!affiliateDetail.value?.aff_code) return ''
@@ -193,6 +196,7 @@ onMounted(async () => {
         : undefined
       oidcOAuthEnabled.value = settings.oidc_oauth_enabled ?? false
       oidcOAuthProviderName.value = settings.oidc_oauth_provider_name || 'OIDC'
+      passkeyEnabled.value = settings.passkey_enabled === true
     })
     .catch((error) => {
       console.error('Failed to load settings:', error)

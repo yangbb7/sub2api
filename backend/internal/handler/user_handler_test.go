@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 )
 
 type userHandlerRepoStub struct {
+	mu         sync.Mutex
 	user       *service.User
 	identities []service.UserAuthIdentityRecord
 	unbound    []string
@@ -30,6 +32,8 @@ func (s *userHandlerRepoStub) CreateWithEmailAliasGuard(context.Context, *servic
 	return nil
 }
 func (s *userHandlerRepoStub) GetByID(context.Context, int64) (*service.User, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	cloned := *s.user
 	return &cloned, nil
 }
@@ -41,10 +45,19 @@ func (s *userHandlerRepoStub) GetFirstAdmin(context.Context) (*service.User, err
 	cloned := *s.user
 	return &cloned, nil
 }
-func (s *userHandlerRepoStub) Update(_ context.Context, user *service.User) error {
+func (s *userHandlerRepoStub) Update(_ context.Context, user *service.User, _ service.UserUpdateFields) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	cloned := *user
 	s.user = &cloned
 	return nil
+}
+
+func (s *userHandlerRepoStub) IncrementTokenVersion(context.Context, int64) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.user.TokenVersion++
+	return s.user.TokenVersion, nil
 }
 func (s *userHandlerRepoStub) Delete(context.Context, int64) error { return nil }
 func (s *userHandlerRepoStub) GetUserAvatar(context.Context, int64) (*service.UserAvatar, error) {
@@ -92,6 +105,14 @@ func (s *userHandlerRepoStub) DeductBalance(context.Context, int64, float64) err
 func (s *userHandlerRepoStub) UpdateConcurrency(context.Context, int64, int) error { return nil }
 func (s *userHandlerRepoStub) BatchSetConcurrency(context.Context, []int64, int) (int, error) {
 	return 0, nil
+}
+
+func (s *userHandlerRepoStub) AdjustBalance(ctx context.Context, id int64, delta float64) (service.BalanceChange, error) {
+	panic("unexpected AdjustBalance call")
+}
+
+func (s *userHandlerRepoStub) SetBalance(ctx context.Context, id int64, value float64) (service.BalanceChange, error) {
+	panic("unexpected SetBalance call")
 }
 func (s *userHandlerRepoStub) BatchAddConcurrency(context.Context, []int64, int) (int, error) {
 	return 0, nil
@@ -408,14 +429,24 @@ type userHandlerEmailCacheStub struct {
 
 type userHandlerRefreshTokenCacheStub struct {
 	revokedUserIDs []int64
+	tokens         map[string]*service.RefreshTokenData
+	deleteUserErr  error
 }
 
-func (s *userHandlerRefreshTokenCacheStub) StoreRefreshToken(context.Context, string, *service.RefreshTokenData, time.Duration) error {
+func (s *userHandlerRefreshTokenCacheStub) StoreRefreshToken(_ context.Context, hash string, data *service.RefreshTokenData, _ time.Duration) error {
+	if s.tokens == nil {
+		s.tokens = make(map[string]*service.RefreshTokenData)
+	}
+	s.tokens[hash] = data
 	return nil
 }
 
-func (s *userHandlerRefreshTokenCacheStub) GetRefreshToken(context.Context, string) (*service.RefreshTokenData, error) {
-	return nil, service.ErrRefreshTokenNotFound
+func (s *userHandlerRefreshTokenCacheStub) GetRefreshToken(_ context.Context, hash string) (*service.RefreshTokenData, error) {
+	data, ok := s.tokens[hash]
+	if !ok {
+		return nil, service.ErrRefreshTokenNotFound
+	}
+	return data, nil
 }
 
 func (s *userHandlerRefreshTokenCacheStub) DeleteRefreshToken(context.Context, string) error {
@@ -424,6 +455,10 @@ func (s *userHandlerRefreshTokenCacheStub) DeleteRefreshToken(context.Context, s
 
 func (s *userHandlerRefreshTokenCacheStub) DeleteUserRefreshTokens(_ context.Context, userID int64) error {
 	s.revokedUserIDs = append(s.revokedUserIDs, userID)
+	if s.deleteUserErr != nil {
+		return s.deleteUserErr
+	}
+	s.tokens = make(map[string]*service.RefreshTokenData)
 	return nil
 }
 
@@ -660,6 +695,8 @@ func TestUserHandlerUnbindIdentityRevokesAllUserSessionsWhenAuthServiceConfigure
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Equal(t, []int64{23}, refreshTokenCache.revokedUserIDs)
+	// Unbinding an identity revokes access tokens by atomically advancing the
+	// persisted epoch before best-effort refresh-session cleanup.
 	require.Equal(t, int64(5), repo.user.TokenVersion)
 }
 

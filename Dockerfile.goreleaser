@@ -40,8 +40,9 @@ RUN addgroup -g 1000 gateway && \
 
 WORKDIR /app
 
-# Copy pre-built binary from GoReleaser
+# Copy the pre-built binary and runtime fallback resources from GoReleaser
 COPY gateway /app/gateway
+COPY --chown=gateway:gateway backend/resources /app/resources
 
 # Create data directory
 RUN mkdir -p /app/data && chown -R gateway:gateway /app

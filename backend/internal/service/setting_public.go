@@ -23,29 +23,130 @@ func normalizeLoginAgreementMode(raw string) string {
 	}
 }
 
+const (
+	defaultTermsContentMD = `## 服务说明
+
+AI Gateway 提供统一 API 网关、账号调度、用量统计和余额扣费能力。用户提交请求后，系统会根据可用账号、分组规则、模型映射和风控配置将请求转发到对应的上游模型服务。
+
+## 用户责任
+
+- 请确认你的使用场景符合所在地法律法规、上游模型服务条款以及本平台的使用政策。
+- 不要提交违法内容、恶意攻击内容、他人敏感信息，或你无权处理的数据。
+- 请自行保护你的 API Key、登录密码、二次验证设备和团队成员权限。
+
+## 服务边界
+
+- 上游模型的可用性、响应质量、限流策略和内容安全策略由对应第三方服务决定。
+- 系统可能因为余额不足、配额限制、风控规则、上游限流、账号异常或维护而拒绝或延迟请求。
+- 管理员可以根据运营、安全或合规要求调整可用模型、账号分组、倍率、限额和访问规则。`
+
+	defaultUsagePolicyContentMD = `## 禁止用途
+
+不得使用本平台从事下列行为：
+
+- 生成、传播或协助实施违法、欺诈、侵权、恶意攻击、垃圾信息或规避安全控制的内容。
+- 未经授权处理他人的个人信息、商业秘密、认证凭证、源代码或其他敏感资料。
+- 批量撞库、扫描、滥发请求、绕过限流、共享或转售未经授权的 API Key。
+- 试图攻击、干扰、逆向、绕过或滥用本平台、上游服务或其他用户资源。
+
+## 风控措施
+
+为保护平台和其他用户，系统可能执行频率限制、IP 访问控制、内容审核、账号切换、请求拒绝、密钥禁用、账号暂停或人工复核。
+
+## 违规处理
+
+如果检测到异常或违规使用，管理员可以限制、暂停或终止相关账号/API Key，并保留必要的安全审计记录用于排障、风控和合规处理。`
+
+	defaultSupportedRegionsContentMD = `## 可用地区
+
+服务是否可用取决于部署节点、网络连通性、支付方式、上游服务条款以及当地法律法规。管理员可以按需限制注册、登录、支付、模型访问或特定地区的使用。
+
+## 用户确认
+
+- 你需要自行确认访问和使用本平台以及上游 AI 服务在你所在地是被允许的。
+- 如果上游服务、支付服务或网络服务不支持你所在地区，相关功能可能无法使用。
+- 如果管理员收到合规、风控或上游服务要求，可能会调整可用地区或限制访问。`
+
+	defaultSecurityPrivacyContentMD = `## 我们处理哪些数据
+
+为提供网关、计费、调度和安全能力，系统会处理并保存必要数据，包括账号邮箱、用户资料、API Key、余额和用量记录、账号分组、上游账号凭证、支付/兑换记录、登录和操作审计记录。
+
+## 请求内容如何处理
+
+- 你的 API 请求会被转发给被调度到的上游模型服务。上游服务会按其自身条款、隐私政策和安全策略处理这些请求。
+- 正常用量日志保存请求 ID、用户/API Key/账号/分组、模型、Token、费用、耗时、状态、IP 和 User-Agent 等元数据，不保存 prompt 或 response 正文。
+- 运维错误日志用于排障和风控，保存错误阶段、状态码、模型、上游错误信息和必要上下文；系统不保存可重放的完整请求体。
+- 如启用内容审核、风控或上游安全策略，相关模块可能会临时读取请求内容用于判定是否放行。
+
+## 凭证与访问控制
+
+- 用户 API Key 用于鉴权和扣费，请像密码一样保管。泄露后应立即删除或轮换。
+- 上游账号凭证和 OAuth token 仅用于代表平台调度请求、刷新 token、查询额度和执行必要的隐私/安全设置。
+- 管理员后台会对敏感凭证做脱敏展示；具备服务器、数据库或管理员权限的人员仍可能接触系统运行所需的敏感数据。
+
+## 第三方与数据出境
+
+请求可能被转发到 OpenAI、Anthropic、Google、Antigravity 或管理员配置的其他上游/支付/邮件服务。你提交的数据可能因此离开本平台所在服务器，并受对应第三方条款约束。
+
+## 用户建议
+
+- 不要提交你无权处理的个人信息、密钥、密码、私有代码、商业秘密或高度敏感资料。
+- 为 API Key 设置额度、过期时间、IP 白名单和合理的速率限制。
+- 团队场景中请按最小权限分配账号和密钥，并定期审查用量和访问记录。
+
+## 联系管理员
+
+如需删除账号、处理数据请求、报告安全问题或了解具体部署的保留周期，请联系本平台管理员。`
+)
+
 func defaultLoginAgreementDocuments() []LoginAgreementDocument {
 	return []LoginAgreementDocument{
 		{
 			ID:        "terms",
 			Title:     "服务条款",
-			ContentMD: "",
+			ContentMD: defaultTermsContentMD,
 		},
 		{
 			ID:        "usage-policy",
 			Title:     "使用政策",
-			ContentMD: "",
+			ContentMD: defaultUsagePolicyContentMD,
 		},
 		{
 			ID:        "supported-regions",
 			Title:     "支持的国家和地区",
-			ContentMD: "",
+			ContentMD: defaultSupportedRegionsContentMD,
 		},
 		{
-			ID:        "service-specific-terms",
-			Title:     "服务特定条款",
-			ContentMD: "",
+			ID:        "security-privacy",
+			Title:     "安全与隐私声明",
+			ContentMD: defaultSecurityPrivacyContentMD,
 		},
 	}
+}
+
+func legacyBlankLoginAgreementDocuments() []LoginAgreementDocument {
+	return []LoginAgreementDocument{
+		{ID: "terms", Title: "服务条款"},
+		{ID: "usage-policy", Title: "使用政策"},
+		{ID: "supported-regions", Title: "支持的国家和地区"},
+		{ID: "service-specific-terms", Title: "服务特定条款"},
+	}
+}
+
+func isLegacyBlankLoginAgreementDocuments(docs []LoginAgreementDocument) bool {
+	legacy := legacyBlankLoginAgreementDocuments()
+	if len(docs) != len(legacy) {
+		return false
+	}
+	for i, doc := range docs {
+		if strings.TrimSpace(doc.ContentMD) != "" {
+			return false
+		}
+		if strings.TrimSpace(doc.ID) != legacy[i].ID || strings.TrimSpace(doc.Title) != legacy[i].Title {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizeLoginAgreementDocumentID(raw string) string {
@@ -113,6 +214,9 @@ func parseLoginAgreementDocuments(raw string) []LoginAgreementDocument {
 	if len(docs) == 0 {
 		return defaultLoginAgreementDocuments()
 	}
+	if isLegacyBlankLoginAgreementDocuments(docs) {
+		return defaultLoginAgreementDocuments()
+	}
 	return docs
 }
 
@@ -164,6 +268,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SettingKeyPasswordResetEnabled,
 		SettingKeyInvitationCodeEnabled,
 		SettingKeyTotpEnabled,
+		SettingKeyPasskeyEnabled,
 		SettingKeyLoginAgreementEnabled,
 		SettingKeyLoginAgreementMode,
 		SettingKeyLoginAgreementUpdatedAt,
@@ -178,6 +283,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SettingKeyContactInfo,
 		SettingKeyDocURL,
 		SettingKeyHomeContent,
+		SettingKeyCompactHomeEnabled,
 		SettingKeyHideCcsImportButton,
 		SettingKeyPurchaseSubscriptionEnabled,
 		SettingKeyPurchaseSubscriptionURL,
@@ -220,6 +326,8 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SettingKeyChannelMonitorEnabled,
 		SettingKeyChannelMonitorDefaultIntervalSeconds,
 		SettingKeyAvailableChannelsEnabled,
+		SettingKeyModelPlazaEnabled,
+		SettingKeyModelPlazaRequireAuth,
 		SettingKeyAffiliateEnabled,
 		SettingKeyRiskControlEnabled,
 		SettingKeyAllowUserViewErrorRequests,
@@ -289,6 +397,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		PasswordResetEnabled:             passwordResetEnabled,
 		InvitationCodeEnabled:            settings[SettingKeyInvitationCodeEnabled] == "true",
 		TotpEnabled:                      settings[SettingKeyTotpEnabled] == "true",
+		PasskeyEnabled:                   s.passkeyConfigured() && s.passkeySettingEnabled(settings),
 		LoginAgreementEnabled:            settings[SettingKeyLoginAgreementEnabled] == "true" && len(loginAgreementDocuments) > 0,
 		LoginAgreementMode:               normalizeLoginAgreementMode(settings[SettingKeyLoginAgreementMode]),
 		LoginAgreementUpdatedAt:          loginAgreementUpdatedAt,
@@ -296,13 +405,14 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		LoginAgreementDocuments:          loginAgreementDocuments,
 		TurnstileEnabled:                 settings[SettingKeyTurnstileEnabled] == "true",
 		TurnstileSiteKey:                 settings[SettingKeyTurnstileSiteKey],
-		SiteName:                         s.getStringOrDefault(settings, SettingKeySiteName, "Sub2API"),
+		SiteName:                         s.getStringOrDefault(settings, SettingKeySiteName, defaultSiteName),
 		SiteLogo:                         settings[SettingKeySiteLogo],
-		SiteSubtitle:                     s.getStringOrDefault(settings, SettingKeySiteSubtitle, "Subscription to API Conversion Platform"),
+		SiteSubtitle:                     s.getStringOrDefault(settings, SettingKeySiteSubtitle, defaultSiteSubtitle),
 		APIBaseURL:                       settings[SettingKeyAPIBaseURL],
 		ContactInfo:                      settings[SettingKeyContactInfo],
 		DocURL:                           settings[SettingKeyDocURL],
 		HomeContent:                      settings[SettingKeyHomeContent],
+		CompactHomeEnabled:               settings[SettingKeyCompactHomeEnabled] == "true",
 		HideCcsImportButton:              settings[SettingKeyHideCcsImportButton] == "true",
 		PurchaseSubscriptionEnabled:      settings[SettingKeyPurchaseSubscriptionEnabled] == "true",
 		PurchaseSubscriptionURL:          strings.TrimSpace(settings[SettingKeyPurchaseSubscriptionURL]),
@@ -332,7 +442,10 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 
 		AvailableChannelsEnabled: settings[SettingKeyAvailableChannelsEnabled] == "true",
 
-		AffiliateEnabled: settings[SettingKeyAffiliateEnabled] == "true",
+		ModelPlazaEnabled:     settings[SettingKeyModelPlazaEnabled] == "true",
+		ModelPlazaRequireAuth: settings[SettingKeyModelPlazaRequireAuth] == "true",
+
+		AffiliateEnabled: !isFalseSettingValue(settings[SettingKeyAffiliateEnabled]),
 
 		RiskControlEnabled: settings[SettingKeyRiskControlEnabled] == "true",
 
@@ -414,6 +527,33 @@ func (s *SettingService) GetAvailableChannelsRuntime(ctx context.Context) Availa
 	}
 }
 
+// ModelPlazaRuntime is the lightweight view of the model-plaza feature consumed
+// by the public plaza handler.
+type ModelPlazaRuntime struct {
+	Enabled     bool
+	RequireAuth bool
+	Description string
+}
+
+// GetModelPlazaRuntime reads the model-plaza feature switches directly from the
+// settings store. Fail-closed: on error returns Enabled=false, matching the
+// opt-in default (unknown ↔ disabled).
+func (s *SettingService) GetModelPlazaRuntime(ctx context.Context) ModelPlazaRuntime {
+	vals, err := s.settingRepo.GetMultiple(ctx, []string{
+		SettingKeyModelPlazaEnabled,
+		SettingKeyModelPlazaRequireAuth,
+		SettingKeyModelPlazaDescription,
+	})
+	if err != nil {
+		return ModelPlazaRuntime{Enabled: false}
+	}
+	return ModelPlazaRuntime{
+		Enabled:     vals[SettingKeyModelPlazaEnabled] == "true",
+		RequireAuth: vals[SettingKeyModelPlazaRequireAuth] == "true",
+		Description: vals[SettingKeyModelPlazaDescription],
+	}
+}
+
 // IsUserErrorViewAllowed reads the user-facing error-requests visibility switch
 // directly from the settings store. Fail-closed: on error returns false (opt-in default).
 func (s *SettingService) IsUserErrorViewAllowed(ctx context.Context) bool {
@@ -446,6 +586,7 @@ type PublicSettingsInjectionPayload struct {
 	PasswordResetEnabled             bool                     `json:"password_reset_enabled"`
 	InvitationCodeEnabled            bool                     `json:"invitation_code_enabled"`
 	TotpEnabled                      bool                     `json:"totp_enabled"`
+	PasskeyEnabled                   bool                     `json:"passkey_enabled"`
 	LoginAgreementEnabled            bool                     `json:"login_agreement_enabled"`
 	LoginAgreementMode               string                   `json:"login_agreement_mode"`
 	LoginAgreementUpdatedAt          string                   `json:"login_agreement_updated_at"`
@@ -460,6 +601,7 @@ type PublicSettingsInjectionPayload struct {
 	ContactInfo                      string                   `json:"contact_info"`
 	DocURL                           string                   `json:"doc_url"`
 	HomeContent                      string                   `json:"home_content"`
+	CompactHomeEnabled               bool                     `json:"compact_home_enabled"`
 	HideCcsImportButton              bool                     `json:"hide_ccs_import_button"`
 	PurchaseSubscriptionEnabled      bool                     `json:"purchase_subscription_enabled"`
 	PurchaseSubscriptionURL          string                   `json:"purchase_subscription_url"`
@@ -494,6 +636,8 @@ type PublicSettingsInjectionPayload struct {
 	ChannelMonitorEnabled                bool `json:"channel_monitor_enabled"`
 	ChannelMonitorDefaultIntervalSeconds int  `json:"channel_monitor_default_interval_seconds"`
 	AvailableChannelsEnabled             bool `json:"available_channels_enabled"`
+	ModelPlazaEnabled                    bool `json:"model_plaza_enabled"`
+	ModelPlazaRequireAuth                bool `json:"model_plaza_require_auth"`
 	AffiliateEnabled                     bool `json:"affiliate_enabled"`
 	RiskControlEnabled                   bool `json:"risk_control_enabled"`
 	AllowUserViewErrorRequests           bool `json:"allow_user_view_error_requests"`
@@ -515,6 +659,7 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		PasswordResetEnabled:             settings.PasswordResetEnabled,
 		InvitationCodeEnabled:            settings.InvitationCodeEnabled,
 		TotpEnabled:                      settings.TotpEnabled,
+		PasskeyEnabled:                   settings.PasskeyEnabled,
 		LoginAgreementEnabled:            settings.LoginAgreementEnabled,
 		LoginAgreementMode:               settings.LoginAgreementMode,
 		LoginAgreementUpdatedAt:          settings.LoginAgreementUpdatedAt,
@@ -529,6 +674,7 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		ContactInfo:                      settings.ContactInfo,
 		DocURL:                           settings.DocURL,
 		HomeContent:                      settings.HomeContent,
+		CompactHomeEnabled:               settings.CompactHomeEnabled,
 		HideCcsImportButton:              settings.HideCcsImportButton,
 		PurchaseSubscriptionEnabled:      settings.PurchaseSubscriptionEnabled,
 		PurchaseSubscriptionURL:          settings.PurchaseSubscriptionURL,
@@ -559,6 +705,8 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		ChannelMonitorEnabled:                settings.ChannelMonitorEnabled,
 		ChannelMonitorDefaultIntervalSeconds: settings.ChannelMonitorDefaultIntervalSeconds,
 		AvailableChannelsEnabled:             settings.AvailableChannelsEnabled,
+		ModelPlazaEnabled:                    settings.ModelPlazaEnabled,
+		ModelPlazaRequireAuth:                settings.ModelPlazaRequireAuth,
 		AffiliateEnabled:                     settings.AffiliateEnabled,
 		RiskControlEnabled:                   settings.RiskControlEnabled,
 		AllowUserViewErrorRequests:           settings.AllowUserViewErrorRequests,

@@ -57,6 +57,11 @@ func (User) Fields() []ent.Field {
 		field.String("status").
 			MaxLen(20).
 			Default(domain.StatusActive),
+		// Persisted raw epoch for invalidating all access and refresh tokens belonging to a user.
+		// JWT claims XOR this epoch with the legacy email/password fingerprint, so zero
+		// preserves tokens issued before this column was introduced.
+		field.Int64("token_version").
+			Default(0),
 
 		// Optional profile fields (added later; default '' in DB migration)
 		field.String("username").

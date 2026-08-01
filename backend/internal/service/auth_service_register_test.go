@@ -479,7 +479,7 @@ func TestAuthService_SendVerifyCode_EmailVerifyDisabled(t *testing.T) {
 	service := newAuthService(repo, map[string]string{
 		SettingKeyRegistrationEnabled: "true",
 		SettingKeyEmailVerifyEnabled:  "false",
-	}, &emailCacheStub{})
+	}, &emailCacheStub{}, nil)
 
 	err := service.SendVerifyCode(context.Background(), "user@test.com")
 	require.ErrorIs(t, err, ErrEmailVerifyRequired)
@@ -490,7 +490,7 @@ func TestAuthService_SendVerifyCodeAsync_EmailVerifyDisabled(t *testing.T) {
 	service := newAuthService(repo, map[string]string{
 		SettingKeyRegistrationEnabled: "true",
 		SettingKeyEmailVerifyEnabled:  "false",
-	}, &emailCacheStub{})
+	}, &emailCacheStub{}, nil)
 
 	result, err := service.SendVerifyCodeAsync(context.Background(), "user@test.com")
 	require.Nil(t, result)
@@ -519,6 +519,7 @@ func TestAuthService_SendVerifyCodeAsync_EmailNotConfigured(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 	)
 	defer service.emailQueueService.Stop()
 
@@ -540,7 +541,7 @@ func TestAuthService_SendVerifyCodeAsync_RejectsDuplicateBeforeQueue(t *testing.
 		SettingKeySMTPUsername:        "smtp-user",
 		SettingKeySMTPPassword:        "smtp-pass",
 		SettingKeySMTPFrom:            "no-reply@example.com",
-	}, cache)
+	}, cache, nil)
 
 	result, err := service.SendVerifyCodeAsync(context.Background(), "user@test.com")
 	require.Nil(t, result)

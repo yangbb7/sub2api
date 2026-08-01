@@ -148,12 +148,12 @@ func TestGetDashboardStatsUsesPaidRangeAndRequestedTimezone(t *testing.T) {
 	stats, err := svc.GetDashboardStats(ctx, PaymentDateRange{StartTime: start, EndTime: end, Location: loc})
 	require.NoError(t, err)
 	require.Equal(t, 3, stats.TotalCount)
-	require.Equal(t, 60.0, stats.TotalAmount)
-	require.Equal(t, 20.0, stats.AvgAmount)
+	require.Equal(t, CurrencyAmounts{"CNY": 60}, stats.TotalAmount)
+	require.Equal(t, CurrencyAmounts{"CNY": 20}, stats.AvgAmount)
 	require.Equal(t, 1, stats.PendingOrders)
 	require.Len(t, stats.DailySeries, 2)
-	require.Equal(t, DailyStats{Date: "2026-07-01", Amount: 30, Count: 2}, stats.DailySeries[0])
-	require.Equal(t, DailyStats{Date: "2026-07-02", Amount: 30, Count: 1}, stats.DailySeries[1])
+	require.Equal(t, DailyStats{Date: "2026-07-01", Amount: CurrencyAmounts{"CNY": 30}, Count: 2}, stats.DailySeries[0])
+	require.Equal(t, DailyStats{Date: "2026-07-02", Amount: CurrencyAmounts{"CNY": 30}, Count: 1}, stats.DailySeries[1])
 }
 
 type paymentAdminTestOrder struct {

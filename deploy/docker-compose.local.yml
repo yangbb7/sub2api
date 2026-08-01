@@ -27,6 +27,8 @@ services:
     image: ${GATEWAY_IMAGE:-ghcr.io/yangbb7/gateway:latest}
     container_name: gateway
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     ulimits:
       nofile:
         soft: 100000

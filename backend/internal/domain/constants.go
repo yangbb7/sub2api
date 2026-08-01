@@ -79,7 +79,7 @@ var DefaultAntigravityModelMapping = map[string]string{
 	// Claude 白名单
 	"claude-fable-5":             "claude-fable-5",           // 官方模型
 	"claude-opus-4-8":            "claude-opus-4-8",          // 官方模型
-	"claude-opus-4-7":            "claude-opus-4-6-thinking", // Free 账号当前未暴露 4.7
+	"claude-opus-4-7":            "claude-opus-4-7",          // 官方模型
 	"claude-opus-4-6-thinking":   "claude-opus-4-6-thinking", // 官方模型
 	"claude-opus-4-6":            "claude-opus-4-6-thinking", // 简称映射
 	"claude-opus-4-5-thinking":   "claude-opus-4-6-thinking", // 迁移旧模型

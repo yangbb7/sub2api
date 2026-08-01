@@ -25,15 +25,15 @@ func TestDefaultAntigravityModelMapping_ImageCompatibilityAliases(t *testing.T) 
 	}
 }
 
-func TestDefaultAntigravityModelMapping_Opus47Fallback(t *testing.T) {
+func TestDefaultAntigravityModelMapping_Opus47Direct(t *testing.T) {
 	t.Parallel()
 
 	got, ok := DefaultAntigravityModelMapping["claude-opus-4-7"]
 	if !ok {
 		t.Fatal("expected mapping for claude-opus-4-7 to exist")
 	}
-	if got != "claude-opus-4-6-thinking" {
-		t.Fatalf("unexpected opus 4.7 fallback: got %q want %q", got, "claude-opus-4-6-thinking")
+	if got != "claude-opus-4-7" {
+		t.Fatalf("unexpected opus 4.7 mapping: got %q want %q", got, "claude-opus-4-7")
 	}
 }
 

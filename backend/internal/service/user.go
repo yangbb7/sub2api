@@ -23,9 +23,9 @@ type User struct {
 	Concurrency    int
 	Status         string
 	AllowedGroups  []int64
-	TokenVersion   int64 // Incremented on password change to invalidate existing tokens
-	// TokenVersionResolved indicates TokenVersion already contains the fingerprint-derived
-	// value expected in JWT claims and refresh-token state.
+	TokenVersion   int64 // Raw persisted epoch, or resolved JWT version when marked below.
+	// TokenVersionResolved prevents applying the legacy email/password fingerprint twice
+	// after UserService prepares a user for access-token middleware validation.
 	TokenVersionResolved bool
 	SignupSource         string
 	LastLoginAt          *time.Time

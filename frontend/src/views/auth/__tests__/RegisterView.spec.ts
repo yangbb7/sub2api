@@ -34,7 +34,7 @@ vi.mock('vue-i18n', async () => {
   return {
     ...actual,
     useI18n: () => ({
-      t: (key: string, params?: Record<string, string | number>) => {
+      t: (key: string, _params?: Record<string, string | number>) => {
         return key
       },
       locale: { value: 'zh-CN' },

@@ -208,7 +208,7 @@
         </div>
 
         <!-- Affiliate invite code input (optional) -->
-        <div v-if="affiliateCodeFieldVisible">
+        <div v-if="affiliateCodeFieldVisible" data-testid="affiliate-invitation-field">
           <label for="aff_code" class="input-label">
             {{ t('auth.affiliateCodeLabel') }}
             <span class="ml-1 text-xs font-normal text-gray-400 dark:text-dark-500">({{ t('common.optional') }})</span>
@@ -278,7 +278,7 @@
         </div>
 
         <!-- Turnstile Widget -->
-        <div v-if="turnstileEnabled && turnstileSiteKey">
+        <div v-if="turnstileEnabled && turnstileSiteKey" data-testid="registration-turnstile">
           <TurnstileWidget
             ref="turnstileRef"
             :site-key="turnstileSiteKey"

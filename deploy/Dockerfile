@@ -122,8 +122,9 @@ RUN addgroup -g 1000 gateway && \
 # Set working directory
 WORKDIR /app
 
-# Copy binary from builder
+# Copy binary and runtime fallback resources from builder
 COPY --from=backend-builder /app/gateway /app/gateway
+COPY --from=backend-builder --chown=gateway:gateway /app/backend/resources /app/resources
 
 # Create data directory
 RUN mkdir -p /app/data && chown -R gateway:gateway /app
