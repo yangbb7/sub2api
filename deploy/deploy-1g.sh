@@ -78,6 +78,7 @@ PNPM_REGISTRY="${PNPM_REGISTRY:-https://registry.npmjs.org/}"
 LOCAL_BUILD_GOMAXPROCS="${LOCAL_BUILD_GOMAXPROCS:-4}"
 LOCAL_BUILD_GOMEMLIMIT="${LOCAL_BUILD_GOMEMLIMIT:-4GiB}"
 LOCAL_BUILD_GCFLAGS="${LOCAL_BUILD_GCFLAGS:-}"
+SOURCE_UPLOAD_RETRIES="${SOURCE_UPLOAD_RETRIES:-3}"
 BUILD_COMMIT="${BUILD_COMMIT:-$(git -C "${ROOT_DIR}" rev-parse --short=12 HEAD 2>/dev/null || printf 'archive')}"
 BUILD_DATE="${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 if [ -z "${REMOTE_DOCKERFILE:-}" ]; then
@@ -671,6 +672,7 @@ validate_build_strategy
 validate_docker_install_method
 validate_positive_int BUILD_GOMAXPROCS "${BUILD_GOMAXPROCS}"
 validate_positive_int LOCAL_BUILD_GOMAXPROCS "${LOCAL_BUILD_GOMAXPROCS}"
+validate_positive_int SOURCE_UPLOAD_RETRIES "${SOURCE_UPLOAD_RETRIES}"
 validate_env_token LOCAL_BUILD_GOMEMLIMIT "${LOCAL_BUILD_GOMEMLIMIT}"
 validate_env_token LOCAL_BUILD_GCFLAGS "${LOCAL_BUILD_GCFLAGS}"
 
@@ -739,6 +741,7 @@ case "${DEPLOY_MODE}" in
   build)
     need ssh
     need scp
+    need rsync
     need tar
     need gzip
     if [ "${BUILD_STRATEGY}" = local-binary ]; then
@@ -840,6 +843,24 @@ run_scp() {
     SSHPASS="${SSH_PASSWORD}" sshpass -e scp "${SCP_ARGS[@]}" "$@"
   else
     scp "${SCP_ARGS[@]}" "$@"
+  fi
+}
+
+rsync_ssh_command() {
+  local arg
+  printf '%q' ssh
+  for arg in "${SSH_ARGS[@]}"; do
+    printf ' %q' "${arg}"
+  done
+}
+
+run_rsync() {
+  local ssh_command
+  ssh_command="$(rsync_ssh_command)"
+  if [ -n "${SSH_PASSWORD}" ]; then
+    SSHPASS="${SSH_PASSWORD}" sshpass -e rsync -e "${ssh_command}" "$@"
+  else
+    rsync -e "${ssh_command}" "$@"
   fi
 }
 
@@ -1002,6 +1023,26 @@ remote_build_image() {
   run_remote_root "set -eu; echo '--- remote memory before build ---'; free -m || true; rm -rf '${remote_upload_dir}/src'; mkdir -p '${remote_upload_dir}/src'; tar -xzf '${remote_upload_dir}/source.tar.gz' -C '${remote_upload_dir}/src'; cd '${remote_upload_dir}/src'; DOCKER_BUILDKIT=0 docker build --build-arg NODE_OPTIONS='${BUILD_NODE_OPTIONS}' --build-arg BUILD_GOMAXPROCS='${BUILD_GOMAXPROCS}' --build-arg PNPM_REGISTRY='${PNPM_REGISTRY}' --build-arg COMMIT='${BUILD_COMMIT}' --build-arg DATE='${BUILD_DATE}' -f '${REMOTE_DOCKERFILE}' -t '${IMAGE_NAME}' .; cd /; rm -rf '${remote_upload_dir}/src' '${remote_upload_dir}/source.tar.gz'; docker image prune -f >/dev/null || true"
 }
 
+upload_source_archive() {
+  local archive="$1"
+  local destination="$2"
+  local attempt
+
+  for ((attempt = 1; attempt <= SOURCE_UPLOAD_RETRIES; attempt++)); do
+    echo "Uploading source archive (attempt ${attempt}/${SOURCE_UPLOAD_RETRIES})..."
+    if run_rsync --partial "${archive}" "${destination}"; then
+      return 0
+    fi
+    if [ "${attempt}" -lt "${SOURCE_UPLOAD_RETRIES}" ]; then
+      echo "Source archive upload interrupted; retrying with the retained partial transfer..." >&2
+      sleep 3
+    fi
+  done
+
+  echo "Source archive upload failed after ${SOURCE_UPLOAD_RETRIES} attempt(s)." >&2
+  return 1
+}
+
 remote_validate_caddyfile() {
   echo "Validating Caddyfile on remote host..."
   run_remote_root "docker run --rm -e DOMAIN='${DOMAIN}' -v '${remote_upload_dir}/Caddyfile.1g:/etc/caddy/Caddyfile:ro' caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null"
@@ -1058,7 +1099,7 @@ if [ "${DEPLOY_MODE}" = build ]; then
   run_remote_root_script "${DEPLOY_DIR}/remote-1g-bootstrap.sh" bash "REMOTE_DIR='${REMOTE_DIR}' SWAP_SIZE='${SWAP_SIZE}' DOCKER_INSTALL_METHOD='${DOCKER_INSTALL_METHOD}'"
   create_source_archive
   run_ssh "${SSH_TARGET}" "rm -rf '${remote_upload_dir}' && mkdir -p '${remote_upload_dir}'"
-  run_scp "${tmp_dir}/source.tar.gz" "${SSH_TARGET}:${remote_upload_dir}/"
+  upload_source_archive "${tmp_dir}/source.tar.gz" "${SSH_TARGET}:${remote_upload_dir}/source.tar.gz"
   remote_build_image
   run_ssh "${SSH_TARGET}" "rm -rf '${remote_upload_dir}'" >/dev/null 2>&1 || true
   remote_upload_committed=true

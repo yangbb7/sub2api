@@ -44,17 +44,17 @@ install_base_packages() {
   if command -v apt-get >/dev/null 2>&1; then
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
-    apt-get install -y ca-certificates curl gzip tar openssl
+    apt-get install -y ca-certificates curl gzip tar openssl rsync
     return
   fi
 
   if command -v dnf >/dev/null 2>&1; then
-    dnf install -y ca-certificates curl gzip tar openssl
+    dnf install -y ca-certificates curl gzip tar openssl rsync
     return
   fi
 
   if command -v yum >/dev/null 2>&1; then
-    yum install -y ca-certificates curl gzip tar openssl
+    yum install -y ca-certificates curl gzip tar openssl rsync
     return
   fi
 
