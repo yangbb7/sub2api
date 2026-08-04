@@ -8,6 +8,7 @@ DOMAIN="${DOMAIN:-api.braintech.icu}"
 REMOTE_DIR="${REMOTE_DIR:-/opt/gateway}"
 TARGET_REGION="${TARGET_REGION:-jp}"
 SSH_CONNECT_TIMEOUT="${SSH_CONNECT_TIMEOUT:-15}"
+SSH_BIND_ADDRESS="${SSH_BIND_ADDRESS:-}"
 HEALTH_ATTEMPTS="${HEALTH_ATTEMPTS:-40}"
 HEALTH_SLEEP="${HEALTH_SLEEP:-0.2}"
 
@@ -70,7 +71,7 @@ default_from_env_file() {
 load_connection_defaults() {
   local name
   for name in \
-    TARGET_REGION DOMAIN REMOTE_DIR SSH_TARGET SSH_PORT SSH_KEY SSH_PASSWORD SSH_PASS SUDO_PASSWORD \
+    TARGET_REGION DOMAIN REMOTE_DIR SSH_TARGET SSH_PORT SSH_KEY SSH_PASSWORD SSH_PASS SUDO_PASSWORD SSH_BIND_ADDRESS \
     JP_SSH_TARGET JP_SSH_PORT JP_SSH_KEY JP_SSH_PASSWORD JP_SSH_PASS \
     HK_SSH_TARGET HK_SSH_PORT HK_SSH_KEY HK_SSH_PASSWORD HK_SSH_PASS
   do
@@ -99,6 +100,11 @@ load_connection_defaults() {
   if [ -n "${SSH_KEY:-}" ] && [ -n "${SSH_PASSWORD:-}" ]; then
     die "Use SSH_KEY or SSH_PASS/SSH_PASSWORD, not both."
   fi
+  if [ -n "${SSH_BIND_ADDRESS:-}" ]; then
+    case "${SSH_BIND_ADDRESS}" in
+      *[!0-9.]*|.*|*..*|*.) die "SSH_BIND_ADDRESS must be an IPv4 address." ;;
+    esac
+  fi
 }
 
 ssh_args() {
@@ -110,6 +116,7 @@ ssh_args() {
   )
   [ -n "${SSH_PORT:-}" ] && args+=(-p "${SSH_PORT}")
   [ -n "${SSH_KEY:-}" ] && args+=(-i "${SSH_KEY}")
+  [ -n "${SSH_BIND_ADDRESS:-}" ] && args+=(-o "BindAddress=${SSH_BIND_ADDRESS}")
   printf '%s\0' "${args[@]}"
 }
 

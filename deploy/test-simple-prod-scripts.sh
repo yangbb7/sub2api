@@ -164,6 +164,8 @@ assert_contains "${DEPLOY_SCRIPT}" 'docker stop.*ACTIVE_GATEWAY' \
   "deploy.sh serial mode must stop the active gateway before starting the full replacement"
 assert_contains "${DEPLOY_SCRIPT}" 'apply_steady_state_resource_limits' \
   "deploy.sh must apply the 2C2G Caddy/Postgres/Redis memory baseline after cutover"
+assert_contains "${DEPLOY_SCRIPT}" 'BindAddress=\$\{SSH_BIND_ADDRESS\}' \
+  "deploy.sh must support binding operations to a healthy local SSH interface"
 
 strategy_values="$({
   ENV_FILE="${runtime_env}" bash -s "${testable_deploy_script}" <<'BASH'
@@ -220,6 +222,8 @@ assert_contains "${ROLLBACK_SCRIPT}" 'docker ps -a' \
   "rollback.sh must show and select stopped serial rollback containers"
 assert_contains "${ROLLBACK_SCRIPT}" 'docker stop.*current' \
   "rollback.sh must avoid overlapping full gateways when restoring a stopped target"
+assert_contains "${ROLLBACK_SCRIPT}" 'BindAddress=\$\{SSH_BIND_ADDRESS\}' \
+  "rollback.sh must use the configured healthy local SSH interface"
 
 for path in "${DEPLOY_SCRIPT}" "${ROLLBACK_SCRIPT}"; do
   assert_not_contains "${path}" 'docker compose .*up|docker compose .*down|docker compose .*force-recreate' \

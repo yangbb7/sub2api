@@ -8,6 +8,7 @@ DOMAIN="${DOMAIN:-api.braintech.icu}"
 REMOTE_DIR="${REMOTE_DIR:-/opt/gateway}"
 TARGET_REGION="${TARGET_REGION:-jp}"
 SSH_CONNECT_TIMEOUT="${SSH_CONNECT_TIMEOUT:-15}"
+SSH_BIND_ADDRESS="${SSH_BIND_ADDRESS:-}"
 HEALTH_ATTEMPTS="${HEALTH_ATTEMPTS:-60}"
 HEALTH_SLEEP="${HEALTH_SLEEP:-0.2}"
 HEALTH_MIN_SUCCESS="${HEALTH_MIN_SUCCESS:-10}"
@@ -92,7 +93,7 @@ default_from_env_file() {
 load_connection_defaults() {
   local name
   for name in \
-    TARGET_REGION DOMAIN REMOTE_DIR SSH_TARGET SSH_PORT SSH_KEY SSH_PASSWORD SSH_PASS SUDO_PASSWORD \
+    TARGET_REGION DOMAIN REMOTE_DIR SSH_TARGET SSH_PORT SSH_KEY SSH_PASSWORD SSH_PASS SUDO_PASSWORD SSH_BIND_ADDRESS \
     DEPLOY_STRATEGY SERIAL_CANARY_MEMORY_LIMIT BLUE_GREEN_MIN_MEMORY_KB \
     GATEWAY_MEMORY_LIMIT GATEWAY_GOMAXPROCS GATEWAY_GOMEMLIMIT \
     GATEWAY_STREAM_KEEPALIVE_INTERVAL GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED \
@@ -132,6 +133,11 @@ load_connection_defaults() {
   [ -n "${SSH_TARGET:-}" ] || die "SSH_TARGET is empty. Set TARGET_REGION=jp with JP_SSH_TARGET, or export SSH_TARGET."
   if [ -n "${SSH_KEY:-}" ] && [ -n "${SSH_PASSWORD:-}" ]; then
     die "Use SSH_KEY or SSH_PASS/SSH_PASSWORD, not both."
+  fi
+  if [ -n "${SSH_BIND_ADDRESS:-}" ]; then
+    case "${SSH_BIND_ADDRESS}" in
+      *[!0-9.]*|.*|*..*|*.) die "SSH_BIND_ADDRESS must be an IPv4 address." ;;
+    esac
   fi
 }
 
@@ -208,6 +214,7 @@ ssh_args() {
   )
   [ -n "${SSH_PORT:-}" ] && args+=(-p "${SSH_PORT}")
   [ -n "${SSH_KEY:-}" ] && args+=(-i "${SSH_KEY}")
+  [ -n "${SSH_BIND_ADDRESS:-}" ] && args+=(-o "BindAddress=${SSH_BIND_ADDRESS}")
   printf '%s\0' "${args[@]}"
 }
 
@@ -472,6 +479,7 @@ build_remote_image() {
     SSH_TARGET="${SSH_TARGET}" \
     SSH_PORT="${SSH_PORT:-}" \
     SSH_KEY="${SSH_KEY:-}" \
+    SSH_BIND_ADDRESS="${SSH_BIND_ADDRESS:-}" \
     SSH_PASS="${SSH_PASSWORD:-}" \
     SUDO_PASSWORD="${SUDO_PASSWORD:-}" \
     REMOTE_DIR="${REMOTE_DIR}" \
@@ -565,7 +573,7 @@ switch_back() {
   local target="$1"
   echo "Verification failed. Switching Caddy back to ${target}..." >&2
   ROLLBACK_TARGET="${target}" ENV_FILE="${ENV_FILE}" DOMAIN="${DOMAIN}" REMOTE_DIR="${REMOTE_DIR}" TARGET_REGION="${TARGET_REGION}" \
-    SSH_TARGET="${SSH_TARGET}" SSH_PORT="${SSH_PORT:-}" SSH_KEY="${SSH_KEY:-}" SSH_PASS="${SSH_PASSWORD:-}" SUDO_PASSWORD="${SUDO_PASSWORD:-}" \
+    SSH_TARGET="${SSH_TARGET}" SSH_PORT="${SSH_PORT:-}" SSH_KEY="${SSH_KEY:-}" SSH_BIND_ADDRESS="${SSH_BIND_ADDRESS:-}" SSH_PASS="${SSH_PASSWORD:-}" SUDO_PASSWORD="${SUDO_PASSWORD:-}" \
     "${SCRIPT_DIR}/rollback.sh" to "${target}" >/dev/null || true
 }
 
