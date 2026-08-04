@@ -215,7 +215,9 @@ gateway:
   openai_high_effort_first_output_timeout_seconds: 0
   # Reversible /v1/responses first-output governance. Keep disabled during
   # baseline observation; the 10s total / 6s first-account split leaves one
-  # short safe retry without extending the client/CDN wait window.
+  # short safe retry without extending the client/CDN wait window. When
+  # enabled, account-health circuit routing protects all stream selections;
+  # rollout_percent only controls the bounded first-output budget.
   openai_stream_governance:
     enabled: false
     rollout_percent: 10

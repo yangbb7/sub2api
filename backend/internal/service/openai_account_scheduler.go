@@ -815,7 +815,7 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 			errorRate, ttft, hasTTFT = s.stats.snapshot(account.ID)
 		}
 		streamHealth := openAIStreamHealthSnapshot{}
-		if openAIStreamGovernanceActive(ctx) && s.stats != nil {
+		if s.service.openAIStreamHealthRoutingEnabled() && s.stats != nil {
 			streamHealth = s.stats.streamHealthSnapshot(account.ID)
 		}
 		allCandidates = append(allCandidates, openAIAccountCandidateScore{
@@ -985,7 +985,7 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 	}
 	candidates, quotaPressureRetry := splitQuotaPressureCandidates(candidates, now)
 	var streamCircuitRetry []openAIAccountCandidateScore
-	if openAIStreamGovernanceActive(ctx) {
+	if s.service.openAIStreamHealthRoutingEnabled() {
 		candidates, streamCircuitRetry = splitOpenAIStreamCircuitCandidates(candidates)
 	}
 	candidates, slowTTFTRetry := s.splitSlowTTFTCandidates(candidates)
@@ -1080,7 +1080,7 @@ func (s *defaultOpenAIAccountScheduler) splitSlowTTFTCandidates(
 func splitOpenAIStreamCircuitCandidates(
 	candidates []openAIAccountCandidateScore,
 ) ([]openAIAccountCandidateScore, []openAIAccountCandidateScore) {
-	if len(candidates) <= openAIAccountScheduleMinPrimary {
+	if len(candidates) <= 1 {
 		return candidates, nil
 	}
 	primary := make([]openAIAccountCandidateScore, 0, len(candidates))
@@ -1092,7 +1092,7 @@ func splitOpenAIStreamCircuitCandidates(
 		}
 		primary = append(primary, candidate)
 	}
-	if len(primary) < openAIAccountScheduleMinPrimary || len(circuitOpen) == 0 {
+	if len(primary) == 0 || len(circuitOpen) == 0 {
 		return candidates, nil
 	}
 	return primary, circuitOpen

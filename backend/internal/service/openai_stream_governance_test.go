@@ -122,9 +122,40 @@ func TestOpenAIStreamHealthCircuitMovesAccountBehindHealthyCandidates(t *testing
 	primary, retry := splitOpenAIStreamCircuitCandidates([]openAIAccountCandidateScore{
 		{account: &Account{ID: 1}, streamHealth: snapshot},
 		{account: &Account{ID: 2}},
-		{account: &Account{ID: 3}},
 	})
-	require.Len(t, primary, 2)
+	require.Len(t, primary, 1)
 	require.Len(t, retry, 1)
+	require.Equal(t, int64(2), primary[0].account.ID)
 	require.Equal(t, int64(1), retry[0].account.ID)
+}
+
+func TestOpenAIStreamHealthRoutingProtectsWholePoolBeforeBudgetRollout(t *testing.T) {
+	stats := newOpenAIAccountRuntimeStats()
+	policy := config.GatewayOpenAIStreamGovernanceConfig{
+		Enabled:                   true,
+		RolloutPercent:            10,
+		HealthTTFTMs:              8000,
+		CircuitMinSamples:         3,
+		CircuitFailureRatePercent: 50,
+		CircuitCooldownSeconds:    300,
+	}
+	for range 3 {
+		stats.reportStreamHealth(14, nil, "first_output_timeout", policy)
+	}
+
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIStreamGovernance = policy
+	cfg.Gateway.OpenAIWS.LBTopK = 7
+	scheduler := &defaultOpenAIAccountScheduler{
+		service: &OpenAIGatewayService{cfg: cfg},
+		stats:   stats,
+	}
+	plan := scheduler.buildOpenAIAccountLoadPlan(context.Background(), OpenAIAccountScheduleRequest{}, []*Account{
+		{ID: 14, Platform: PlatformOpenAI, Type: AccountTypeOAuth},
+		{ID: 23, Platform: PlatformOpenAI, Type: AccountTypeOAuth},
+	}, map[int64]*AccountLoadInfo{})
+
+	require.Equal(t, []int64{23}, openAIPlanAccountIDs(plan.candidates))
+	require.Equal(t, []int64{14}, openAIPlanAccountIDs(plan.slowTTFTRetry))
+	require.Equal(t, 1, plan.candidateCount)
 }

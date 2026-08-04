@@ -48,7 +48,7 @@ ORIGIN_PROBE_CLIENT_KEY=/secure/path/client.key \
 ## 灰度顺序与开关
 
 1. 先保持 `GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED=false`、`GATEWAY_STREAM_KEEPALIVE_INTERVAL=0`，积累影子观测和隔离实验。
-2. 就绪后在 10% 确定性请求 cohort 启用：`GATEWAY_STREAM_KEEPALIVE_INTERVAL=5`、`GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED=true`、`GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT=10`。
+2. 就绪后在 10% 确定性请求 cohort 启用首输出预算：`GATEWAY_STREAM_KEEPALIVE_INTERVAL=5`、`GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED=true`、`GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT=10`。启用后账户健康熔断会为全部流式选路重排候选，但熔断账户仍保留为回退；只有 10 秒首输出预算受该 cohort 限制。
 3. 连续 24 小时指标无回归后再扩大。心跳只在收到上游响应头后发出，能避免代理空闲断开，不能修复“上游响应头未到”。
 
 首输出调度总预算为 10 秒：第一个候选账户最多 6 秒，第二个候选账户最多 4 秒。跨账户重放只允许尚未向客户端输出、没有 `tools`、没有 `previous_response_id`，并且携带 `Idempotency-Key` 的请求；其他请求只依靠账户健康路由避开慢账户。账户健康窗口按近 5/15 分钟 TTFT、首输出超时率和首语义输出前取消率熔断；熔断账户仍保留为容量不足时的后备。

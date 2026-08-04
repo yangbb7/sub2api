@@ -101,6 +101,20 @@ func openAIStreamGovernanceActive(ctx context.Context) bool {
 	return plan != nil && plan.enabled
 }
 
+// openAIStreamHealthRoutingEnabled deliberately has a broader scope than the
+// bounded first-output-budget rollout. Account health only changes selection
+// order and keeps a circuit-open account as a fallback, so once governance is
+// enabled it can protect every stream without making every request subject to
+// the short first-output budget. This is particularly important while the
+// budget itself is still in a small, reversible rollout cohort.
+func (s *OpenAIGatewayService) openAIStreamHealthRoutingEnabled() bool {
+	if s == nil || s.cfg == nil {
+		return false
+	}
+	cfg := s.cfg.Gateway.OpenAIStreamGovernance
+	return cfg.Enabled && cfg.RolloutPercent > 0
+}
+
 // WithOpenAIStreamGovernancePlan applies the deterministic rollout decision to
 // this request. The decision is keyed by the gateway request ID so retries do
 // not drift between cohorts. reserveBackup is true only when the handler has
