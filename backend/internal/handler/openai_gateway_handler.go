@@ -322,10 +322,15 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", invalidStreamFieldTypeMessage)
 		return
 	}
+	safePreOutputReplay := false
 	if reqStream {
+		// The stream budget depends on whether the handler may safely replay a
+		// pre-semantic attempt on another account. Stateful Codex turns cannot
+		// do that, so they must keep the full total budget on their sole account.
+		safePreOutputReplay = openAIResponsesSafePreOutputReplay(c, body)
 		service.StartStreamAttempt(c, requestStart, body, reqModel, true)
 		defer service.FinalizeStreamAttempt(c)
-		if governedCtx := h.gatewayService.WithOpenAIStreamGovernancePlan(c, requestStart); governedCtx != nil {
+		if governedCtx := h.gatewayService.WithOpenAIStreamGovernancePlan(c, requestStart, safePreOutputReplay); governedCtx != nil {
 			c.Request = c.Request.WithContext(governedCtx)
 		}
 	}

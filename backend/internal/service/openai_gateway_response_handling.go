@@ -725,7 +725,13 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if clientDisconnected {
 				continue
 			}
-			if eventInProgress {
+			// Before the first semantic event, guarded frames are still private in
+			// firstOutputStage. A downstream SSE comment can safely precede them
+			// without splitting an event on the wire. This keeps the Cloudflare /
+			// Codex path alive even when an upstream preamble never reaches its
+			// blank-line boundary. Once guard mode ends, retain the legacy rule and
+			// never inject a comment into an open event.
+			if eventInProgress && !guardFirstOutput {
 				continue
 			}
 			if time.Since(lastDownstreamWriteAt) < keepaliveInterval {

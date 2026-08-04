@@ -103,8 +103,12 @@ func openAIStreamGovernanceActive(ctx context.Context) bool {
 
 // WithOpenAIStreamGovernancePlan applies the deterministic rollout decision to
 // this request. The decision is keyed by the gateway request ID so retries do
-// not drift between cohorts.
-func (s *OpenAIGatewayService) WithOpenAIStreamGovernancePlan(c *gin.Context, startedAt time.Time) context.Context {
+// not drift between cohorts. reserveBackup is true only when the handler has
+// established that a pre-semantic cross-account replay is safe. Stateful
+// Responses turns (tools, continuations, and requests without caller
+// idempotency) cannot use a backup account, so their sole attempt receives the
+// complete total budget rather than being cut off at the first-attempt budget.
+func (s *OpenAIGatewayService) WithOpenAIStreamGovernancePlan(c *gin.Context, startedAt time.Time, reserveBackup bool) context.Context {
 	if c == nil || c.Request == nil || s == nil || s.cfg == nil {
 		return nil
 	}
@@ -116,11 +120,17 @@ func (s *OpenAIGatewayService) WithOpenAIStreamGovernancePlan(c *gin.Context, st
 	if startedAt.IsZero() {
 		startedAt = time.Now()
 	}
+	firstAttemptBudget := time.Duration(cfg.FirstAttemptBudgetSeconds) * time.Second
+	backupAttemptBudget := time.Duration(cfg.TotalBudgetSeconds-cfg.FirstAttemptBudgetSeconds) * time.Second
+	if !reserveBackup {
+		firstAttemptBudget = time.Duration(cfg.TotalBudgetSeconds) * time.Second
+		backupAttemptBudget = 0
+	}
 	plan := &openAIStreamGovernancePlan{
 		enabled:             true,
 		totalDeadline:       startedAt.Add(time.Duration(cfg.TotalBudgetSeconds) * time.Second),
-		firstAttemptBudget:  time.Duration(cfg.FirstAttemptBudgetSeconds) * time.Second,
-		backupAttemptBudget: time.Duration(cfg.TotalBudgetSeconds-cfg.FirstAttemptBudgetSeconds) * time.Second,
+		firstAttemptBudget:  firstAttemptBudget,
+		backupAttemptBudget: backupAttemptBudget,
 	}
 	return withOpenAIStreamGovernancePlan(ctx, plan)
 }

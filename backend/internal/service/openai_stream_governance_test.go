@@ -2,11 +2,14 @@ package service
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -53,6 +56,53 @@ func TestOpenAIStreamGovernanceRolloutIsRequestIDDeterministic(t *testing.T) {
 		require.Equal(t, first, openAIStreamGovernanceInRollout(ctx, 10))
 	}
 	require.False(t, openAIStreamGovernanceInRollout(context.Background(), 10))
+}
+
+func TestWithOpenAIStreamGovernancePlanUsesTotalBudgetWhenReplayIsUnsafe(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{
+		OpenAIStreamGovernance: config.GatewayOpenAIStreamGovernanceConfig{
+			Enabled:                   true,
+			RolloutPercent:            100,
+			TotalBudgetSeconds:        10,
+			FirstAttemptBudgetSeconds: 6,
+		},
+	}}}
+	startedAt := time.Now()
+
+	ctx := svc.WithOpenAIStreamGovernancePlan(c, startedAt, false)
+	plan := openAIStreamGovernancePlanFromContext(ctx)
+	require.NotNil(t, plan)
+	first, deadline := plan.claimAttempt(startedAt)
+	require.Equal(t, 10*time.Second, first)
+	require.Equal(t, startedAt.Add(10*time.Second), deadline)
+}
+
+func TestWithOpenAIStreamGovernancePlanReservesBackupForSafeReplay(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{
+		OpenAIStreamGovernance: config.GatewayOpenAIStreamGovernanceConfig{
+			Enabled:                   true,
+			RolloutPercent:            100,
+			TotalBudgetSeconds:        10,
+			FirstAttemptBudgetSeconds: 6,
+		},
+	}}}
+	startedAt := time.Now()
+
+	ctx := svc.WithOpenAIStreamGovernancePlan(c, startedAt, true)
+	plan := openAIStreamGovernancePlanFromContext(ctx)
+	require.NotNil(t, plan)
+	first, firstDeadline := plan.claimAttempt(startedAt)
+	second, secondDeadline := plan.claimAttempt(startedAt.Add(6 * time.Second))
+	require.Equal(t, 6*time.Second, first)
+	require.Equal(t, startedAt.Add(6*time.Second), firstDeadline)
+	require.Equal(t, 4*time.Second, second)
+	require.Equal(t, startedAt.Add(10*time.Second), secondDeadline)
 }
 
 func TestOpenAIStreamHealthCircuitMovesAccountBehindHealthyCandidates(t *testing.T) {

@@ -567,6 +567,46 @@ func TestOpenAINativeFirstOutputTimeoutDisabledPreservesKeepaliveFlush(t *testin
 	require.Contains(t, rec.Body.String(), "response.in_progress")
 }
 
+func TestOpenAINativeFirstOutputTimeoutHeartbeatsDuringOpenPreamble(t *testing.T) {
+	cfg := &config.Config{Gateway: config.GatewayConfig{
+		OpenAIFirstOutputTimeoutSeconds: 2,
+		StreamKeepaliveInterval:         1,
+		MaxLineSize:                     defaultMaxLineSize,
+	}}
+	svc := &OpenAIGatewayService{cfg: cfg, responseHeaderFilter: compileResponseHeaderFilter(cfg)}
+	reader, writer := io.Pipe()
+	trackedBody := &firstOutputCloseTrackingBody{ReadCloser: reader, closed: make(chan struct{})}
+	writerDone := make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		defer func() { _ = writer.Close() }()
+		// The upstream has started an SSE preamble but never finishes its event.
+		// The gateway must still send downstream comments while keeping these
+		// private attempt bytes out of the wire until semantic output exists.
+		_, _ = writer.Write([]byte("data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_stalled\"}}\n"))
+		select {
+		case <-trackedBody.closed:
+		case <-time.After(4 * time.Second):
+		}
+	}()
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"X-Request-Id": []string{"request-stalled"}}, Body: trackedBody}
+
+	_, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, &Account{ID: 1, Platform: PlatformOpenAI}, time.Now(), "model", "model")
+
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Contains(t, rec.Body.String(), ":\n\n")
+	require.NotContains(t, rec.Body.String(), "resp_stalled", "preamble remains private before semantic output")
+	select {
+	case <-writerDone:
+	case <-time.After(time.Second):
+		t.Fatal("first-output timeout did not close the stalled upstream body")
+	}
+}
+
 func TestOpenAINativeFirstOutputFailoverKeepsAttemptHeadersPrivateAfterKeepaliveCommit(t *testing.T) {
 	cfg := &config.Config{Gateway: config.GatewayConfig{
 		OpenAIFirstOutputTimeoutSeconds: 2,
