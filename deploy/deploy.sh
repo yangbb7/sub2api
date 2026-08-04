@@ -21,10 +21,12 @@ PUBLIC_VERIFICATION_SOURCE="${PUBLIC_VERIFICATION_SOURCE:-local}"
 KEEP_ROLLBACKS="${KEEP_ROLLBACKS:-1}"
 DEPLOY_STRATEGY="${DEPLOY_STRATEGY:-auto}"
 # A 2GiB host cannot retain two full 896MiB gateways during a blue-green
-# cutover. The serial strategy validates the image in an isolated capped
-# process, then briefly stops the active gateway before starting the
-# steady-state replacement and reloading Caddy.
-SERIAL_CANARY_MEMORY_LIMIT="${SERIAL_CANARY_MEMORY_LIMIT:-256m}"
+# cutover. The serial strategy briefly overlaps the active gateway with a
+# capped, live candidate, switches Caddy only after it is healthy, then stops
+# the old gateway and restores the candidate to its steady-state limit.
+SERIAL_CANARY_MEMORY_LIMIT="${SERIAL_CANARY_MEMORY_LIMIT:-}"
+SERIAL_DRAIN_SECONDS="${SERIAL_DRAIN_SECONDS:-}"
+SERIAL_MIN_AVAILABLE_KB="${SERIAL_MIN_AVAILABLE_KB:-}"
 BLUE_GREEN_MIN_MEMORY_KB="${BLUE_GREEN_MIN_MEMORY_KB:-3670016}"
 GATEWAY_MEMORY_LIMIT="${GATEWAY_MEMORY_LIMIT:-}"
 GATEWAY_GOMAXPROCS="${GATEWAY_GOMAXPROCS:-}"
@@ -99,7 +101,7 @@ load_connection_defaults() {
   local name
   for name in \
     TARGET_REGION DOMAIN REMOTE_DIR SSH_TARGET SSH_PORT SSH_KEY SSH_PASSWORD SSH_PASS SUDO_PASSWORD SSH_BIND_ADDRESS PUBLIC_VERIFICATION_SOURCE \
-    DEPLOY_STRATEGY SERIAL_CANARY_MEMORY_LIMIT BLUE_GREEN_MIN_MEMORY_KB \
+    DEPLOY_STRATEGY SERIAL_CANARY_MEMORY_LIMIT SERIAL_DRAIN_SECONDS SERIAL_MIN_AVAILABLE_KB BLUE_GREEN_MIN_MEMORY_KB \
     GATEWAY_MEMORY_LIMIT GATEWAY_GOMAXPROCS GATEWAY_GOMEMLIMIT \
     GATEWAY_STREAM_KEEPALIVE_INTERVAL GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED \
     GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS \
@@ -116,6 +118,9 @@ load_connection_defaults() {
   GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT="${GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT:-10}"
   GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS="${GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS:-10}"
   GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS="${GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS:-6}"
+  SERIAL_CANARY_MEMORY_LIMIT="${SERIAL_CANARY_MEMORY_LIMIT:-256m}"
+  SERIAL_DRAIN_SECONDS="${SERIAL_DRAIN_SECONDS:-15}"
+  SERIAL_MIN_AVAILABLE_KB="${SERIAL_MIN_AVAILABLE_KB:-524288}"
   PUBLIC_VERIFICATION_SOURCE="${PUBLIC_VERIFICATION_SOURCE:-local}"
 
   SSH_PASSWORD="${SSH_PASSWORD:-${SSH_PASS:-}}"
@@ -167,6 +172,8 @@ validate_runtime_overrides() {
   GATEWAY_GOMEMLIMIT="${GATEWAY_GOMEMLIMIT:-640MiB}"
   validate_simple_token GATEWAY_MEMORY_LIMIT "${GATEWAY_MEMORY_LIMIT}"
   validate_simple_token SERIAL_CANARY_MEMORY_LIMIT "${SERIAL_CANARY_MEMORY_LIMIT}"
+  validate_simple_token SERIAL_DRAIN_SECONDS "${SERIAL_DRAIN_SECONDS}"
+  validate_simple_token SERIAL_MIN_AVAILABLE_KB "${SERIAL_MIN_AVAILABLE_KB}"
   validate_simple_token BLUE_GREEN_MIN_MEMORY_KB "${BLUE_GREEN_MIN_MEMORY_KB}"
   validate_simple_token GATEWAY_GOMAXPROCS "${GATEWAY_GOMAXPROCS:-}"
   validate_simple_token GATEWAY_GOMEMLIMIT "${GATEWAY_GOMEMLIMIT:-}"
@@ -201,6 +208,12 @@ validate_runtime_overrides() {
     ''|*[!0-9]*) die "BLUE_GREEN_MIN_MEMORY_KB must be a positive integer." ;;
   esac
   [ "${BLUE_GREEN_MIN_MEMORY_KB}" -gt 0 ] || die "BLUE_GREEN_MIN_MEMORY_KB must be a positive integer."
+  for value_name in SERIAL_DRAIN_SECONDS SERIAL_MIN_AVAILABLE_KB; do
+    case "${!value_name}" in
+      ''|*[!0-9]*) die "${value_name} must be a non-negative integer." ;;
+    esac
+  done
+  [ "${SERIAL_MIN_AVAILABLE_KB}" -gt 0 ] || die "SERIAL_MIN_AVAILABLE_KB must be a positive integer."
   for value_name in GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS; do
     case "${!value_name}" in
       ''|*[!0-9]*) die "${value_name} must be an integer." ;;
@@ -338,9 +351,8 @@ CANARY_MEMORY_LIMIT=$(single_quote "${SERIAL_CANARY_MEMORY_LIMIT}")
 
 test "\$(docker inspect "\${ACTIVE_GATEWAY}" --format '{{.State.Health.Status}}')" = healthy
 test "\$(docker inspect gateway:cloud --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "\${EXPECTED_REVISION}"
-# This is intentionally not a second server process. On a 2GiB host even a
-# capped server can overlap the steady-state gateway's working set. It proves
-# that the built image can execute before the reversible single-instance cut.
+# This isolated check proves that the built image can execute before launching
+# the bounded live candidate used for the no-gap serial cutover below.
 docker run --rm --network none --memory "\${CANARY_MEMORY_LIMIT}" gateway:cloud --version >/dev/null
 echo "serial_image_preflight_memory_limit=\${CANARY_MEMORY_LIMIT}"
 REMOTE
@@ -363,6 +375,9 @@ NEXT_GATEWAY=$(single_quote "${next_gateway}")
 GATEWAY_MEMORY_LIMIT=$(single_quote "${GATEWAY_MEMORY_LIMIT}")
 GATEWAY_GOMAXPROCS=$(single_quote "${GATEWAY_GOMAXPROCS:-}")
 GATEWAY_GOMEMLIMIT=$(single_quote "${GATEWAY_GOMEMLIMIT:-}")
+CANARY_MEMORY_LIMIT=$(single_quote "${SERIAL_CANARY_MEMORY_LIMIT}")
+SERIAL_DRAIN_SECONDS=$(single_quote "${SERIAL_DRAIN_SECONDS}")
+SERIAL_MIN_AVAILABLE_KB=$(single_quote "${SERIAL_MIN_AVAILABLE_KB}")
 GATEWAY_STREAM_KEEPALIVE_INTERVAL=$(single_quote "${GATEWAY_STREAM_KEEPALIVE_INTERVAL}")
 GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED=$(single_quote "${GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED}")
 GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT=$(single_quote "${GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT}")
@@ -370,6 +385,17 @@ GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS=$(single_quote "${GATEWAY_
 GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS=$(single_quote "${GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS}")
 
 test "\$(docker inspect "\${ACTIVE_GATEWAY}" --format '{{.State.Health.Status}}')" = healthy
+available_kb="\$(awk '/^MemAvailable:/ {print \$2; exit}' /proc/meminfo)"
+case "\${available_kb}" in
+  ''|*[!0-9]*)
+    echo "Could not determine MemAvailable before serial candidate launch." >&2
+    exit 1
+    ;;
+esac
+if [ "\${available_kb}" -lt "\${SERIAL_MIN_AVAILABLE_KB}" ]; then
+  echo "Refusing no-gap serial cutover: MemAvailable=\${available_kb}KiB is below required \${SERIAL_MIN_AVAILABLE_KB}KiB." >&2
+  exit 1
+fi
 backup="Caddyfile.1g.before-\${NEXT_GATEWAY}-\$(date -u +%Y%m%dT%H%M%SZ).bak"
 cp Caddyfile.1g "\${backup}"
 sed "s/reverse_proxy \${ACTIVE_GATEWAY}:18080/reverse_proxy \${NEXT_GATEWAY}:18080/" "\${backup}" > Caddyfile.1g.next
@@ -417,13 +443,15 @@ set_env_override GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT "\${GATEWAY_OP
 set_env_override GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS "\${GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS}"
 set_env_override GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS "\${GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS}"
 docker rm -f "\${NEXT_GATEWAY}" >/dev/null 2>&1 || true
-docker stop "\${ACTIVE_GATEWAY}" >/dev/null
+# During the short overlap the two gateway cgroup maxima remain below the
+# 2GiB baseline. This candidate is deliberately live: stopping the active
+# gateway first creates the observed Caddy 502/503 window.
 docker run -d \\
   --name "\${NEXT_GATEWAY}" \\
   --restart unless-stopped \\
   --network gateway_gateway-network \\
   --ulimit nofile=65535:65535 \\
-  --memory "\${GATEWAY_MEMORY_LIMIT}" \\
+  --memory "\${CANARY_MEMORY_LIMIT}" \\
   --env-file "\${env_file}" \\
   -v /opt/gateway/data:/app/data \\
   gateway:cloud >/dev/null
@@ -438,9 +466,15 @@ for i in \$(seq 1 45); do
   sleep 2
 done
 test "\${ready_streak}" -ge 3
+docker exec gateway-caddy wget -q -T 2 -O /dev/null "http://\${NEXT_GATEWAY}:18080/health"
 mv Caddyfile.1g.next Caddyfile.1g
 docker exec -i gateway-caddy sh -c 'cat > /tmp/Caddyfile.next && caddy reload --config /tmp/Caddyfile.next --adapter caddyfile' < Caddyfile.1g
 docker exec gateway-caddy wget -q -O- http://127.0.0.1:2019/config/ | grep -q "\${NEXT_GATEWAY}:18080"
+if [ "\${SERIAL_DRAIN_SECONDS}" -gt 0 ]; then
+  sleep "\${SERIAL_DRAIN_SECONDS}"
+fi
+docker stop "\${ACTIVE_GATEWAY}" >/dev/null
+docker update --memory "\${GATEWAY_MEMORY_LIMIT}" "\${NEXT_GATEWAY}" >/dev/null
 failed=false
 echo "active=\${NEXT_GATEWAY}"
 echo "rollback=\${ACTIVE_GATEWAY}"

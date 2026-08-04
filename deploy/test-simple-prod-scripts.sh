@@ -34,6 +34,21 @@ assert_not_contains() {
   fi
 }
 
+assert_last_order() {
+  local path="$1"
+  local first_pattern="$2"
+  local second_pattern="$3"
+  local message="$4"
+  local first_line
+  local second_line
+  first_line="$(grep -En "${first_pattern}" "${path}" | tail -n 1 | cut -d: -f1 || true)"
+  second_line="$(grep -En "${second_pattern}" "${path}" | tail -n 1 | cut -d: -f1 || true)"
+  if [ -z "${first_line}" ] || [ -z "${second_line}" ] || [ "${first_line}" -ge "${second_line}" ]; then
+    echo "${message}" >&2
+    exit 1
+  fi
+}
+
 require_file "${DEPLOY_SCRIPT}"
 require_file "${ROLLBACK_SCRIPT}"
 require_file "${HUANA_SCRIPT}"
@@ -160,8 +175,10 @@ assert_contains "${DEPLOY_SCRIPT}" 'stop_inactive_gateways' \
   "deploy.sh serial mode must release inactive rollback containers before cutover"
 assert_contains "${DEPLOY_SCRIPT}" 'docker run --rm --network none --memory' \
   "deploy.sh serial mode must validate the image without a second gateway server"
-assert_contains "${DEPLOY_SCRIPT}" 'docker stop.*ACTIVE_GATEWAY' \
-  "deploy.sh serial mode must stop the active gateway before starting the full replacement"
+assert_contains "${DEPLOY_SCRIPT}" 'SERIAL_MIN_AVAILABLE_KB' \
+  "deploy.sh serial mode must reject an unsafe candidate overlap before traffic changes"
+assert_contains "${DEPLOY_SCRIPT}" 'SERIAL_DRAIN_SECONDS' \
+  "deploy.sh serial mode must drain established streams after Caddy switches"
 assert_contains "${DEPLOY_SCRIPT}" 'apply_steady_state_resource_limits' \
   "deploy.sh must apply the 2C2G Caddy/Postgres/Redis memory baseline after cutover"
 assert_contains "${DEPLOY_SCRIPT}" 'BindAddress=\$\{SSH_BIND_ADDRESS\}' \
@@ -195,6 +212,8 @@ GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT=10 \
 GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS=10 \
 GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS=6 \
 SERIAL_CANARY_MEMORY_LIMIT=256m \
+SERIAL_DRAIN_SECONDS=15 \
+SERIAL_MIN_AVAILABLE_KB=524288 \
 bash -s "${testable_deploy_script}" <<'BASH'
 source "$1"
 run_remote_root_script() { cp "$1" "$REMOTE_SCRIPT_OUTPUT"; }
@@ -203,10 +222,18 @@ BASH
 bash -n "${serial_remote_script}"
 assert_contains "${serial_remote_script}" "NEXT_GATEWAY='gateway-green-abcdef123456-rollout'" \
   "serial cutover must accept a unique rollout container name"
-assert_contains "${serial_remote_script}" 'docker stop.*ACTIVE_GATEWAY' \
-  "serial remote cutover must stop the active gateway before the replacement starts"
 assert_contains "${serial_remote_script}" 'docker run -d' \
-  "serial remote cutover must start a replacement gateway"
+  "serial remote cutover must start a live replacement gateway"
+assert_contains "${serial_remote_script}" 'MemAvailable' \
+  "serial remote cutover must check available host memory before overlap"
+assert_contains "${serial_remote_script}" 'http://\$\{NEXT_GATEWAY\}:18080/health' \
+  "serial remote cutover must prove Caddy can reach the candidate before switching"
+assert_contains "${serial_remote_script}" 'docker update --memory "\$\{GATEWAY_MEMORY_LIMIT\}" "\$\{NEXT_GATEWAY\}"' \
+  "serial remote cutover must restore the candidate's steady-state memory after draining"
+assert_last_order "${serial_remote_script}" 'docker run -d' 'docker stop "\$\{ACTIVE_GATEWAY\}"' \
+  "serial remote cutover must start the candidate before stopping the active gateway"
+assert_last_order "${serial_remote_script}" 'caddy reload --config /tmp/Caddyfile.next' 'docker stop "\$\{ACTIVE_GATEWAY\}"' \
+  "serial remote cutover must switch Caddy before stopping the active gateway"
 assert_contains "${serial_remote_script}" 'restore_active' \
   "serial remote cutover must restore the active gateway if the replacement fails"
 
