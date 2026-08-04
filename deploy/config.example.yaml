@@ -213,6 +213,18 @@ gateway:
   openai_first_output_timeout_seconds: 0
   # Optional high/xhigh/max override (seconds, 0=use the standard timeout)
   openai_high_effort_first_output_timeout_seconds: 0
+  # Reversible /v1/responses first-output governance. Keep disabled during
+  # baseline observation; the 10s total / 6s first-account split leaves one
+  # short safe retry without extending the client/CDN wait window.
+  openai_stream_governance:
+    enabled: false
+    rollout_percent: 10
+    total_budget_seconds: 10
+    first_attempt_budget_seconds: 6
+    health_ttft_ms: 8000
+    circuit_min_samples: 3
+    circuit_failure_rate_percent: 50
+    circuit_cooldown_seconds: 300
   # Max request body size in bytes (default: 256MB)
   # 请求体最大字节数（默认 256MB）
   max_body_size: 268435456
@@ -470,7 +482,7 @@ gateway:
   stream_data_interval_timeout: 180
   # Stream keepalive interval (seconds), 0=disable
   # 流式 keepalive 间隔（秒），0=禁用
-  stream_keepalive_interval: 10
+  stream_keepalive_interval: 0
   # Image stream data interval timeout (seconds), 0=disable; independent from ordinary text streams
   # 图片流数据间隔超时（秒），0=禁用；独立于普通文本流式
   image_stream_data_interval_timeout: 900

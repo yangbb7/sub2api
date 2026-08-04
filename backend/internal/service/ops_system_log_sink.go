@@ -133,6 +133,12 @@ func (s *OpsSystemLogSink) shouldIndex(event *logger.LogEvent) bool {
 	if strings.Contains(component, "http.access") {
 		return true
 	}
+	// Stream attempts are deliberately emitted at info level: they are a
+	// baseline for cancellations that do not reach successful usage accounting.
+	// Keep this narrow so normal info logs remain out of ops_system_logs.
+	if component == "stream_attempts" {
+		return true
+	}
 	if strings.Contains(component, "audit") {
 		return true
 	}

@@ -85,6 +85,10 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		h.responsesErrorResponse(c, http.StatusBadRequest, "invalid_request_error", invalidStreamFieldTypeMessage)
 		return
 	}
+	if reqStream {
+		service.StartStreamAttempt(c, requestStart, body, reqModel, true)
+		defer service.FinalizeStreamAttempt(c)
+	}
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 
 	setOpsRequestContext(c, reqModel, reqStream)
@@ -190,6 +194,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 			case FailoverContinue:
 				continue
 			case FailoverCanceled:
+				service.StreamAttemptMarkClientCanceled(c)
 				failoverClientGone(c)
 				return
 			default:
@@ -202,6 +207,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 			}
 		}
 		account := selection.Account
+		service.StreamAttemptMarkSelectedAccount(c, account)
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
 		// 4. Acquire account concurrency slot
@@ -294,6 +300,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 					h.handleResponsesFailoverExhausted(c, fs.LastFailoverErr, streamStarted)
 					return
 				case FailoverCanceled:
+					service.StreamAttemptMarkClientCanceled(c)
 					failoverClientGone(c)
 					return
 				}

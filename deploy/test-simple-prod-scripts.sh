@@ -57,6 +57,88 @@ assert_contains "${DEPLOY_SCRIPT}" 'docker inspect .*ACTIVE_GATEWAY.*Config\.Env
   "deploy.sh must copy runtime environment from the active healthy gateway"
 assert_contains "${DEPLOY_SCRIPT}" 'docker run -d' \
   "deploy.sh must start a parallel gateway container"
+assert_contains "${DEPLOY_SCRIPT}" 'GATEWAY_MEMORY_LIMIT=.*896m' \
+  "deploy.sh must default green gateways to the 2C2G memory baseline"
+assert_contains "${DEPLOY_SCRIPT}" 'GATEWAY_GOMAXPROCS=.*:-2' \
+  "deploy.sh must default green gateways to two Go scheduler threads"
+assert_contains "${DEPLOY_SCRIPT}" 'GATEWAY_GOMEMLIMIT=.*640MiB' \
+  "deploy.sh must default green gateways to the Go memory limit baseline"
+assert_not_contains "${DEPLOY_SCRIPT}" 'GATEWAY_OPENAI_FIRST_OUTPUT_TIMEOUT_SECONDS:-120' \
+  "deploy.sh must not deploy the abandoned 120-second first-output default"
+assert_not_contains "${DEPLOY_SCRIPT}" 'GATEWAY_OPENAI_HIGH_EFFORT_FIRST_OUTPUT_TIMEOUT_SECONDS:-600' \
+  "deploy.sh must not deploy the abandoned 600-second high-effort timeout"
+assert_contains "${DEPLOY_SCRIPT}" 'GATEWAY_STREAM_KEEPALIVE_INTERVAL' \
+  "deploy.sh must pass the reversible SSE keepalive switch to the green container"
+assert_contains "${DEPLOY_SCRIPT}" 'GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED' \
+  "deploy.sh must pass the reversible stream-governance switch to the green container"
+assert_contains "${DEPLOY_SCRIPT}" 'GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS:-10' \
+  "deploy.sh must default stream governance to a 10-second total budget"
+assert_contains "${DEPLOY_SCRIPT}" 'GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS:-6' \
+  "deploy.sh must reserve a 6-second first-account budget"
+assert_contains "${DEPLOY_SCRIPT}" 'set_env_override GATEWAY_STREAM_KEEPALIVE_INTERVAL' \
+  "deploy.sh must apply SSE keepalive to the green container environment"
+assert_contains "${DEPLOY_SCRIPT}" 'set_env_override GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED' \
+  "deploy.sh must apply stream governance to the green container environment"
+
+runtime_env="$(mktemp)"
+testable_deploy_script="$(mktemp)"
+cleanup_runtime_env() {
+  rm -f "${runtime_env}" "${testable_deploy_script}"
+}
+trap cleanup_runtime_env EXIT
+sed '$d' "${DEPLOY_SCRIPT}" > "${testable_deploy_script}"
+cat > "${runtime_env}" <<'EOF'
+SSH_TARGET=deploy@example.net
+GATEWAY_STREAM_KEEPALIVE_INTERVAL=5
+GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED=true
+GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT=10
+GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS=10
+GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS=6
+EOF
+runtime_values="$({
+  ENV_FILE="${runtime_env}" bash -s "${testable_deploy_script}" <<'BASH'
+unset GATEWAY_STREAM_KEEPALIVE_INTERVAL
+unset GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED
+unset GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT
+unset GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS
+unset GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS
+source "$1"
+load_connection_defaults
+validate_runtime_overrides
+printf '%s %s %s %s %s\n' \
+  "${GATEWAY_STREAM_KEEPALIVE_INTERVAL}" \
+  "${GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED}" \
+  "${GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT}" \
+  "${GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS}" \
+  "${GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS}"
+BASH
+})"
+[ "${runtime_values}" = "5 true 10 10 6" ] || {
+  echo "deploy.sh did not load stream governance overrides from ENV_FILE: ${runtime_values}" >&2
+  exit 1
+}
+runtime_values="$({
+  GATEWAY_STREAM_KEEPALIVE_INTERVAL=10 \
+  GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED=false \
+  GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT=20 \
+  GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS=12 \
+  GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS=7 \
+  ENV_FILE="${runtime_env}" bash -s "${testable_deploy_script}" <<'BASH'
+source "$1"
+load_connection_defaults
+validate_runtime_overrides
+printf '%s %s %s %s %s\n' \
+  "${GATEWAY_STREAM_KEEPALIVE_INTERVAL}" \
+  "${GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED}" \
+  "${GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT}" \
+  "${GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS}" \
+  "${GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS}"
+BASH
+})"
+[ "${runtime_values}" = "10 false 20 12 7" ] || {
+  echo "deploy.sh did not preserve shell stream governance overrides: ${runtime_values}" >&2
+  exit 1
+}
 assert_contains "${DEPLOY_SCRIPT}" 'caddy reload' \
   "deploy.sh must hot-reload Caddy instead of recreating it"
 assert_contains "${DEPLOY_SCRIPT}" 'https://\$\{DOMAIN\}/v1/responses' \

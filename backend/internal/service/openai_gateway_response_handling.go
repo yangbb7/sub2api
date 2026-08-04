@@ -45,8 +45,9 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel, reasoningEffort string) (*openaiStreamingResult, error) {
 	firstOutputTimeout := time.Duration(0)
 	if account != nil && account.Platform == PlatformOpenAI {
-		firstOutputTimeout = s.openAIFirstOutputTimeout(reasoningEffort)
+		firstOutputTimeout = s.openAIFirstOutputTimeoutForCurrentAttempt(ctx, reasoningEffort)
 	}
+	firstOutputDeadline := openAIFirstOutputDeadlineForRequest(ctx, startTime, firstOutputTimeout)
 	guardFirstOutput := firstOutputTimeout > 0
 	var attemptResponseHeaders http.Header
 	if guardFirstOutput {
@@ -130,6 +131,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			}
 		}
 		flusher.Flush()
+		StreamAttemptMarkFirstDownstreamByte(c)
 		return nil
 	}
 
@@ -179,7 +181,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	var firstOutputTimer *time.Timer
 	var firstOutputCh <-chan time.Time
 	if firstOutputTimeout > 0 {
-		remaining := time.Until(startTime.Add(firstOutputTimeout))
+		remaining := time.Until(firstOutputDeadline)
 		if remaining <= 0 {
 			remaining = time.Nanosecond
 		}
@@ -219,6 +221,12 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	eventInProgress := false
 	eventStartsClientOutput := false
 	eventShouldFlush := false
+	reportPresemanticCancel := func() {
+		StreamAttemptMarkClientCanceled(c)
+		if firstTokenMs == nil && StreamAttemptClaimPreSemanticCancel(c) {
+			s.ReportOpenAIStreamAttempt(account.ID, nil, "presemantic_cancel")
+		}
+	}
 	handlePendingWriteError := func(err error) {
 		if firstOutputStage != nil && firstTokenMs == nil && !firstOutputStage.closed {
 			message := "OpenAI first-output staging failed"
@@ -233,6 +241,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			return
 		}
 		clientDisconnected = true
+		reportPresemanticCancel()
 		logger.LegacyPrintf("service.openai_gateway", "Client disconnected during streaming, continuing to drain upstream for billing")
 	}
 	completeGuardedEvent := func(queueDrained bool) {
@@ -246,6 +255,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if shouldFlush {
 				if err := flushBuffered(); err != nil {
 					clientDisconnected = true
+					reportPresemanticCancel()
 					logger.LegacyPrintf("service.openai_gateway", "Client disconnected during streaming flush, continuing to drain upstream for billing")
 				} else {
 					clientOutputStarted = true
@@ -254,6 +264,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			}
 		}
 		if completedSemanticEvent && firstTokenMs == nil {
+			StreamAttemptMarkFirstSemanticEvent(c)
 			firstOutputScanGuard.Store(false)
 			ms := int(time.Since(startTime).Milliseconds())
 			firstTokenMs = &ms
@@ -270,14 +281,17 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		payload := `{"type":"error","sequence_number":0,"error":{"type":"upstream_error","message":` + strconv.Quote(reason) + `,"code":` + strconv.Quote(reason) + `}}`
 		if err := flushBuffered(); err != nil {
 			clientDisconnected = true
+			reportPresemanticCancel()
 			return
 		}
 		if _, err := writePendingString("data: " + payload + "\n\n"); err != nil {
 			clientDisconnected = true
+			reportPresemanticCancel()
 			return
 		}
 		if err := flushBuffered(); err != nil {
 			clientDisconnected = true
+			reportPresemanticCancel()
 			return
 		}
 		clientOutputStarted = true
@@ -303,6 +317,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		}
 		if err := flushBuffered(); err != nil {
 			clientDisconnected = true
+			reportPresemanticCancel()
 			logger.LegacyPrintf("service.openai_gateway", "%s", disconnectMessage)
 			return
 		}
@@ -372,6 +387,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		// 客户端断开/取消请求时，上游读取往往会返回 context canceled。
 		// /v1/responses 的 SSE 事件必须符合 OpenAI 协议；这里不注入自定义 error event，避免下游 SDK 解析失败。
 		if errors.Is(scanErr, context.Canceled) || errors.Is(scanErr, context.DeadlineExceeded) {
+			reportPresemanticCancel()
 			if eventShouldFlush {
 				flushPending("Client disconnected during canceled stream flush, returning collected usage")
 			}
@@ -539,6 +555,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 
 			// Record first token time
 			if !guardFirstOutput && firstTokenMs == nil && startsClientOutput {
+				StreamAttemptMarkFirstSemanticEvent(c)
 				ms := int(time.Since(startTime).Milliseconds())
 				firstTokenMs = &ms
 				stopFirstOutputTimer()
@@ -719,20 +736,24 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				// committed here, but account headers remain private until semantic output.
 				if _, err := w.Write([]byte(":\n\n")); err != nil {
 					clientDisconnected = true
+					reportPresemanticCancel()
 					logger.LegacyPrintf("service.openai_gateway", "Client disconnected during streaming, continuing to drain upstream for billing")
 					continue
 				}
 				flusher.Flush()
+				StreamAttemptMarkFirstDownstreamByte(c)
 				lastDownstreamWriteAt = time.Now()
 				continue
 			}
 			if _, err := writePendingString(":\n\n"); err != nil {
 				clientDisconnected = true
+				reportPresemanticCancel()
 				logger.LegacyPrintf("service.openai_gateway", "Client disconnected during streaming, continuing to drain upstream for billing")
 				continue
 			}
 			if err := flushBuffered(); err != nil {
 				clientDisconnected = true
+				reportPresemanticCancel()
 				logger.LegacyPrintf("service.openai_gateway", "Client disconnected during keepalive flush, continuing to drain upstream for billing")
 			} else {
 				lastDownstreamWriteAt = time.Now()

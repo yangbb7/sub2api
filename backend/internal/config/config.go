@@ -942,6 +942,10 @@ type GatewayConfig struct {
 	Live GatewayLiveConfig `mapstructure:"live"`
 	// OpenAIScheduler: OpenAI 高级调度器粘性逃逸配置
 	OpenAIScheduler GatewayOpenAISchedulerConfig `mapstructure:"openai_scheduler"`
+	// OpenAIStreamGovernance enables the bounded first-output budget and the
+	// account-health preference used for /v1/responses streaming requests.
+	// It is disabled by default so the first rollout is shadow-observation only.
+	OpenAIStreamGovernance GatewayOpenAIStreamGovernanceConfig `mapstructure:"openai_stream_governance"`
 	// OpenAIHTTP2: OpenAI HTTP 上游协议策略（默认启用 HTTP/2，可按代理能力回退 HTTP/1.1）
 	OpenAIHTTP2 GatewayOpenAIHTTP2Config `mapstructure:"openai_http2"`
 	// OpenAIProxyStreamCircuit: Responses SSE 代理断流熔断策略。
@@ -1254,6 +1258,20 @@ type GatewayOpenAISchedulerConfig struct {
 	StickyEscapeTTFTMs int `mapstructure:"sticky_escape_ttft_ms"`
 	// StickyEscapeErrorRate: 错误率 EWMA 超过该阈值时跳过 sticky
 	StickyEscapeErrorRate float64 `mapstructure:"sticky_escape_error_rate"`
+}
+
+// GatewayOpenAIStreamGovernanceConfig controls the gradual, reversible
+// first-output governance rollout. Timings are intentionally short because
+// client/CDN wait windows cannot be fixed by increasing gateway timeouts.
+type GatewayOpenAIStreamGovernanceConfig struct {
+	Enabled                     bool `mapstructure:"enabled"`
+	RolloutPercent              int  `mapstructure:"rollout_percent"`
+	TotalBudgetSeconds          int  `mapstructure:"total_budget_seconds"`
+	FirstAttemptBudgetSeconds   int  `mapstructure:"first_attempt_budget_seconds"`
+	HealthTTFTMs                int  `mapstructure:"health_ttft_ms"`
+	CircuitMinSamples           int  `mapstructure:"circuit_min_samples"`
+	CircuitFailureRatePercent   int  `mapstructure:"circuit_failure_rate_percent"`
+	CircuitCooldownSeconds      int  `mapstructure:"circuit_cooldown_seconds"`
 }
 
 // GatewayUsageRecordConfig 使用量记录异步队列配置
@@ -2225,6 +2243,14 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_response_header_timeout", 0)
 	viper.SetDefault("gateway.openai_first_output_timeout_seconds", 0)
 	viper.SetDefault("gateway.openai_high_effort_first_output_timeout_seconds", 0)
+	viper.SetDefault("gateway.openai_stream_governance.enabled", false)
+	viper.SetDefault("gateway.openai_stream_governance.rollout_percent", 10)
+	viper.SetDefault("gateway.openai_stream_governance.total_budget_seconds", 10)
+	viper.SetDefault("gateway.openai_stream_governance.first_attempt_budget_seconds", 6)
+	viper.SetDefault("gateway.openai_stream_governance.health_ttft_ms", 8000)
+	viper.SetDefault("gateway.openai_stream_governance.circuit_min_samples", 3)
+	viper.SetDefault("gateway.openai_stream_governance.circuit_failure_rate_percent", 50)
+	viper.SetDefault("gateway.openai_stream_governance.circuit_cooldown_seconds", 300)
 	viper.SetDefault("gateway.log_upstream_error_body", true)
 	viper.SetDefault("gateway.log_upstream_error_body_max_bytes", 2048)
 	viper.SetDefault("gateway.inject_beta_for_apikey", false)
@@ -2326,7 +2352,9 @@ func setDefaults() {
 	viper.SetDefault("gateway.client_idle_ttl_seconds", 900)
 	viper.SetDefault("gateway.concurrency_slot_ttl_minutes", 30) // 并发槽位过期时间（支持超长请求）
 	viper.SetDefault("gateway.stream_data_interval_timeout", 180)
-	viper.SetDefault("gateway.stream_keepalive_interval", 10)
+	// Keep SSE heartbeats opt-in so their first rollout is explicit and
+	// reversible. The production canary sets this to 5 after baseline metrics.
+	viper.SetDefault("gateway.stream_keepalive_interval", 0)
 	viper.SetDefault("gateway.image_stream_data_interval_timeout", 900)
 	viper.SetDefault("gateway.image_stream_keepalive_interval", 10)
 	viper.SetDefault("gateway.image_nonstream_keepalive_interval", 0)
@@ -3125,6 +3153,21 @@ func (c *Config) Validate() error {
 	if c.Gateway.OpenAIHighEffortFirstOutputTimeoutSeconds < 0 || c.Gateway.OpenAIHighEffortFirstOutputTimeoutSeconds > 1800 ||
 		(c.Gateway.OpenAIHighEffortFirstOutputTimeoutSeconds > 0 && c.Gateway.OpenAIHighEffortFirstOutputTimeoutSeconds < 30) {
 		return fmt.Errorf("gateway.openai_high_effort_first_output_timeout_seconds must be 0 or between 30-1800 seconds")
+	}
+	streamGov := c.Gateway.OpenAIStreamGovernance
+	if streamGov.RolloutPercent < 0 || streamGov.RolloutPercent > 100 {
+		return fmt.Errorf("gateway.openai_stream_governance.rollout_percent must be between 0-100")
+	}
+	if streamGov.TotalBudgetSeconds < 1 || streamGov.TotalBudgetSeconds > 30 {
+		return fmt.Errorf("gateway.openai_stream_governance.total_budget_seconds must be between 1-30")
+	}
+	if streamGov.FirstAttemptBudgetSeconds < 1 || streamGov.FirstAttemptBudgetSeconds >= streamGov.TotalBudgetSeconds {
+		return fmt.Errorf("gateway.openai_stream_governance.first_attempt_budget_seconds must be positive and less than total_budget_seconds")
+	}
+	if streamGov.HealthTTFTMs < 1000 || streamGov.CircuitMinSamples < 1 ||
+		streamGov.CircuitFailureRatePercent < 1 || streamGov.CircuitFailureRatePercent > 100 ||
+		streamGov.CircuitCooldownSeconds < 1 {
+		return fmt.Errorf("gateway.openai_stream_governance health and circuit settings are invalid")
 	}
 	if c.Gateway.Live.MaxSessionDurationSeconds <= 0 {
 		c.Gateway.Live.MaxSessionDurationSeconds = 3600

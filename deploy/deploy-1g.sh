@@ -33,7 +33,7 @@ load_env_file() {
     PLATFORM GATEWAY_IMAGE ADMIN_EMAIL ADMIN_PASSWORD PROXIED DEPLOY_MODE BUILD_STRATEGY REMOTE_DOCKERFILE REMOTE_SUDO SUDO_PASSWORD \
     SKIP_DNS ROLLBACK_ON_FAILURE CF_API_TOKEN CF_ZONE_ID TTL TZ ACME_EMAIL UPDATE_PROXY_URL SSH_CONNECT_TIMEOUT \
     SWAP_SIZE MIN_FREE_KB MIN_DOCKER_FREE_KB DOCKER_INSTALL_METHOD BUILD_NODE_OPTIONS BUILD_GOMAXPROCS PNPM_REGISTRY \
-    LOCAL_BUILD_GOMAXPROCS LOCAL_BUILD_GOMEMLIMIT LOCAL_BUILD_GCFLAGS \
+    LOCAL_BUILD_GOMAXPROCS LOCAL_BUILD_GOMEMLIMIT LOCAL_BUILD_GCFLAGS SOURCE_UPLOAD_IDLE_TIMEOUT SOURCE_UPLOAD_DEADLINE \
     POSTGRES_PASSWORD JWT_SECRET TOTP_ENCRYPTION_KEY REDIS_PASSWORD
   do
     if [ "${!name+x}" = x ]; then
@@ -79,6 +79,8 @@ LOCAL_BUILD_GOMAXPROCS="${LOCAL_BUILD_GOMAXPROCS:-4}"
 LOCAL_BUILD_GOMEMLIMIT="${LOCAL_BUILD_GOMEMLIMIT:-4GiB}"
 LOCAL_BUILD_GCFLAGS="${LOCAL_BUILD_GCFLAGS:-}"
 SOURCE_UPLOAD_RETRIES="${SOURCE_UPLOAD_RETRIES:-3}"
+SOURCE_UPLOAD_IDLE_TIMEOUT="${SOURCE_UPLOAD_IDLE_TIMEOUT:-120}"
+SOURCE_UPLOAD_DEADLINE="${SOURCE_UPLOAD_DEADLINE:-1800}"
 BUILD_COMMIT="${BUILD_COMMIT:-$(git -C "${ROOT_DIR}" rev-parse --short=12 HEAD 2>/dev/null || printf 'archive')}"
 BUILD_DATE="${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 if [ -z "${REMOTE_DOCKERFILE:-}" ]; then
@@ -673,6 +675,8 @@ validate_docker_install_method
 validate_positive_int BUILD_GOMAXPROCS "${BUILD_GOMAXPROCS}"
 validate_positive_int LOCAL_BUILD_GOMAXPROCS "${LOCAL_BUILD_GOMAXPROCS}"
 validate_positive_int SOURCE_UPLOAD_RETRIES "${SOURCE_UPLOAD_RETRIES}"
+validate_positive_int SOURCE_UPLOAD_IDLE_TIMEOUT "${SOURCE_UPLOAD_IDLE_TIMEOUT}"
+validate_positive_int SOURCE_UPLOAD_DEADLINE "${SOURCE_UPLOAD_DEADLINE}"
 validate_env_token LOCAL_BUILD_GOMEMLIMIT "${LOCAL_BUILD_GOMEMLIMIT}"
 validate_env_token LOCAL_BUILD_GCFLAGS "${LOCAL_BUILD_GCFLAGS}"
 
@@ -742,6 +746,7 @@ case "${DEPLOY_MODE}" in
     need ssh
     need scp
     need rsync
+    need perl
     need tar
     need gzip
     if [ "${BUILD_STRATEGY}" = local-binary ]; then
@@ -858,10 +863,15 @@ run_rsync() {
   local ssh_command
   ssh_command="$(rsync_ssh_command)"
   if [ -n "${SSH_PASSWORD}" ]; then
-    SSHPASS="${SSH_PASSWORD}" sshpass -e rsync -e "${ssh_command}" "$@"
+    SSHPASS="${SSH_PASSWORD}" run_with_deadline "${SOURCE_UPLOAD_DEADLINE}" \
+      sshpass -e rsync -e "${ssh_command}" "$@"
   else
-    rsync -e "${ssh_command}" "$@"
+    run_with_deadline "${SOURCE_UPLOAD_DEADLINE}" rsync -e "${ssh_command}" "$@"
   fi
+}
+
+run_with_deadline() {
+  "${DEPLOY_DIR}/run-with-deadline.pl" "$@"
 }
 
 remote_root_method=""
@@ -1030,7 +1040,7 @@ upload_source_archive() {
 
   for ((attempt = 1; attempt <= SOURCE_UPLOAD_RETRIES; attempt++)); do
     echo "Uploading source archive (attempt ${attempt}/${SOURCE_UPLOAD_RETRIES})..."
-    if run_rsync --partial "${archive}" "${destination}"; then
+    if run_rsync --partial --timeout="${SOURCE_UPLOAD_IDLE_TIMEOUT}" "${archive}" "${destination}"; then
       return 0
     fi
     if [ "${attempt}" -lt "${SOURCE_UPLOAD_RETRIES}" ]; then

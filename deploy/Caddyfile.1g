@@ -34,6 +34,8 @@
 		health_timeout 10s
 		header_up X-Real-IP {remote_host}
 		header_up CF-Connecting-IP {http.request.header.CF-Connecting-IP}
+		# Keep the controlled probe correlation ID visible in Gateway logs.
+		header_up X-Request-ID {http.request.header.X-Request-ID}
 		transport http {
 			keepalive 60s
 			compression off

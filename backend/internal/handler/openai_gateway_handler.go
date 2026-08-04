@@ -322,6 +322,13 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", invalidStreamFieldTypeMessage)
 		return
 	}
+	if reqStream {
+		service.StartStreamAttempt(c, requestStart, body, reqModel, true)
+		defer service.FinalizeStreamAttempt(c)
+		if governedCtx := h.gatewayService.WithOpenAIStreamGovernancePlan(c, requestStart); governedCtx != nil {
+			c.Request = c.Request.WithContext(governedCtx)
+		}
+	}
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 	previousResponseID := strings.TrimSpace(gjson.GetBytes(body, "previous_response_id").String())
 	if previousResponseID != "" {
@@ -519,6 +526,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			zap.Float64("load_skew", scheduleDecision.LoadSkew),
 		)
 		account := selection.Account
+		service.StreamAttemptMarkSelectedAccount(c, account)
 		sessionHash = ensureOpenAIPoolModeSessionHash(sessionHash, account)
 		reqLog.Debug("openai.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
 		setOpsSelectedAccount(c, account.ID, account.Platform)
@@ -581,6 +589,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
 					if failoverClientGone(c) {
+						service.StreamAttemptMarkClientCanceled(c)
+						if !streamStarted && service.StreamAttemptClaimPreSemanticCancel(c) {
+							h.gatewayService.ReportOpenAIStreamAttempt(account.ID, nil, "presemantic_cancel")
+						}
 						reqLog.Info("openai.failover_aborted_client_disconnected",
 							zap.Int64("account_id", account.ID),
 							zap.Int("upstream_status", failoverErr.StatusCode),
@@ -597,7 +609,19 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					if failoverErr.ShouldReportAccountScheduleFailure() {
 						h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(reqModel), false, nil)
 					}
+					if failoverErr.StatusCode == http.StatusGatewayTimeout &&
+						strings.Contains(string(failoverErr.ResponseBody), "first_output_timeout") {
+						h.gatewayService.ReportOpenAIStreamAttempt(account.ID, nil, "first_output_timeout")
+					}
 					if !failoverErr.ShouldRetryNextAccount() {
+						h.handleFailoverExhausted(c, failoverErr, streamStarted)
+						return
+					}
+					// Cross-account replay is never allowed for a request which may
+					// carry state or side effects. A client-provided idempotency key
+					// protects the remaining stateless, pre-semantic-output retry.
+					if !openAIResponsesSafePreOutputReplay(c, sessionHashBody) {
+						service.StreamAttemptMarkOutcome(c, "retry_blocked_unsafe")
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}
@@ -678,7 +702,11 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			if account.Type == service.AccountTypeOAuth && !account.IsShadow() {
 				h.gatewayService.UpdateCodexUsageSnapshotFromHeaders(c.Request.Context(), account.ID, result.ResponseHeaders)
 			}
-			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(reqModel), openAIForwardSucceededForScheduling(result), result.FirstTokenMs)
+			scheduleSucceeded := openAIForwardSucceededForScheduling(result)
+			if reqStream && scheduleSucceeded && result.FirstTokenMs != nil {
+				h.gatewayService.ReportOpenAIStreamAttempt(account.ID, result.FirstTokenMs, "succeeded")
+			}
+			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(reqModel), scheduleSucceeded, result.FirstTokenMs)
 		} else {
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(reqModel), openAIForwardSucceededForScheduling(result), nil)
 		}

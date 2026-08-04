@@ -149,6 +149,7 @@ func (s *GatewayService) ForwardAsResponses(
 		writeResponsesError(c, http.StatusBadGateway, "server_error", "Upstream request failed")
 		return nil, fmt.Errorf("upstream request failed: %s", safeErr)
 	}
+	StreamAttemptMarkUpstreamResponseHeaders(c)
 	defer func() { _ = resp.Body.Close() }()
 
 	// 12. Handle error response with failover
@@ -531,10 +532,15 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 			for _, restored := range payloads {
 				eventType := gjson.GetBytes(restored, "type").String()
 				if _, err := fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", eventType, restored); err != nil {
+					StreamAttemptMarkClientCanceled(c)
 					logger.L().Info("forward_as_responses stream: client disconnected",
 						zap.String("request_id", requestID),
 					)
 					return true // client disconnected
+				}
+				StreamAttemptMarkFirstDownstreamByte(c)
+				if openAIStreamDataStartsClientOutput(string(restored), eventType) {
+					StreamAttemptMarkFirstSemanticEvent(c)
 				}
 			}
 		}

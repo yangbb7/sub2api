@@ -186,8 +186,11 @@ type openAIAccountRuntimeStats struct {
 }
 
 type openAIAccountRuntimeStat struct {
-	errorRateEWMABits atomic.Uint64
-	ttftEWMABits      atomic.Uint64
+	errorRateEWMABits  atomic.Uint64
+	ttftEWMABits       atomic.Uint64
+	streamHealthMu     sync.Mutex
+	streamHealthEvents []openAIStreamHealthEvent
+	streamCircuitUntil time.Time
 }
 
 func newOpenAIAccountRuntimeStats() *openAIAccountRuntimeStats {
@@ -591,14 +594,15 @@ func (s *defaultOpenAIAccountScheduler) shouldEscapeStickyAccount(accountID int6
 }
 
 type openAIAccountCandidateScore struct {
-	account   *Account
-	loadInfo  *AccountLoadInfo
-	loadKnown bool
-	score     float64
-	priority  int
-	errorRate float64
-	ttft      float64
-	hasTTFT   bool
+	account      *Account
+	loadInfo     *AccountLoadInfo
+	loadKnown    bool
+	score        float64
+	priority     int
+	errorRate    float64
+	ttft         float64
+	hasTTFT      bool
+	streamHealth openAIStreamHealthSnapshot
 }
 
 type openAIAccountCandidateHeap []openAIAccountCandidateScore
@@ -810,13 +814,18 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 		if s.stats != nil {
 			errorRate, ttft, hasTTFT = s.stats.snapshot(account.ID)
 		}
+		streamHealth := openAIStreamHealthSnapshot{}
+		if openAIStreamGovernanceActive(ctx) && s.stats != nil {
+			streamHealth = s.stats.streamHealthSnapshot(account.ID)
+		}
 		allCandidates = append(allCandidates, openAIAccountCandidateScore{
-			account:   account,
-			loadInfo:  loadInfo,
-			loadKnown: loadKnown,
-			errorRate: errorRate,
-			ttft:      ttft,
-			hasTTFT:   hasTTFT,
+			account:      account,
+			loadInfo:     loadInfo,
+			loadKnown:    loadKnown,
+			errorRate:    errorRate,
+			ttft:         ttft,
+			hasTTFT:      hasTTFT,
+			streamHealth: streamHealth,
 		})
 	}
 
@@ -975,7 +984,12 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 		}
 	}
 	candidates, quotaPressureRetry := splitQuotaPressureCandidates(candidates, now)
+	var streamCircuitRetry []openAIAccountCandidateScore
+	if openAIStreamGovernanceActive(ctx) {
+		candidates, streamCircuitRetry = splitOpenAIStreamCircuitCandidates(candidates)
+	}
 	candidates, slowTTFTRetry := s.splitSlowTTFTCandidates(candidates)
+	slowTTFTRetry = append(slowTTFTRetry, streamCircuitRetry...)
 	plan.candidates = candidates
 	plan.slowTTFTRetry = slowTTFTRetry
 	plan.quotaPressureRetry = quotaPressureRetry
@@ -1058,6 +1072,30 @@ func (s *defaultOpenAIAccountScheduler) splitSlowTTFTCandidates(
 		return candidates, nil
 	}
 	return primary, slow
+}
+
+// splitOpenAIStreamCircuitCandidates keeps a healthy primary set whenever
+// possible. Circuit-open accounts remain eligible as fallbacks so that a
+// temporary lack of capacity never turns into a hard outage.
+func splitOpenAIStreamCircuitCandidates(
+	candidates []openAIAccountCandidateScore,
+) ([]openAIAccountCandidateScore, []openAIAccountCandidateScore) {
+	if len(candidates) <= openAIAccountScheduleMinPrimary {
+		return candidates, nil
+	}
+	primary := make([]openAIAccountCandidateScore, 0, len(candidates))
+	circuitOpen := make([]openAIAccountCandidateScore, 0)
+	for _, candidate := range candidates {
+		if streamHealthCircuitOpen(candidate.streamHealth) {
+			circuitOpen = append(circuitOpen, candidate)
+			continue
+		}
+		primary = append(primary, candidate)
+	}
+	if len(primary) < openAIAccountScheduleMinPrimary || len(circuitOpen) == 0 {
+		return candidates, nil
+	}
+	return primary, circuitOpen
 }
 
 func (s *defaultOpenAIAccountScheduler) buildOpenAISelectionOrder(

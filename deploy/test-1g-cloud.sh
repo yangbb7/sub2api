@@ -31,7 +31,9 @@ bash -n \
   "${DEPLOY_DIR}/verify-live-1g.sh" \
   "${DEPLOY_DIR}/audit-1g-completion.sh" \
   "${DEPLOY_DIR}/cloudflare-upsert-dns.sh" \
+	"${DEPLOY_DIR}/stream-isolation-probe.sh" \
   "${DEPLOY_DIR}/test-doctor-1g.sh" \
+  "${DEPLOY_DIR}/test-upload-deadline.sh" \
   "${DEPLOY_DIR}/test-cloudflare-upsert-dns.sh" \
   "${DEPLOY_DIR}/test-simple-prod-scripts.sh" \
   "${DEPLOY_DIR}/test-probe-frontend.sh" \
@@ -231,11 +233,19 @@ if ! grep -q 'roll_size 10mb' "${DEPLOY_DIR}/Caddyfile.1g" ||
   exit 1
 fi
 
-echo "Checking 1G compose invariants..."
+echo "Checking protected stream isolation probe..."
+if ! grep -Fq 'ORIGIN_PROBE_MTLS_REQUIRED' "${DEPLOY_DIR}/stream-isolation-probe.sh" ||
+  ! grep -Fq 'X-Request-ID:' "${DEPLOY_DIR}/stream-isolation-probe.sh" ||
+  ! grep -Fq 'synthetic stream isolation probe' "${DEPLOY_DIR}/stream-isolation-probe.sh"; then
+  echo "stream-isolation-probe.sh must use synthetic requests with mTLS-protected origin correlation" >&2
+  exit 1
+fi
+
+echo "Checking 2C2G streaming compose baseline..."
 compose_file="${DEPLOY_DIR}/docker-compose.1g.yml"
-for expected in 'mem_limit: 64m' 'mem_limit: 256m' 'mem_limit: 128m' '127.0.0.1:${SERVER_PORT:-18080}:18080' '80:80' '443:443'; do
+for expected in 'mem_limit: 96m' 'mem_limit: 896m' 'mem_limit: 320m' 'mem_limit: 128m' 'GOMAXPROCS=${GOMAXPROCS:-2}' 'GOMEMLIMIT=${GOMEMLIMIT:-640MiB}' '127.0.0.1:${SERVER_PORT:-18080}:18080' '80:80' '443:443'; do
   if ! grep -Fq "${expected}" "${compose_file}"; then
-    echo "docker-compose.1g.yml is missing expected 1G invariant: ${expected}" >&2
+    echo "docker-compose.1g.yml is missing expected 2C2G baseline: ${expected}" >&2
     exit 1
   fi
 done
@@ -419,6 +429,9 @@ MIN_DOCKER_FREE_KB=1 \
 
 echo "Running 1G doctor validation tests..."
 "${DEPLOY_DIR}/test-doctor-1g.sh"
+
+echo "Running source upload deadline tests..."
+"${DEPLOY_DIR}/test-upload-deadline.sh"
 
 echo "Running simple production deploy/rollback script tests..."
 "${DEPLOY_DIR}/test-simple-prod-scripts.sh"
