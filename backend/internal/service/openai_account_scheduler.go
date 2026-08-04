@@ -186,11 +186,19 @@ type openAIAccountRuntimeStats struct {
 }
 
 type openAIAccountRuntimeStat struct {
-	errorRateEWMABits  atomic.Uint64
-	ttftEWMABits       atomic.Uint64
-	streamHealthMu     sync.Mutex
-	streamHealthEvents []openAIStreamHealthEvent
-	streamCircuitUntil time.Time
+	errorRateEWMABits   atomic.Uint64
+	ttftEWMABits        atomic.Uint64
+	streamHealthMu      sync.Mutex
+	streamHealthByModel map[string]*openAIModelStreamHealthStat
+}
+
+// openAIModelStreamHealthStat deliberately scopes the first-output circuit to
+// one canonical requested model. An account can be fast for gpt-5.6-sol while
+// being slow for gpt-5.5, so an account-wide circuit would either miss the
+// slow model or unnecessarily remove the fast one.
+type openAIModelStreamHealthStat struct {
+	events       []openAIStreamHealthEvent
+	circuitUntil time.Time
 }
 
 func newOpenAIAccountRuntimeStats() *openAIAccountRuntimeStats {
@@ -816,7 +824,7 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 		}
 		streamHealth := openAIStreamHealthSnapshot{}
 		if s.service.openAIStreamHealthRoutingEnabled() && s.stats != nil {
-			streamHealth = s.stats.streamHealthSnapshot(account.ID)
+			streamHealth = s.stats.streamHealthSnapshot(account.ID, req.RequestedModel)
 		}
 		allCandidates = append(allCandidates, openAIAccountCandidateScore{
 			account:      account,

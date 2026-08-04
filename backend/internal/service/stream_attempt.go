@@ -25,10 +25,13 @@ type StreamAttempt struct {
 	clientType string
 	bodyBucket string
 	model      string
-	stream     bool
-	accountID  int64
-	platform   string
-	attempts   int
+	// reasoningEffort is a normalized finite enum (unspecified/low/medium/high/
+	// xhigh/max), never a raw value from the request body.
+	reasoningEffort string
+	stream          bool
+	accountID       int64
+	platform        string
+	attempts        int
 
 	upstreamHeadersAt         time.Time
 	firstSemanticAt           time.Time
@@ -52,14 +55,19 @@ func StartStreamAttempt(c *gin.Context, startedAt time.Time, body []byte, model 
 		startedAt = time.Now()
 	}
 	requestID, _ := c.Request.Context().Value(ctxkey.RequestID).(string)
+	reasoningEffort := "unspecified"
+	if effort := extractOpenAIReasoningEffortFromBody(body, model); effort != nil {
+		reasoningEffort = *effort
+	}
 	attempt := &StreamAttempt{
-		startedAt:  startedAt,
-		requestID:  strings.TrimSpace(requestID),
-		cfRay:      boundedStreamAttemptValue(c.GetHeader("CF-Ray"), 128),
-		clientType: classifyStreamClient(c.GetHeader("User-Agent")),
-		bodyBucket: streamAttemptBodyBucket(len(body)),
-		model:      boundedStreamAttemptValue(model, 160),
-		stream:     true,
+		startedAt:       startedAt,
+		requestID:       strings.TrimSpace(requestID),
+		cfRay:           boundedStreamAttemptValue(c.GetHeader("CF-Ray"), 128),
+		clientType:      classifyStreamClient(c.GetHeader("User-Agent")),
+		bodyBucket:      streamAttemptBodyBucket(len(body)),
+		model:           boundedStreamAttemptValue(model, 160),
+		reasoningEffort: reasoningEffort,
+		stream:          true,
 	}
 	c.Set(streamAttemptContextKey, attempt)
 	return attempt
@@ -229,6 +237,7 @@ func FinalizeStreamAttempt(c *gin.Context) {
 		"client_type":                  attempt.clientType,
 		"request_body_bucket":          attempt.bodyBucket,
 		"model":                        attempt.model,
+		"reasoning_effort":             attempt.reasoningEffort,
 		"stream":                       attempt.stream,
 		"selected_account_id":          attempt.accountID,
 		"platform":                     attempt.platform,

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"hash/fnv"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -209,13 +210,56 @@ type openAIStreamHealthEvent struct {
 type openAIStreamHealthSnapshot struct {
 	TTFT5mMs           float64
 	TTFT15mMs          float64
+	TTFTP95_5mMs       int
 	FirstTimeoutRate5m float64
 	PreCancelRate5m    float64
 	CircuitOpen        bool
 	Samples15m         int
 }
 
-func (s *openAIAccountRuntimeStats) reportStreamHealth(accountID int64, firstTokenMs *int, outcome string, policy config.GatewayOpenAIStreamGovernanceConfig) {
+const maxOpenAIStreamHealthModelsPerAccount = 64
+
+func normalizedOpenAIStreamHealthModel(model string) string {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if model == "" {
+		return "unknown"
+	}
+	// The key is only in memory, but it is still derived from client input.
+	// Cap it to prevent unbounded per-account cardinality from malformed model
+	// identifiers while preserving normal provider model names verbatim.
+	if len(model) > 160 {
+		return "other"
+	}
+	return model
+}
+
+func streamHealthForModelLocked(stat *openAIAccountRuntimeStat, model string, create bool) *openAIModelStreamHealthStat {
+	if stat == nil {
+		return nil
+	}
+	model = normalizedOpenAIStreamHealthModel(model)
+	if stat.streamHealthByModel == nil {
+		if !create {
+			return nil
+		}
+		stat.streamHealthByModel = make(map[string]*openAIModelStreamHealthStat)
+	}
+	health := stat.streamHealthByModel[model]
+	if health != nil || !create {
+		return health
+	}
+	if len(stat.streamHealthByModel) >= maxOpenAIStreamHealthModelsPerAccount {
+		model = "other"
+		if health = stat.streamHealthByModel[model]; health != nil {
+			return health
+		}
+	}
+	health = &openAIModelStreamHealthStat{}
+	stat.streamHealthByModel[model] = health
+	return health
+}
+
+func (s *openAIAccountRuntimeStats) reportStreamHealth(accountID int64, model string, firstTokenMs *int, outcome string, policy config.GatewayOpenAIStreamGovernanceConfig) {
 	if s == nil || accountID <= 0 {
 		return
 	}
@@ -236,18 +280,26 @@ func (s *openAIAccountRuntimeStats) reportStreamHealth(accountID int64, firstTok
 		event.preCancel = true
 	}
 	stat.streamHealthMu.Lock()
-	stat.streamHealthEvents = append(stat.streamHealthEvents, event)
-	stat.streamHealthEvents = pruneOpenAIStreamHealthEvents(stat.streamHealthEvents, now.Add(-15*time.Minute))
-	snapshot := summarizeOpenAIStreamHealth(stat.streamHealthEvents, now, stat.streamCircuitUntil.After(now), stat.streamCircuitUntil)
-	slowTTFT := snapshot.TTFT5mMs > float64(policy.HealthTTFTMs)
+	health := streamHealthForModelLocked(stat, model, true)
+	if health == nil {
+		stat.streamHealthMu.Unlock()
+		return
+	}
+	health.events = append(health.events, event)
+	health.events = pruneOpenAIStreamHealthEvents(health.events, now.Add(-15*time.Minute))
+	snapshot := summarizeOpenAIStreamHealth(health.events, now, health.circuitUntil.After(now), health.circuitUntil)
+	// The acceptance target is a tail target. A mean lets one 25-second
+	// first-token event hide behind several quick responses, so use P95 for
+	// the circuit decision as well.
+	slowTTFT := snapshot.TTFTP95_5mMs > policy.HealthTTFTMs
 	if snapshot.Samples15m >= policy.CircuitMinSamples && (slowTTFT ||
 		(snapshot.FirstTimeoutRate5m+snapshot.PreCancelRate5m) >= float64(policy.CircuitFailureRatePercent)/100) {
-		stat.streamCircuitUntil = now.Add(time.Duration(policy.CircuitCooldownSeconds) * time.Second)
+		health.circuitUntil = now.Add(time.Duration(policy.CircuitCooldownSeconds) * time.Second)
 	}
 	stat.streamHealthMu.Unlock()
 }
 
-func (s *openAIAccountRuntimeStats) streamHealthSnapshot(accountID int64) openAIStreamHealthSnapshot {
+func (s *openAIAccountRuntimeStats) streamHealthSnapshot(accountID int64, model string) openAIStreamHealthSnapshot {
 	if s == nil || accountID <= 0 {
 		return openAIStreamHealthSnapshot{}
 	}
@@ -261,8 +313,13 @@ func (s *openAIAccountRuntimeStats) streamHealthSnapshot(accountID int64) openAI
 	}
 	now := time.Now()
 	stat.streamHealthMu.Lock()
-	stat.streamHealthEvents = pruneOpenAIStreamHealthEvents(stat.streamHealthEvents, now.Add(-15*time.Minute))
-	snapshot := summarizeOpenAIStreamHealth(stat.streamHealthEvents, now, stat.streamCircuitUntil.After(now), stat.streamCircuitUntil)
+	health := streamHealthForModelLocked(stat, model, false)
+	if health == nil {
+		stat.streamHealthMu.Unlock()
+		return openAIStreamHealthSnapshot{}
+	}
+	health.events = pruneOpenAIStreamHealthEvents(health.events, now.Add(-15*time.Minute))
+	snapshot := summarizeOpenAIStreamHealth(health.events, now, health.circuitUntil.After(now), health.circuitUntil)
 	stat.streamHealthMu.Unlock()
 	return snapshot
 }
@@ -281,6 +338,7 @@ func pruneOpenAIStreamHealthEvents(events []openAIStreamHealthEvent, cutoff time
 func summarizeOpenAIStreamHealth(events []openAIStreamHealthEvent, now time.Time, circuitOpen bool, _ time.Time) openAIStreamHealthSnapshot {
 	var out openAIStreamHealthSnapshot
 	var ttft5, ttft15 float64
+	ttft5Values := make([]int, 0, len(events))
 	var ttft5Count, ttft15Count, fiveMinuteCount, timeouts5, cancels5 int
 	fiveMinuteAgo := now.Add(-5 * time.Minute)
 	for _, event := range events {
@@ -291,6 +349,7 @@ func summarizeOpenAIStreamHealth(events []openAIStreamHealthEvent, now time.Time
 			if !event.at.Before(fiveMinuteAgo) {
 				ttft5 += float64(event.ttftMs)
 				ttft5Count++
+				ttft5Values = append(ttft5Values, event.ttftMs)
 			}
 		}
 		if event.at.Before(fiveMinuteAgo) {
@@ -306,6 +365,11 @@ func summarizeOpenAIStreamHealth(events []openAIStreamHealthEvent, now time.Time
 	}
 	if ttft5Count > 0 {
 		out.TTFT5mMs = ttft5 / float64(ttft5Count)
+		sort.Ints(ttft5Values)
+		// Nearest-rank P95 is conservative for the deliberately small circuit
+		// sample window and matches the routing goal of avoiding long tails.
+		p95Index := (95*len(ttft5Values)+99)/100 - 1
+		out.TTFTP95_5mMs = ttft5Values[p95Index]
 	}
 	if ttft15Count > 0 {
 		out.TTFT15mMs = ttft15 / float64(ttft15Count)
@@ -318,11 +382,11 @@ func summarizeOpenAIStreamHealth(events []openAIStreamHealthEvent, now time.Time
 	return out
 }
 
-func (s *OpenAIGatewayService) ReportOpenAIStreamAttempt(accountID int64, firstTokenMs *int, outcome string) {
+func (s *OpenAIGatewayService) ReportOpenAIStreamAttempt(accountID int64, model string, firstTokenMs *int, outcome string) {
 	if s == nil || s.openaiAccountStats == nil || s.cfg == nil {
 		return
 	}
-	s.openaiAccountStats.reportStreamHealth(accountID, firstTokenMs, outcome, s.cfg.Gateway.OpenAIStreamGovernance)
+	s.openaiAccountStats.reportStreamHealth(accountID, model, firstTokenMs, outcome, s.cfg.Gateway.OpenAIStreamGovernance)
 }
 
 func streamHealthCircuitOpen(snapshot openAIStreamHealthSnapshot) bool { return snapshot.CircuitOpen }

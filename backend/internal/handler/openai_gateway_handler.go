@@ -596,7 +596,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					if failoverClientGone(c) {
 						service.StreamAttemptMarkClientCanceled(c)
 						if !streamStarted && service.StreamAttemptClaimPreSemanticCancel(c) {
-							h.gatewayService.ReportOpenAIStreamAttempt(account.ID, nil, "presemantic_cancel")
+							h.gatewayService.ReportOpenAIStreamAttempt(account.ID, reqModel, nil, "presemantic_cancel")
 						}
 						reqLog.Info("openai.failover_aborted_client_disconnected",
 							zap.Int64("account_id", account.ID),
@@ -616,7 +616,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					}
 					if failoverErr.StatusCode == http.StatusGatewayTimeout &&
 						strings.Contains(string(failoverErr.ResponseBody), "first_output_timeout") {
-						h.gatewayService.ReportOpenAIStreamAttempt(account.ID, nil, "first_output_timeout")
+						h.gatewayService.ReportOpenAIStreamAttempt(account.ID, reqModel, nil, "first_output_timeout")
 					}
 					if !failoverErr.ShouldRetryNextAccount() {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
@@ -709,7 +709,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			}
 			scheduleSucceeded := openAIForwardSucceededForScheduling(result)
 			if reqStream && scheduleSucceeded && result.FirstTokenMs != nil {
-				h.gatewayService.ReportOpenAIStreamAttempt(account.ID, result.FirstTokenMs, "succeeded")
+				h.gatewayService.ReportOpenAIStreamAttempt(account.ID, reqModel, result.FirstTokenMs, "succeeded")
 			}
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(reqModel), scheduleSucceeded, result.FirstTokenMs)
 		} else {

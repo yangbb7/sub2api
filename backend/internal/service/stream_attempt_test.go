@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,7 +31,8 @@ func TestStreamAttemptFinalizationIsPrivacySafeAndCapturesPreSemanticCancel(t *t
 	c.Request.Header.Set("CF-Ray", "ray-1")
 	c.Request.Header.Set("User-Agent", "Codex Desktop")
 
-	StartStreamAttempt(c, time.Now().Add(-10*time.Millisecond), make([]byte, 5*1024*1024), "gpt-5", true)
+	body := []byte(`{"reasoning":{"effort":"HIGH"},"input":"` + strings.Repeat("x", 5*1024*1024) + `"}`)
+	StartStreamAttempt(c, time.Now().Add(-10*time.Millisecond), body, "gpt-5", true)
 	StreamAttemptMarkSelectedAccount(c, &Account{ID: 42, Platform: PlatformOpenAI, Name: "never-recorded"})
 	StreamAttemptMarkUpstreamResponseHeaders(c)
 	cancel()
@@ -44,11 +46,20 @@ func TestStreamAttemptFinalizationIsPrivacySafeAndCapturesPreSemanticCancel(t *t
 	require.Equal(t, "ray-1", event.Fields["cf_ray"])
 	require.Equal(t, "codex_desktop", event.Fields["client_type"])
 	require.Equal(t, "4m_8m", event.Fields["request_body_bucket"])
+	require.Equal(t, "high", event.Fields["reasoning_effort"])
 	require.Equal(t, int64(42), event.Fields["selected_account_id"])
 	require.Equal(t, "after_headers_before_semantic", event.Fields["cancel_phase"])
 	require.Equal(t, "client_canceled", event.Fields["final_outcome"])
 	require.NotContains(t, event.Fields, "selected_account_name")
 	require.NotContains(t, event.Fields, "request_body")
+}
+
+func TestStreamAttemptReasoningEffortUsesFinitePrivacySafeValues(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+	attempt := StartStreamAttempt(c, time.Now(), []byte(`{"reasoning":{"effort":"customer-secret-value"}}`), "gpt-5", true)
+	require.NotNil(t, attempt)
+	require.Equal(t, "unspecified", attempt.reasoningEffort)
 }
 
 func TestStreamAttemptBodyBucketsAndClientClassification(t *testing.T) {

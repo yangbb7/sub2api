@@ -224,7 +224,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	reportPresemanticCancel := func() {
 		StreamAttemptMarkClientCanceled(c)
 		if firstTokenMs == nil && StreamAttemptClaimPreSemanticCancel(c) {
-			s.ReportOpenAIStreamAttempt(account.ID, nil, "presemantic_cancel")
+			s.ReportOpenAIStreamAttempt(account.ID, originalModel, nil, "presemantic_cancel")
 		}
 	}
 	handlePendingWriteError := func(err error) {

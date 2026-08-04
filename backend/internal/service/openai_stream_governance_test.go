@@ -108,15 +108,17 @@ func TestWithOpenAIStreamGovernancePlanReservesBackupForSafeReplay(t *testing.T)
 func TestOpenAIStreamHealthCircuitMovesAccountBehindHealthyCandidates(t *testing.T) {
 	stats := newOpenAIAccountRuntimeStats()
 	policy := config.GatewayOpenAIStreamGovernanceConfig{
+		Enabled:                   true,
+		RolloutPercent:            10,
 		HealthTTFTMs:              8000,
 		CircuitMinSamples:         3,
 		CircuitFailureRatePercent: 50,
 		CircuitCooldownSeconds:    300,
 	}
 	for range 3 {
-		stats.reportStreamHealth(1, nil, "first_output_timeout", policy)
+		stats.reportStreamHealth(1, "gpt-5.5", nil, "first_output_timeout", policy)
 	}
-	snapshot := stats.streamHealthSnapshot(1)
+	snapshot := stats.streamHealthSnapshot(1, "gpt-5.5")
 	require.True(t, snapshot.CircuitOpen)
 
 	primary, retry := splitOpenAIStreamCircuitCandidates([]openAIAccountCandidateScore{
@@ -140,7 +142,7 @@ func TestOpenAIStreamHealthRoutingProtectsWholePoolBeforeBudgetRollout(t *testin
 		CircuitCooldownSeconds:    300,
 	}
 	for range 3 {
-		stats.reportStreamHealth(14, nil, "first_output_timeout", policy)
+		stats.reportStreamHealth(14, "gpt-5.5", nil, "first_output_timeout", policy)
 	}
 
 	cfg := &config.Config{}
@@ -150,7 +152,7 @@ func TestOpenAIStreamHealthRoutingProtectsWholePoolBeforeBudgetRollout(t *testin
 		service: &OpenAIGatewayService{cfg: cfg},
 		stats:   stats,
 	}
-	plan := scheduler.buildOpenAIAccountLoadPlan(context.Background(), OpenAIAccountScheduleRequest{}, []*Account{
+	plan := scheduler.buildOpenAIAccountLoadPlan(context.Background(), OpenAIAccountScheduleRequest{RequestedModel: "gpt-5.5"}, []*Account{
 		{ID: 14, Platform: PlatformOpenAI, Type: AccountTypeOAuth},
 		{ID: 23, Platform: PlatformOpenAI, Type: AccountTypeOAuth},
 	}, map[int64]*AccountLoadInfo{})
@@ -158,4 +160,47 @@ func TestOpenAIStreamHealthRoutingProtectsWholePoolBeforeBudgetRollout(t *testin
 	require.Equal(t, []int64{23}, openAIPlanAccountIDs(plan.candidates))
 	require.Equal(t, []int64{14}, openAIPlanAccountIDs(plan.slowTTFTRetry))
 	require.Equal(t, 1, plan.candidateCount)
+}
+
+func TestOpenAIStreamHealthIsolatedByModelAndUsesP95(t *testing.T) {
+	stats := newOpenAIAccountRuntimeStats()
+	policy := config.GatewayOpenAIStreamGovernanceConfig{
+		Enabled:                   true,
+		RolloutPercent:            10,
+		HealthTTFTMs:              8000,
+		CircuitMinSamples:         3,
+		CircuitFailureRatePercent: 50,
+		CircuitCooldownSeconds:    300,
+	}
+	for _, ttft := range []int{1000, 1000, 9000} {
+		ttft := ttft
+		stats.reportStreamHealth(18, "gpt-5.5", &ttft, "succeeded", policy)
+	}
+	for _, ttft := range []int{1000, 1000, 1000} {
+		ttft := ttft
+		stats.reportStreamHealth(18, "gpt-5.6-sol", &ttft, "succeeded", policy)
+	}
+
+	gpt55 := stats.streamHealthSnapshot(18, "gpt-5.5")
+	gpt56 := stats.streamHealthSnapshot(18, "gpt-5.6-sol")
+	require.Equal(t, 9000, gpt55.TTFTP95_5mMs)
+	require.True(t, gpt55.CircuitOpen, "P95 must open the circuit even when the mean is below the threshold")
+	require.False(t, gpt56.CircuitOpen, "slow gpt-5.5 samples must not evict a fast gpt-5.6-sol route")
+
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIStreamGovernance = policy
+	scheduler := &defaultOpenAIAccountScheduler{
+		service: &OpenAIGatewayService{cfg: cfg},
+		stats:   stats,
+	}
+	accounts := []*Account{
+		{ID: 18, Platform: PlatformOpenAI, Type: AccountTypeOAuth},
+		{ID: 23, Platform: PlatformOpenAI, Type: AccountTypeOAuth},
+	}
+	slowPlan := scheduler.buildOpenAIAccountLoadPlan(context.Background(), OpenAIAccountScheduleRequest{RequestedModel: "gpt-5.5"}, accounts, map[int64]*AccountLoadInfo{})
+	fastPlan := scheduler.buildOpenAIAccountLoadPlan(context.Background(), OpenAIAccountScheduleRequest{RequestedModel: "gpt-5.6-sol"}, accounts, map[int64]*AccountLoadInfo{})
+	require.Equal(t, []int64{23}, openAIPlanAccountIDs(slowPlan.candidates))
+	require.Equal(t, []int64{18}, openAIPlanAccountIDs(slowPlan.slowTTFTRetry))
+	require.ElementsMatch(t, []int64{18, 23}, openAIPlanAccountIDs(fastPlan.candidates))
+	require.Empty(t, fastPlan.slowTTFTRetry)
 }
