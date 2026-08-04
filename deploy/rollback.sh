@@ -180,14 +180,15 @@ set -euo pipefail
 cd $(single_quote "${REMOTE_DIR}")
 current="\$(grep -Eo 'reverse_proxy[[:space:]]+[^[:space:]]+:18080' Caddyfile.1g | awk '{print \$2}' | sed 's/:18080$//' | head -1 || true)"
 printf 'CURRENT %s\\n' "\${current:-unknown}"
-docker ps --format '{{.Names}}' | grep -E '^(gateway$|gateway-(green|blue|next|rollback))' | while read -r name; do
+docker ps -a --format '{{.Names}}' | grep -E '^(gateway$|gateway-(green|blue|next|rollback))' | while read -r name; do
+  state="\$(docker inspect "\${name}" --format '{{.State.Status}}')"
   health="\$(docker inspect "\${name}" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}')"
   revision="\$(docker inspect "\${name}" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
   created="\$(docker inspect "\${name}" --format '{{.Created}}')"
   marker=' '
   [ "\${name}" = "\${current}" ] && marker='*'
-  printf '%s\t%s\t%s\t%s\t%s\\n' "\${created}" "\${marker}" "\${name}" "\${health}" "\${revision:-unknown}"
-done | sort -r | awk -F '\\t' '{printf "%s %s %s %s %s\\n", \$2, \$1, \$3, \$4, \$5}'
+  printf '%s\t%s\t%s\t%s\t%s\t%s\\n' "\${created}" "\${marker}" "\${name}" "\${state}" "\${health}" "\${revision:-unknown}"
+done | sort -r | awk -F '\\t' '{printf "%s %s %s %s/%s %s\\n", \$2, \$1, \$3, \$4, \$5, \$6}'
 REMOTE
   run_remote_root_script "${tmp}"
   rm -f "${tmp}"
@@ -201,10 +202,15 @@ select_previous_target() {
 set -euo pipefail
 cd $(single_quote "${REMOTE_DIR}")
 current="\$(grep -Eo 'reverse_proxy[[:space:]]+[^[:space:]]+:18080' Caddyfile.1g | awk '{print \$2}' | sed 's/:18080$//' | head -1 || true)"
-docker ps --format '{{.Names}}' | grep -E '^(gateway$|gateway-(green|blue|next|rollback))' | while read -r name; do
+docker ps -a --format '{{.Names}}' | grep -E '^(gateway$|gateway-(green|blue|next|rollback))' | while read -r name; do
   [ "\${name}" != "\${current}" ] || continue
+  state="\$(docker inspect "\${name}" --format '{{.State.Status}}')"
   health="\$(docker inspect "\${name}" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}')"
-  [ "\${health}" = healthy ] || continue
+  if [ "\${state}" = running ]; then
+    [ "\${health}" = healthy ] || continue
+  else
+    [ "\${state}" = exited ] || continue
+  fi
   created="\$(docker inspect "\${name}" --format '{{.Created}}')"
   printf '%s %s\\n' "\${created}" "\${name}"
 done | sort -r | awk 'NR == 1 {print \$2}'
@@ -222,19 +228,59 @@ switch_caddy() {
 set -euo pipefail
 cd $(single_quote "${REMOTE_DIR}")
 TARGET=$(single_quote "${target}")
-test "\$(docker inspect "\${TARGET}" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}')" = healthy
 current="\$(grep -Eo 'reverse_proxy[[:space:]]+[^[:space:]]+:18080' Caddyfile.1g | awk '{print \$2}' | sed 's/:18080$//' | head -1 || true)"
 test -n "\${current}"
 if [ "\${current}" = "\${TARGET}" ]; then
   echo "already=\${TARGET}"
   exit 0
 fi
+target_was_stopped=false
+target_state="\$(docker inspect "\${TARGET}" --format '{{.State.Status}}')"
+restore_current() {
+  docker stop "\${TARGET}" >/dev/null 2>&1 || true
+  docker start "\${current}" >/dev/null 2>&1 || true
+}
+if [ "\${target_state}" != running ]; then
+  [ "\${target_state}" = exited ] || {
+    echo "rollback target is not runnable: \${TARGET} state=\${target_state}" >&2
+    exit 1
+  }
+  # Serial deployments keep the old container stopped to fit in 2GiB. Do not
+  # briefly run both full-size gateways when restoring it.
+  docker stop "\${current}" >/dev/null
+  if ! docker start "\${TARGET}" >/dev/null; then
+    docker start "\${current}" >/dev/null 2>&1 || true
+    exit 1
+  fi
+  target_was_stopped=true
+fi
+ready=false
+for i in \$(seq 1 45); do
+  if docker exec "\${TARGET}" wget -q -T 2 -O /dev/null http://127.0.0.1:18080/health; then
+    ready=true
+    break
+  fi
+  sleep 2
+done
+if [ "\${ready}" != true ]; then
+  [ "\${target_was_stopped}" = true ] && restore_current
+  echo "rollback target did not become ready: \${TARGET}" >&2
+  exit 1
+fi
 backup="Caddyfile.1g.before-rollback-to-\${TARGET}-\$(date -u +%Y%m%dT%H%M%SZ).bak"
 cp Caddyfile.1g "\${backup}"
-sed "s/reverse_proxy \${current}:18080/reverse_proxy \${TARGET}:18080/" "\${backup}" > Caddyfile.1g
+sed "s/reverse_proxy \${current}:18080/reverse_proxy \${TARGET}:18080/" "\${backup}" > Caddyfile.1g.next
 if docker ps --format '{{.Names}}' | grep -qx gateway-caddy; then
-  docker exec -i gateway-caddy sh -c 'cat > /tmp/Caddyfile.next && caddy validate --config /tmp/Caddyfile.next --adapter caddyfile && caddy reload --config /tmp/Caddyfile.next --adapter caddyfile' < Caddyfile.1g
+  if ! docker exec -i gateway-caddy sh -c 'cat > /tmp/Caddyfile.next && caddy validate --config /tmp/Caddyfile.next --adapter caddyfile' < Caddyfile.1g.next || \\
+    ! mv Caddyfile.1g.next Caddyfile.1g || \\
+    ! docker exec -i gateway-caddy sh -c 'cat > /tmp/Caddyfile.next && caddy reload --config /tmp/Caddyfile.next --adapter caddyfile' < Caddyfile.1g; then
+    cp "\${backup}" Caddyfile.1g
+    docker exec -i gateway-caddy sh -c 'cat > /tmp/Caddyfile.rollback && caddy reload --config /tmp/Caddyfile.rollback --adapter caddyfile' < Caddyfile.1g || true
+    [ "\${target_was_stopped}" = true ] && restore_current
+    exit 1
+  fi
 else
+  mv Caddyfile.1g.next Caddyfile.1g
   docker start gateway-caddy >/dev/null
 fi
 docker exec gateway-caddy wget -q -O- http://127.0.0.1:2019/config/ | grep -q "\${TARGET}:18080"

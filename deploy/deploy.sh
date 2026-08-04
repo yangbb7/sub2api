@@ -13,6 +13,13 @@ HEALTH_SLEEP="${HEALTH_SLEEP:-0.2}"
 HEALTH_MIN_SUCCESS="${HEALTH_MIN_SUCCESS:-10}"
 HEALTH_REQUIRED_STREAK="${HEALTH_REQUIRED_STREAK:-5}"
 KEEP_ROLLBACKS="${KEEP_ROLLBACKS:-1}"
+DEPLOY_STRATEGY="${DEPLOY_STRATEGY:-auto}"
+# A 2GiB host cannot retain two full 896MiB gateways during a blue-green
+# cutover. The serial strategy validates the image in an isolated capped
+# process, then briefly stops the active gateway before starting the
+# steady-state replacement and reloading Caddy.
+SERIAL_CANARY_MEMORY_LIMIT="${SERIAL_CANARY_MEMORY_LIMIT:-256m}"
+BLUE_GREEN_MIN_MEMORY_KB="${BLUE_GREEN_MIN_MEMORY_KB:-3670016}"
 GATEWAY_MEMORY_LIMIT="${GATEWAY_MEMORY_LIMIT:-}"
 GATEWAY_GOMAXPROCS="${GATEWAY_GOMAXPROCS:-}"
 GATEWAY_GOMEMLIMIT="${GATEWAY_GOMEMLIMIT:-}"
@@ -31,8 +38,8 @@ What it does:
   1. Requires local HEAD to match origin/main unless ALLOW_UNPUSHED=1.
   2. Builds the embedded frontend and linux gateway binary locally.
   3. Builds gateway:cloud on the production server.
-  4. Starts a new parallel gateway container from the active container env.
-  5. Hot-reloads Caddy to the new container after health checks pass.
+  4. Chooses blue-green when memory permits, otherwise a 2GiB-safe serial cutover.
+  5. Hot-reloads Caddy to the verified new container after health checks pass.
 
 Required:
   SSH access to the production host configured in deploy/deploy-1g.env.local,
@@ -86,6 +93,7 @@ load_connection_defaults() {
   local name
   for name in \
     TARGET_REGION DOMAIN REMOTE_DIR SSH_TARGET SSH_PORT SSH_KEY SSH_PASSWORD SSH_PASS SUDO_PASSWORD \
+    DEPLOY_STRATEGY SERIAL_CANARY_MEMORY_LIMIT BLUE_GREEN_MIN_MEMORY_KB \
     GATEWAY_MEMORY_LIMIT GATEWAY_GOMAXPROCS GATEWAY_GOMEMLIMIT \
     GATEWAY_STREAM_KEEPALIVE_INTERVAL GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED \
     GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS \
@@ -146,6 +154,8 @@ validate_runtime_overrides() {
   GATEWAY_GOMAXPROCS="${GATEWAY_GOMAXPROCS:-2}"
   GATEWAY_GOMEMLIMIT="${GATEWAY_GOMEMLIMIT:-640MiB}"
   validate_simple_token GATEWAY_MEMORY_LIMIT "${GATEWAY_MEMORY_LIMIT}"
+  validate_simple_token SERIAL_CANARY_MEMORY_LIMIT "${SERIAL_CANARY_MEMORY_LIMIT}"
+  validate_simple_token BLUE_GREEN_MIN_MEMORY_KB "${BLUE_GREEN_MIN_MEMORY_KB}"
   validate_simple_token GATEWAY_GOMAXPROCS "${GATEWAY_GOMAXPROCS:-}"
   validate_simple_token GATEWAY_GOMEMLIMIT "${GATEWAY_GOMEMLIMIT:-}"
   validate_simple_token GATEWAY_STREAM_KEEPALIVE_INTERVAL "${GATEWAY_STREAM_KEEPALIVE_INTERVAL}"
@@ -167,6 +177,14 @@ validate_runtime_overrides() {
     true|false) ;;
     *) die "GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED must be true or false." ;;
   esac
+  case "${DEPLOY_STRATEGY}" in
+    auto|bluegreen|serial) ;;
+    *) die "DEPLOY_STRATEGY must be auto, bluegreen, or serial." ;;
+  esac
+  case "${BLUE_GREEN_MIN_MEMORY_KB}" in
+    ''|*[!0-9]*) die "BLUE_GREEN_MIN_MEMORY_KB must be a positive integer." ;;
+  esac
+  [ "${BLUE_GREEN_MIN_MEMORY_KB}" -gt 0 ] || die "BLUE_GREEN_MIN_MEMORY_KB must be a positive integer."
   for value_name in GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS; do
     case "${!value_name}" in
       ''|*[!0-9]*) die "${value_name} must be an integer." ;;
@@ -248,6 +266,187 @@ require_clean_head() {
   if [ "${ALLOW_UNPUSHED:-0}" != 1 ] && [ "${head}" != "${origin}" ]; then
     die "HEAD (${head}) does not match origin/main (${origin}). Push first, or set ALLOW_UNPUSHED=1 deliberately."
   fi
+}
+
+select_deploy_strategy() {
+  local memory_kb
+  case "${DEPLOY_STRATEGY}" in
+    bluegreen|serial)
+      printf '%s\n' "${DEPLOY_STRATEGY}"
+      return 0
+      ;;
+  esac
+
+  memory_kb="$(run_ssh "awk '/^MemTotal:/ {print \$2; exit}' /proc/meminfo")"
+  case "${memory_kb}" in
+    ''|*[!0-9]*) die "Could not determine remote MemTotal for DEPLOY_STRATEGY=auto." ;;
+  esac
+  if [ "${memory_kb}" -lt "${BLUE_GREEN_MIN_MEMORY_KB}" ]; then
+    printf '%s\n' serial
+  else
+    printf '%s\n' bluegreen
+  fi
+}
+
+stop_inactive_gateways() {
+  local active_gateway="$1"
+  local tmp
+  tmp="$(mktemp)"
+  cat > "${tmp}" <<REMOTE
+#!/usr/bin/env bash
+set -euo pipefail
+ACTIVE_GATEWAY=$(single_quote "${active_gateway}")
+docker ps --format '{{.Names}}' | grep -E '^(gateway$|gateway-(green|blue|next|rollback))' | while read -r name; do
+  [ "\${name}" = "\${ACTIVE_GATEWAY}" ] && continue
+  echo "stop inactive gateway before serial cutover: \${name}"
+  docker stop "\${name}" >/dev/null
+done
+REMOTE
+  run_remote_root_script "${tmp}"
+  rm -f "${tmp}"
+}
+
+start_serial_candidate() {
+  local active_gateway="$1"
+  local commit="$2"
+  local tmp
+  tmp="$(mktemp)"
+  cat > "${tmp}" <<REMOTE
+#!/usr/bin/env bash
+set -euo pipefail
+cd $(single_quote "${REMOTE_DIR}")
+ACTIVE_GATEWAY=$(single_quote "${active_gateway}")
+EXPECTED_REVISION=$(single_quote "${commit}")
+CANARY_MEMORY_LIMIT=$(single_quote "${SERIAL_CANARY_MEMORY_LIMIT}")
+
+test "\$(docker inspect "\${ACTIVE_GATEWAY}" --format '{{.State.Health.Status}}')" = healthy
+test "\$(docker inspect gateway:cloud --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "\${EXPECTED_REVISION}"
+# This is intentionally not a second server process. On a 2GiB host even a
+# capped server can overlap the steady-state gateway's working set. It proves
+# that the built image can execute before the reversible single-instance cut.
+docker run --rm --network none --memory "\${CANARY_MEMORY_LIMIT}" gateway:cloud --version >/dev/null
+echo "serial_image_preflight_memory_limit=\${CANARY_MEMORY_LIMIT}"
+REMOTE
+  run_remote_root_script "${tmp}"
+  rm -f "${tmp}"
+}
+
+promote_serial_candidate() {
+  local active_gateway="$1"
+  local commit="$2"
+  local next_gateway="gateway-green-${commit}"
+  local tmp
+  tmp="$(mktemp)"
+  cat > "${tmp}" <<REMOTE
+#!/usr/bin/env bash
+set -euo pipefail
+cd $(single_quote "${REMOTE_DIR}")
+ACTIVE_GATEWAY=$(single_quote "${active_gateway}")
+NEXT_GATEWAY=$(single_quote "${next_gateway}")
+GATEWAY_MEMORY_LIMIT=$(single_quote "${GATEWAY_MEMORY_LIMIT}")
+GATEWAY_GOMAXPROCS=$(single_quote "${GATEWAY_GOMAXPROCS:-}")
+GATEWAY_GOMEMLIMIT=$(single_quote "${GATEWAY_GOMEMLIMIT:-}")
+GATEWAY_STREAM_KEEPALIVE_INTERVAL=$(single_quote "${GATEWAY_STREAM_KEEPALIVE_INTERVAL}")
+GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED=$(single_quote "${GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED}")
+GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT=$(single_quote "${GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT}")
+GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS=$(single_quote "${GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS}")
+GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS=$(single_quote "${GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS}")
+
+test "\$(docker inspect "\${ACTIVE_GATEWAY}" --format '{{.State.Health.Status}}')" = healthy
+backup="Caddyfile.1g.before-\${NEXT_GATEWAY}-\$(date -u +%Y%m%dT%H%M%SZ).bak"
+cp Caddyfile.1g "\${backup}"
+sed "s/reverse_proxy \${ACTIVE_GATEWAY}:18080/reverse_proxy \${NEXT_GATEWAY}:18080/" "\${backup}" > Caddyfile.1g.next
+if ! docker exec -i gateway-caddy sh -c 'cat > /tmp/Caddyfile.next && caddy validate --config /tmp/Caddyfile.next --adapter caddyfile' < Caddyfile.1g.next; then
+  rm -f Caddyfile.1g.next
+  exit 1
+fi
+env_file="\$(mktemp /tmp/gateway-serial-env.XXXXXX)"
+restore_active() {
+  rm -f "\${env_file}" Caddyfile.1g.next
+  docker rm -f "\${NEXT_GATEWAY}" >/dev/null 2>&1 || true
+  if [ -f "\${backup}" ]; then
+    cp "\${backup}" Caddyfile.1g
+    docker exec -i gateway-caddy sh -c 'cat > /tmp/Caddyfile.rollback && caddy reload --config /tmp/Caddyfile.rollback --adapter caddyfile' < Caddyfile.1g || true
+  fi
+  docker start "\${ACTIVE_GATEWAY}" >/dev/null 2>&1 || true
+}
+failed=true
+cleanup() {
+  status=\$?
+  if [ "\${failed}" = true ]; then
+    restore_active
+  else
+    rm -f "\${env_file}"
+  fi
+  exit "\${status}"
+}
+trap cleanup EXIT
+chmod 600 "\${env_file}"
+docker inspect "\${ACTIVE_GATEWAY}" --format '{{range .Config.Env}}{{println .}}{{end}}' > "\${env_file}"
+set_env_override() {
+  key="\$1"
+  value="\$2"
+  [ -n "\${value}" ] || return 0
+  next_env="\${env_file}.next"
+  awk -F= -v key="\${key}" '\$1 != key { print }' "\${env_file}" > "\${next_env}"
+  printf '%s=%s\n' "\${key}" "\${value}" >> "\${next_env}"
+  mv "\${next_env}" "\${env_file}"
+}
+set_env_override GOMAXPROCS "\${GATEWAY_GOMAXPROCS}"
+set_env_override GOMEMLIMIT "\${GATEWAY_GOMEMLIMIT}"
+set_env_override GATEWAY_STREAM_KEEPALIVE_INTERVAL "\${GATEWAY_STREAM_KEEPALIVE_INTERVAL}"
+set_env_override GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED "\${GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED}"
+set_env_override GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT "\${GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT}"
+set_env_override GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS "\${GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS}"
+set_env_override GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS "\${GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS}"
+docker rm -f "\${NEXT_GATEWAY}" >/dev/null 2>&1 || true
+docker stop "\${ACTIVE_GATEWAY}" >/dev/null
+docker run -d \\
+  --name "\${NEXT_GATEWAY}" \\
+  --restart unless-stopped \\
+  --network gateway_gateway-network \\
+  --ulimit nofile=65535:65535 \\
+  --memory "\${GATEWAY_MEMORY_LIMIT}" \\
+  --env-file "\${env_file}" \\
+  -v /opt/gateway/data:/app/data \\
+  gateway:cloud >/dev/null
+ready_streak=0
+for i in \$(seq 1 45); do
+  if docker exec "\${NEXT_GATEWAY}" wget -q -T 2 -O /dev/null http://127.0.0.1:18080/health; then
+    ready_streak=\$((ready_streak + 1))
+    [ "\${ready_streak}" -ge 3 ] && break
+  else
+    ready_streak=0
+  fi
+  sleep 2
+done
+test "\${ready_streak}" -ge 3
+mv Caddyfile.1g.next Caddyfile.1g
+docker exec -i gateway-caddy sh -c 'cat > /tmp/Caddyfile.next && caddy reload --config /tmp/Caddyfile.next --adapter caddyfile' < Caddyfile.1g
+docker exec gateway-caddy wget -q -O- http://127.0.0.1:2019/config/ | grep -q "\${NEXT_GATEWAY}:18080"
+failed=false
+echo "active=\${NEXT_GATEWAY}"
+echo "rollback=\${ACTIVE_GATEWAY}"
+REMOTE
+  run_remote_root_script "${tmp}"
+  rm -f "${tmp}"
+}
+
+apply_steady_state_resource_limits() {
+  local tmp
+  tmp="$(mktemp)"
+  cat > "${tmp}" <<'REMOTE'
+#!/usr/bin/env bash
+set -euo pipefail
+docker update --memory 96m gateway-caddy >/dev/null
+docker update --memory 320m gateway-postgres >/dev/null
+docker update --memory 128m gateway-redis >/dev/null
+docker inspect gateway-caddy --format 'gateway-caddy memory={{.HostConfig.Memory}}'
+docker inspect gateway-postgres --format 'gateway-postgres memory={{.HostConfig.Memory}}'
+docker inspect gateway-redis --format 'gateway-redis memory={{.HostConfig.Memory}}'
+REMOTE
+  run_remote_root_script "${tmp}"
+  rm -f "${tmp}"
 }
 
 remote_current_gateway() {
@@ -441,13 +640,17 @@ if [ "\${KEEP_ROLLBACKS}" -gt 0 ] && [ -n "\${ROLLBACK_GATEWAY}" ]; then
   printf '%s\n' "\${ROLLBACK_GATEWAY}" >> "\${keep_file}"
 fi
 
-docker ps --format '{{.Names}}' | grep -E '^(gateway$|gateway-(green|blue|next|rollback))' | while read -r name; do
+docker ps -a --format '{{.Names}} {{.State}}' | grep -E '^(gateway$|gateway-(green|blue|next|rollback)) ' | while read -r name state; do
   if grep -Fxq "\${name}" "\${keep_file}"; then
     echo "keep gateway container: \${name}"
     continue
   fi
-  echo "stop old gateway container: \${name}"
-  docker stop "\${name}" >/dev/null || true
+  if [ "\${state}" = running ]; then
+    echo "stop old gateway container: \${name}"
+    docker stop "\${name}" >/dev/null || true
+  fi
+  echo "remove stale gateway container: \${name}"
+  docker rm "\${name}" >/dev/null || true
 done
 REMOTE
   run_remote_root_script "${tmp}"
@@ -468,12 +671,14 @@ main() {
   validate_runtime_overrides
   require_clean_head
 
-  local commit active_gateway
+  local commit active_gateway deploy_strategy
   commit="$(git -C "${ROOT_DIR}" rev-parse --short=12 HEAD)"
   active_gateway="$(remote_current_gateway)"
   [ -n "${active_gateway}" ] || die "Could not determine active Caddy upstream."
+  deploy_strategy="$(select_deploy_strategy)"
   echo "Current production gateway: ${active_gateway}"
   echo "Deploying revision: ${commit}"
+  echo "Deployment strategy: ${deploy_strategy}"
   echo "Gateway runtime memory limit: ${GATEWAY_MEMORY_LIMIT}"
   [ -n "${GATEWAY_GOMAXPROCS:-}" ] && echo "Gateway runtime GOMAXPROCS: ${GATEWAY_GOMAXPROCS}"
   [ -n "${GATEWAY_GOMEMLIMIT:-}" ] && echo "Gateway runtime GOMEMLIMIT: ${GATEWAY_GOMEMLIMIT}"
@@ -481,7 +686,19 @@ main() {
   echo "Gateway stream governance: enabled=${GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED} rollout=${GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT}% total=${GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS}s first=${GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS}s"
 
   build_remote_image
-  promote_new_container "${active_gateway}" "${commit}"
+  case "${deploy_strategy}" in
+    bluegreen)
+      promote_new_container "${active_gateway}" "${commit}"
+      ;;
+    serial)
+      echo "2GiB-safe serial mode: stopping inactive rollback containers before candidate preflight."
+      stop_inactive_gateways "${active_gateway}"
+      start_serial_candidate "${active_gateway}" "${commit}"
+      promote_serial_candidate "${active_gateway}" "${commit}"
+      ;;
+    *) die "Unexpected deployment strategy: ${deploy_strategy}" ;;
+  esac
+  apply_steady_state_resource_limits
   verify_public "${active_gateway}"
   cleanup_old_gateways "gateway-green-${commit}" "${active_gateway}" "${KEEP_ROLLBACKS}"
 

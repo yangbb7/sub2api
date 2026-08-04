@@ -66,6 +66,8 @@ GATEWAY_STREAM_KEEPALIVE_INTERVAL=0
 
 入口继续保留 `Content-Length`/现有最大请求体保护，并仅按大小分桶观测。后续针对 Codex 重复上下文、工具回填和附件在客户端做压缩或截断；服务端不得删除未知字段或用户正文。
 
-运行基线为 2C2G：Gateway `896m`、`GOMEMLIMIT=640MiB`、`GOMAXPROCS=2`；Caddy `96m`、Postgres `320m`、Redis `128m`。总容器上限约 1.44GiB，给宿主页缓存和突发保留约 0.5GiB。蓝绿并行会额外占用一个 Gateway 的工作集，因此在 2GiB 主机上必须先完成可用内存预检，容量不足时在维护窗口扩容后发布；不要用 OOM 风险换取无缝切流。
+运行基线为 2C2G：Gateway `896m`、`GOMEMLIMIT=640MiB`、`GOMAXPROCS=2`；Caddy `96m`、Postgres `320m`、Redis `128m`。总容器上限约 1.44GiB，给宿主页缓存和突发保留约 0.5GiB。
 
-上线前还必须验证云厂商控制台或堡垒机的备用入口：完成一次蓝绿发布、健康探测和回滚演练后，才允许推广流量。
+`deploy/deploy.sh` 默认 `DEPLOY_STRATEGY=auto`：主机内存低于约 3.5GiB 时自动使用串行切换，而不是错误地并行运行两个完整 Gateway。串行模式先以 `SERIAL_CANARY_MEMORY_LIMIT=256m` 无网络执行新镜像的 `--version` 校验；随后保留旧容器、停止旧 Gateway、以完整 `896m` 启动新 Gateway，并在本地健康检查通过后重载 Caddy。它的切换窗口通常是数秒，失败会删除新容器并重新启动旧容器。旧容器保持停止状态，`rollback.sh previous` 会以同样的无重叠方式恢复它。
+
+内存充足的主机才使用蓝绿。上线前还必须验证云厂商控制台或堡垒机的备用入口：完成一次健康探测和回滚演练后，才允许推广流量。

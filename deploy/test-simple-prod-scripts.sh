@@ -82,8 +82,9 @@ assert_contains "${DEPLOY_SCRIPT}" 'set_env_override GATEWAY_OPENAI_STREAM_GOVER
 
 runtime_env="$(mktemp)"
 testable_deploy_script="$(mktemp)"
+serial_remote_script="$(mktemp)"
 cleanup_runtime_env() {
-  rm -f "${runtime_env}" "${testable_deploy_script}"
+  rm -f "${runtime_env}" "${testable_deploy_script}" "${serial_remote_script}"
 }
 trap cleanup_runtime_env EXIT
 sed '$d' "${DEPLOY_SCRIPT}" > "${testable_deploy_script}"
@@ -153,6 +154,57 @@ assert_contains "${DEPLOY_SCRIPT}" 'cleanup_old_gateways' \
   "deploy.sh must prune old blue/green gateway containers after a verified deploy"
 assert_contains "${DEPLOY_SCRIPT}" 'KEEP_ROLLBACKS' \
   "deploy.sh must keep a bounded number of rollback gateway containers"
+assert_contains "${DEPLOY_SCRIPT}" 'DEPLOY_STRATEGY=.*auto' \
+  "deploy.sh must automatically use serial deployment on memory-constrained hosts"
+assert_contains "${DEPLOY_SCRIPT}" 'stop_inactive_gateways' \
+  "deploy.sh serial mode must release inactive rollback containers before cutover"
+assert_contains "${DEPLOY_SCRIPT}" 'docker run --rm --network none --memory' \
+  "deploy.sh serial mode must validate the image without a second gateway server"
+assert_contains "${DEPLOY_SCRIPT}" 'docker stop.*ACTIVE_GATEWAY' \
+  "deploy.sh serial mode must stop the active gateway before starting the full replacement"
+assert_contains "${DEPLOY_SCRIPT}" 'apply_steady_state_resource_limits' \
+  "deploy.sh must apply the 2C2G Caddy/Postgres/Redis memory baseline after cutover"
+
+strategy_values="$({
+  ENV_FILE="${runtime_env}" bash -s "${testable_deploy_script}" <<'BASH'
+source "$1"
+run_ssh() { printf '%s\n' "${TEST_MEMTOTAL_KB}"; }
+DEPLOY_STRATEGY=auto
+BLUE_GREEN_MIN_MEMORY_KB=3670016
+TEST_MEMTOTAL_KB=2015232
+printf '%s ' "$(select_deploy_strategy)"
+TEST_MEMTOTAL_KB=4194304
+printf '%s\n' "$(select_deploy_strategy)"
+BASH
+})"
+[ "${strategy_values}" = "serial bluegreen" ] || {
+  echo "deploy.sh did not select serial/bluegreen by remote memory: ${strategy_values}" >&2
+  exit 1
+}
+
+REMOTE_SCRIPT_OUTPUT="${serial_remote_script}" \
+REMOTE_DIR=/opt/gateway \
+GATEWAY_MEMORY_LIMIT=896m \
+GATEWAY_GOMAXPROCS=2 \
+GATEWAY_GOMEMLIMIT=640MiB \
+GATEWAY_STREAM_KEEPALIVE_INTERVAL=5 \
+GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED=true \
+GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT=10 \
+GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS=10 \
+GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS=6 \
+SERIAL_CANARY_MEMORY_LIMIT=256m \
+bash -s "${testable_deploy_script}" <<'BASH'
+source "$1"
+run_remote_root_script() { cp "$1" "$REMOTE_SCRIPT_OUTPUT"; }
+promote_serial_candidate gateway-green-old abcdef123456
+BASH
+bash -n "${serial_remote_script}"
+assert_contains "${serial_remote_script}" 'docker stop.*ACTIVE_GATEWAY' \
+  "serial remote cutover must stop the active gateway before the replacement starts"
+assert_contains "${serial_remote_script}" 'docker run -d' \
+  "serial remote cutover must start a replacement gateway"
+assert_contains "${serial_remote_script}" 'restore_active' \
+  "serial remote cutover must restore the active gateway if the replacement fails"
 
 assert_contains "${ROLLBACK_SCRIPT}" '^(usage|list_targets|select_previous_target|switch_caddy)' \
   "rollback.sh must expose list, previous selection, and Caddy switch helpers"
@@ -164,6 +216,10 @@ assert_contains "${ROLLBACK_SCRIPT}" 'caddy reload' \
   "rollback.sh must hot-reload Caddy"
 assert_contains "${ROLLBACK_SCRIPT}" 'gateway-\(green\|blue\|next\|rollback\)' \
   "rollback.sh must only consider app gateway containers, not gateway-caddy/postgres/redis"
+assert_contains "${ROLLBACK_SCRIPT}" 'docker ps -a' \
+  "rollback.sh must show and select stopped serial rollback containers"
+assert_contains "${ROLLBACK_SCRIPT}" 'docker stop.*current' \
+  "rollback.sh must avoid overlapping full gateways when restoring a stopped target"
 
 for path in "${DEPLOY_SCRIPT}" "${ROLLBACK_SCRIPT}"; do
   assert_not_contains "${path}" 'docker compose .*up|docker compose .*down|docker compose .*force-recreate' \
