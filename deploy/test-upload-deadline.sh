@@ -16,8 +16,8 @@ grep -Fq 'SOURCE_UPLOAD_CHUNK_BYTES' "${DEPLOY_SCRIPT}" ||
   fail "source uploads must use a bounded chunk size on unstable links"
 grep -Fq 'split -b "${SOURCE_UPLOAD_CHUNK_BYTES}"' "${DEPLOY_SCRIPT}" ||
   fail "source uploads must split the archive into resumable fixed-size parts"
-grep -Fq 'run_rsync --append-verify --timeout="${SOURCE_UPLOAD_IDLE_TIMEOUT}"' "${DEPLOY_SCRIPT}" ||
-  fail "source part uploads must retain append-verify retry support and I/O idle timeout"
+grep -Fq 'run_rsync --append --timeout="${SOURCE_UPLOAD_IDLE_TIMEOUT}"' "${DEPLOY_SCRIPT}" ||
+  fail "source part uploads must retain append retry support and I/O idle timeout"
 grep -Fq 'Source archive uploaded and checksum verified' "${DEPLOY_SCRIPT}" ||
   fail "source uploads must verify the assembled archive before the remote build"
 grep -Fq 'SOURCE_UPLOAD_RETRIES' "${DEPLOY_SCRIPT}" ||

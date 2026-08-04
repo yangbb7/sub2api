@@ -1051,7 +1051,10 @@ upload_source_part() {
   local attempt
 
   for ((attempt = 1; attempt <= SOURCE_UPLOAD_RETRIES; attempt++)); do
-    if run_rsync --append-verify --timeout="${SOURCE_UPLOAD_IDLE_TIMEOUT}" "${part}" "${destination}"; then
+    # macOS ships an older rsync without --append-verify. SSH supplies
+    # transport integrity and the archive-level SHA-256 below verifies the
+    # final assembled bytes, while --append keeps the fixed part resumable.
+    if run_rsync --append --timeout="${SOURCE_UPLOAD_IDLE_TIMEOUT}" "${part}" "${destination}"; then
       return 0
     fi
     if [ "${attempt}" -lt "${SOURCE_UPLOAD_RETRIES}" ]; then
