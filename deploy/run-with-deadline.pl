@@ -23,34 +23,62 @@ sub terminate_process_group {
   kill $signal, -$child_pid;
 }
 
+sub process_group_exists {
+  return kill 0, -$child_pid;
+}
+
+sub exit_with_status {
+  my ($status) = @_;
+  exit 128 + ($status & 127) if $status & 127;
+  exit $status >> 8;
+}
+
+my $received_signal;
 for my $signal (qw(HUP INT TERM)) {
   $SIG{$signal} = sub {
-    terminate_process_group('TERM');
-    sleep 0.2;
-    terminate_process_group('KILL');
-    exit 128 + ($signal eq 'HUP' ? 1 : $signal eq 'INT' ? 2 : 15);
+    $received_signal //= $signal;
   };
 }
 
 my $deadline_at = time() + $deadline_seconds;
 my $termination_started_at;
+my $termination_exit_status;
+my $kill_sent;
+my $leader_reaped = 0;
+my $leader_status;
 while (1) {
-  my $waited = waitpid($child_pid, WNOHANG);
-  if ($waited == $child_pid) {
-    my $status = $?;
-    exit 128 + ($status & 127) if $status & 127;
-    exit $status >> 8;
+  if (!$leader_reaped) {
+    my $waited = waitpid($child_pid, WNOHANG);
+    if ($waited == $child_pid) {
+      $leader_status = $?;
+      $leader_reaped = 1;
+    } elsif ($waited == -1) {
+      die "waitpid failed: $!\n";
+    }
   }
-  die "waitpid failed: $!\n" if $waited == -1;
 
   my $now = time();
-  if (!defined $termination_started_at && $now >= $deadline_at) {
+  if (!defined $termination_started_at && defined $received_signal) {
+    warn "received ${received_signal}; terminating command process group\n";
+    terminate_process_group('TERM');
+    $termination_started_at = $now;
+    $termination_exit_status = 128 + ($received_signal eq 'HUP' ? 1 : $received_signal eq 'INT' ? 2 : 15);
+  } elsif (!defined $termination_started_at && $now >= $deadline_at) {
     warn "command exceeded ${deadline_seconds}s deadline; terminating its process group\n";
     terminate_process_group('TERM');
     $termination_started_at = $now;
-  } elsif (defined $termination_started_at && $now >= $termination_started_at + 2) {
+    $termination_exit_status = 124;
+  } elsif (defined $termination_started_at && !$kill_sent && $now >= $termination_started_at + 2) {
     warn "command ignored termination; killing its process group\n";
     terminate_process_group('KILL');
+    $kill_sent = 1;
+  }
+
+  # The leader may exit while a TERM-ignoring descendant remains in its
+  # session. Do not return until the process group is empty.
+  if (!process_group_exists()) {
+    exit $termination_exit_status if defined $termination_exit_status;
+    exit_with_status($leader_status) if $leader_reaped;
   }
   sleep 0.05;
 }

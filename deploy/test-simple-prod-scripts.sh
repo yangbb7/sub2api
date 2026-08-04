@@ -100,9 +100,10 @@ assert_contains "${DEPLOY_SCRIPT}" 'GATEWAY_RESPONSES_MAX_BODY_SIZE' \
 runtime_env="$(mktemp)"
 testable_deploy_script="$(mktemp)"
 serial_remote_script="$(mktemp)"
+missing_governance_env="$(mktemp)"
 deploy_lock_dir="$(mktemp -d)"
 cleanup_runtime_env() {
-  rm -f "${runtime_env}" "${testable_deploy_script}" "${serial_remote_script}"
+  rm -f "${runtime_env}" "${testable_deploy_script}" "${serial_remote_script}" "${missing_governance_env}"
   rmdir "${deploy_lock_dir}" 2>/dev/null || true
 }
 trap cleanup_runtime_env EXIT
@@ -141,6 +142,14 @@ BASH
   echo "deploy.sh did not load stream governance overrides from ENV_FILE: ${runtime_values}" >&2
   exit 1
 }
+if ENV_FILE="${missing_governance_env}" bash -s "${testable_deploy_script}" 2>/dev/null <<'BASH'
+source "$1"
+load_connection_defaults
+BASH
+then
+  echo "deploy.sh must reject omitted stream-governance enablement instead of defaulting it to false" >&2
+  exit 1
+fi
 runtime_values="$({
   GATEWAY_STREAM_KEEPALIVE_INTERVAL=10 \
   GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED=false \
@@ -255,16 +264,30 @@ assert_contains "${serial_remote_script}" 'docker run -d' \
   "serial remote cutover must start a live replacement gateway"
 assert_contains "${serial_remote_script}" 'MemAvailable' \
   "serial remote cutover must check available host memory before overlap"
+assert_contains "${serial_remote_script}" 'serial_supporting_limit_before' \
+  "serial cutover must audit legacy supporting-service cgroup limits before candidate launch"
+assert_contains "${serial_remote_script}" 'docker update --memory "\$\{memory_limit\}" --memory-swap "\$\{memory_limit\}" "\$\{service\}"' \
+  "serial cutover must set finite Caddy, Postgres, and Redis memory/swap limits before candidate launch"
+assert_contains "${serial_remote_script}" 'serial_host_budget_bytes' \
+  "serial cutover must calculate a bounded 2GiB host budget before candidate launch"
+assert_contains "${serial_remote_script}" "GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED='true'" \
+  "serial cutover must preserve the enabled governance canary from ENV_FILE"
+assert_contains "${serial_remote_script}" 'set_env_override GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED "\$\{GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED\}"' \
+  "serial cutover must write the enabled governance canary into the next container environment"
+assert_contains "${serial_remote_script}" '--memory-swap "\$\{CANARY_MEMORY_LIMIT\}"' \
+  "serial candidate must use a finite swap limit while the old gateway remains live"
 assert_contains "${serial_remote_script}" 'http://\$\{NEXT_GATEWAY\}:18080/health' \
   "serial remote cutover must prove Caddy can reach the candidate before switching"
 assert_contains "${serial_remote_script}" 'docker update --memory "\$\{GATEWAY_MEMORY_LIMIT\}".*"\$\{NEXT_GATEWAY\}"' \
   "serial remote cutover must restore the candidate's steady-state memory after draining"
-assert_contains "${serial_remote_script}" 'ACTIVE_MEMORY_SWAP' \
-  "serial remote cutover must preserve the active gateway swap limit when restoring memory"
+assert_not_contains "${serial_remote_script}" 'ACTIVE_MEMORY_SWAP|--memory-swap -1' \
+  "serial remote cutover must not restore an unbounded swap limit"
 assert_contains "${serial_remote_script}" '--memory-swap' \
   "serial remote cutover must update memory and swap together"
 assert_last_order "${serial_remote_script}" 'docker run -d' 'docker stop "\$\{ACTIVE_GATEWAY\}"' \
   "serial remote cutover must start the candidate before stopping the active gateway"
+assert_last_order "${serial_remote_script}" 'preflight_serial_supporting_limits' 'docker run -d' \
+  "serial remote cutover must limit legacy supporting services before starting the candidate"
 assert_last_order "${serial_remote_script}" 'caddy reload --config /tmp/Caddyfile.next' 'docker stop "\$\{ACTIVE_GATEWAY\}"' \
   "serial remote cutover must switch Caddy before stopping the active gateway"
 assert_contains "${serial_remote_script}" 'restore_active' \

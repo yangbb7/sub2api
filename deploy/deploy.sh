@@ -130,10 +130,11 @@ load_connection_defaults() {
     default_from_env_file "${name}"
   done
 
-  # Stream controls are intentionally opt-in. Increasing first-output waits
-  # cannot extend a client/CDN cancellation window.
+  # These rollout controls are approved per deployment in ENV_FILE or the
+  # caller's environment. Never silently replace an approved canary with a
+  # disabled global fallback.
   GATEWAY_STREAM_KEEPALIVE_INTERVAL="${GATEWAY_STREAM_KEEPALIVE_INTERVAL:-0}"
-  GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED="${GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED:-false}"
+  [ -n "${GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED}" ] || die "GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED must be explicitly set in ENV_FILE or the environment."
   GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT="${GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT:-10}"
   GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS="${GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS:-10}"
   GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS="${GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS:-6}"
@@ -411,7 +412,57 @@ GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS=$(single_quote "${
 GATEWAY_RESPONSES_MAX_BODY_SIZE=$(single_quote "${GATEWAY_RESPONSES_MAX_BODY_SIZE}")
 
 test "\$(docker inspect "\${ACTIVE_GATEWAY}" --format '{{.State.Health.Status}}')" = healthy
-ACTIVE_MEMORY_SWAP="\$(docker inspect "\${ACTIVE_GATEWAY}" --format '{{.HostConfig.MemorySwap}}')"
+ACTIVE_MEMORY="\$(docker inspect "\${ACTIVE_GATEWAY}" --format '{{.HostConfig.Memory}}')"
+case "\${ACTIVE_MEMORY}" in
+  ''|*[!0-9]*|0)
+    echo "Refusing serial candidate launch: active gateway has no finite memory cgroup limit." >&2
+    exit 1
+    ;;
+esac
+serial_canary_bytes() {
+  case "\${CANARY_MEMORY_LIMIT}" in
+    *[mM]) printf '%s\n' "\$(( \${CANARY_MEMORY_LIMIT%[mM]} * 1024 * 1024 ))" ;;
+    *[gG]) printf '%s\n' "\$(( \${CANARY_MEMORY_LIMIT%[gG]} * 1024 * 1024 * 1024 ))" ;;
+    *)
+      echo "Refusing serial candidate launch: SERIAL_CANARY_MEMORY_LIMIT must use an m or g suffix for a bounded host-budget preflight." >&2
+      exit 1
+      ;;
+  esac
+}
+preflight_serial_supporting_limits() {
+  local service memory_limit memory swap
+  for service in gateway-caddy gateway-postgres gateway-redis; do
+    case "\${service}" in
+      gateway-caddy) memory_limit=96m ;;
+      gateway-postgres) memory_limit=320m ;;
+      gateway-redis) memory_limit=128m ;;
+    esac
+    echo "serial_supporting_limit_before service=\${service} memory=\$(docker inspect "\${service}" --format '{{.HostConfig.Memory}}') swap=\$(docker inspect "\${service}" --format '{{.HostConfig.MemorySwap}}')"
+    docker update --memory "\${memory_limit}" --memory-swap "\${memory_limit}" "\${service}" >/dev/null
+    memory="\$(docker inspect "\${service}" --format '{{.HostConfig.Memory}}')"
+    swap="\$(docker inspect "\${service}" --format '{{.HostConfig.MemorySwap}}')"
+    case "\${memory}:\${swap}" in
+      *[!0-9:]*|0:*|*:0)
+        echo "Refusing serial candidate launch: \${service} does not have finite memory and swap cgroup limits." >&2
+        exit 1
+        ;;
+    esac
+    [ "\${memory}" = "\${swap}" ] || {
+      echo "Refusing serial candidate launch: \${service} swap limit differs from its memory limit." >&2
+      exit 1
+    }
+    echo "serial_supporting_limit_after service=\${service} memory=\${memory} swap=\${swap}"
+  done
+}
+preflight_serial_supporting_limits
+support_memory_bytes="\$(( 96 * 1024 * 1024 + 320 * 1024 * 1024 + 128 * 1024 * 1024 ))"
+canary_memory_bytes="\$(serial_canary_bytes)"
+serial_total_memory_bytes="\$(( ACTIVE_MEMORY + support_memory_bytes + canary_memory_bytes ))"
+if [ "\${serial_total_memory_bytes}" -gt 2147483648 ]; then
+  echo "Refusing serial candidate launch: active gateway plus bounded supporting services and candidate require \${serial_total_memory_bytes} bytes, above the 2GiB host budget." >&2
+  exit 1
+fi
+echo "serial_host_budget_bytes=\${serial_total_memory_bytes}"
 available_kb="\$(awk '/^MemAvailable:/ {print \$2; exit}' /proc/meminfo)"
 case "\${available_kb}" in
   ''|*[!0-9]*)
@@ -500,6 +551,7 @@ docker run -d \\
   --network gateway_gateway-network \\
   --ulimit nofile=65535:65535 \\
   --memory "\${CANARY_MEMORY_LIMIT}" \\
+  --memory-swap "\${CANARY_MEMORY_LIMIT}" \\
   --env-file "\${env_file}" \\
   -v /opt/gateway/data:/app/data \\
   gateway:cloud >/dev/null
@@ -522,14 +574,7 @@ if [ "\${SERIAL_DRAIN_SECONDS}" -gt 0 ]; then
   sleep "\${SERIAL_DRAIN_SECONDS}"
 fi
 docker stop "\${ACTIVE_GATEWAY}" >/dev/null
-case "\${ACTIVE_MEMORY_SWAP}" in
-  ''|*[!0-9]*|0)
-    docker update --memory "\${GATEWAY_MEMORY_LIMIT}" --memory-swap -1 "\${NEXT_GATEWAY}" >/dev/null
-    ;;
-  *)
-    docker update --memory "\${GATEWAY_MEMORY_LIMIT}" --memory-swap "\${ACTIVE_MEMORY_SWAP}" "\${NEXT_GATEWAY}" >/dev/null
-    ;;
-esac
+docker update --memory "\${GATEWAY_MEMORY_LIMIT}" --memory-swap "\${GATEWAY_MEMORY_LIMIT}" "\${NEXT_GATEWAY}" >/dev/null
 failed=false
 echo "active=\${NEXT_GATEWAY}"
 echo "rollback=\${ACTIVE_GATEWAY}"
@@ -544,12 +589,12 @@ apply_steady_state_resource_limits() {
   cat > "${tmp}" <<'REMOTE'
 #!/usr/bin/env bash
 set -euo pipefail
-docker update --memory 96m gateway-caddy >/dev/null
-docker update --memory 320m gateway-postgres >/dev/null
-docker update --memory 128m gateway-redis >/dev/null
-docker inspect gateway-caddy --format 'gateway-caddy memory={{.HostConfig.Memory}}'
-docker inspect gateway-postgres --format 'gateway-postgres memory={{.HostConfig.Memory}}'
-docker inspect gateway-redis --format 'gateway-redis memory={{.HostConfig.Memory}}'
+docker update --memory 96m --memory-swap 96m gateway-caddy >/dev/null
+docker update --memory 320m --memory-swap 320m gateway-postgres >/dev/null
+docker update --memory 128m --memory-swap 128m gateway-redis >/dev/null
+docker inspect gateway-caddy --format 'gateway-caddy memory={{.HostConfig.Memory}} swap={{.HostConfig.MemorySwap}}'
+docker inspect gateway-postgres --format 'gateway-postgres memory={{.HostConfig.Memory}} swap={{.HostConfig.MemorySwap}}'
+docker inspect gateway-redis --format 'gateway-redis memory={{.HostConfig.Memory}} swap={{.HostConfig.MemorySwap}}'
 REMOTE
   run_remote_root_script "${tmp}"
   rm -f "${tmp}"

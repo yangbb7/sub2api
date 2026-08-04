@@ -106,4 +106,66 @@ if kill -0 "${child_pid}" 2>/dev/null; then
   fail "deadline helper leaked stalled child process ${child_pid}"
 fi
 
+# A command leader can exit before the deadline while leaving a TERM-ignoring
+# process in its session. The helper must still own and clean up that group.
+early_exit_child_pid_file="${tmp_dir}/early-exit-child.pid"
+started="$(date +%s)"
+set +e
+"${HELPER}" 1 /bin/sh -c '
+  ( trap "" TERM; while :; do sleep 1; done ) &
+  printf "%s\\n" "$!" > "$1"
+  exit 0
+' sh "${early_exit_child_pid_file}"
+early_exit_status=$?
+set -e
+if [ "${early_exit_status}" -eq 0 ]; then
+  fail "deadline helper returned success after its leader leaked a child process"
+fi
+elapsed="$(( $(date +%s) - started ))"
+[ "${elapsed}" -le 5 ] || fail "deadline helper exceeded bounded cleanup after leader exit: ${elapsed}s"
+
+[ -s "${early_exit_child_pid_file}" ] || fail "early-exit child pid was not recorded"
+early_exit_child_pid="$(cat "${early_exit_child_pid_file}")"
+for _ in {1..20}; do
+  if ! kill -0 "${early_exit_child_pid}" 2>/dev/null; then
+    break
+  fi
+  sleep 0.1
+done
+if kill -0 "${early_exit_child_pid}" 2>/dev/null; then
+  fail "deadline helper leaked child process ${early_exit_child_pid} after leader exit"
+fi
+
+# Apply the same ownership rule when the deploy runner is interrupted after
+# its command leader has already exited.
+signal_child_pid_file="${tmp_dir}/signal-child.pid"
+"${HELPER}" 30 /bin/sh -c '
+  ( trap "" TERM; while :; do sleep 1; done ) &
+  printf "%s\\n" "$!" > "$1"
+  exit 0
+' sh "${signal_child_pid_file}" &
+helper_pid=$!
+for _ in {1..20}; do
+  [ -s "${signal_child_pid_file}" ] && break
+  sleep 0.1
+done
+[ -s "${signal_child_pid_file}" ] || fail "signal-test child pid was not recorded"
+kill -TERM "${helper_pid}"
+set +e
+wait "${helper_pid}"
+signal_status=$?
+set -e
+[ "${signal_status}" -eq 143 ] || fail "deadline helper did not preserve TERM status after leader exit: ${signal_status}"
+
+signal_child_pid="$(cat "${signal_child_pid_file}")"
+for _ in {1..20}; do
+  if ! kill -0 "${signal_child_pid}" 2>/dev/null; then
+    break
+  fi
+  sleep 0.1
+done
+if kill -0 "${signal_child_pid}" 2>/dev/null; then
+  fail "deadline helper leaked child process ${signal_child_pid} after TERM"
+fi
+
 echo "upload deadline tests passed"
