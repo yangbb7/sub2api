@@ -6,12 +6,31 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+func TestGatewayResponsesRejectsKnownOversizedBodyBeforeParsing(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, rec := newOpenAICompatibleStreamValidationContext(
+		"/v1/responses",
+		`{"model":"gpt-5","input":"this request must be rejected before parsing"}`,
+		false,
+	)
+	handler := &GatewayHandler{cfg: &config.Config{Gateway: config.GatewayConfig{
+		MaxBodySize:          128,
+		ResponsesMaxBodySize: 16,
+	}}}
+
+	handler.Responses(c)
+
+	require.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
+	require.Equal(t, buildBodyTooLargeMessage(16), gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
+}
 
 func TestOpenAICompatibleHandlersRejectInvalidStreamFieldType(t *testing.T) {
 	gin.SetMode(gin.TestMode)

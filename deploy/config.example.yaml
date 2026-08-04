@@ -230,6 +230,12 @@ gateway:
   # Max request body size in bytes (default: 256MB)
   # 请求体最大字节数（默认 256MB）
   max_body_size: 268435456
+  # Optional /v1/responses request-body budget in bytes (0 uses max_body_size).
+  # Known Content-Length requests are rejected before JSON is read. Set this
+  # only after the client can compact and retry a 413 response.
+  # /v1/responses 可选请求体预算（0 表示使用 max_body_size）。仅当客户端能压缩
+  # 并处理 413 重试时启用；已知 Content-Length 会在读取 JSON 前被拒绝。
+  responses_max_body_size: 0
   # Pure-text endpoint body limit (embeddings and alpha/search), default 32 MiB.
   # 纯文本端点请求体上限（embeddings、alpha/search），默认 32 MiB。
   text_max_body_size: 33554432

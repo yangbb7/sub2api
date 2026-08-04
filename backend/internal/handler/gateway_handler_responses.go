@@ -43,8 +43,13 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		zap.Any("group_id", apiKey.GroupID),
 	)
 
+	// Enforce the optional /responses-specific budget before reading JSON.
+	if limit, rejected := prepareResponsesRequestBodyLimit(c, h.cfg); rejected {
+		h.responsesErrorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(limit))
+		return
+	}
 	// Read request body
-	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
+	body, err := readLenientResponsesJSONRequestBodyWithPrealloc(c.Request, h.cfg)
 	if err != nil {
 		if maxErr, ok := extractMaxBytesError(err); ok {
 			h.responsesErrorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))

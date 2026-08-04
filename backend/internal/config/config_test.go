@@ -59,6 +59,7 @@ func TestLoadHTTPIngressSafetyDefaults(t *testing.T) {
 	require.False(t, cfg.Server.TrustedProxiesConfigured)
 	require.True(t, cfg.TrustForwardedIPForAPIKeyACL())
 	require.Equal(t, int64(32*1024*1024), cfg.Gateway.TextMaxBodySize)
+	require.Zero(t, cfg.Gateway.ResponsesMaxBodySize)
 	require.True(t, cfg.APIKeyAuth.InvalidAbuse.Enabled)
 	require.Equal(t, 120, cfg.APIKeyAuth.InvalidAbuse.Threshold)
 	require.Equal(t, 16384, cfg.APIKeyAuth.InvalidAbuse.Capacity)
@@ -1760,6 +1761,16 @@ func TestValidateConfigErrors(t *testing.T) {
 			name:    "gateway text body exceeds media body",
 			mutate:  func(c *Config) { c.Gateway.TextMaxBodySize = c.Gateway.MaxBodySize + 1 },
 			wantErr: "gateway.text_max_body_size",
+		},
+		{
+			name:    "gateway responses body negative",
+			mutate:  func(c *Config) { c.Gateway.ResponsesMaxBodySize = -1 },
+			wantErr: "gateway.responses_max_body_size",
+		},
+		{
+			name:    "gateway responses body exceeds global body limit",
+			mutate:  func(c *Config) { c.Gateway.ResponsesMaxBodySize = c.Gateway.MaxBodySize + 1 },
+			wantErr: "gateway.responses_max_body_size",
 		},
 		{
 			name:    "gateway response header timeout",

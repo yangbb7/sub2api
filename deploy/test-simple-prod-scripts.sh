@@ -94,6 +94,8 @@ assert_contains "${DEPLOY_SCRIPT}" 'set_env_override GATEWAY_STREAM_KEEPALIVE_IN
   "deploy.sh must apply SSE keepalive to the green container environment"
 assert_contains "${DEPLOY_SCRIPT}" 'set_env_override GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED' \
   "deploy.sh must apply stream governance to the green container environment"
+assert_contains "${DEPLOY_SCRIPT}" 'GATEWAY_RESPONSES_MAX_BODY_SIZE' \
+  "deploy.sh must expose the optional Responses request-body budget"
 
 runtime_env="$(mktemp)"
 testable_deploy_script="$(mktemp)"
@@ -113,6 +115,7 @@ GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED=true
 GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT=10
 GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS=10
 GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS=6
+GATEWAY_RESPONSES_MAX_BODY_SIZE=4194304
 EOF
 runtime_values="$({
   ENV_FILE="${runtime_env}" bash -s "${testable_deploy_script}" <<'BASH'
@@ -121,18 +124,20 @@ unset GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED
 unset GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT
 unset GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS
 unset GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS
+unset GATEWAY_RESPONSES_MAX_BODY_SIZE
 source "$1"
 load_connection_defaults
 validate_runtime_overrides
-printf '%s %s %s %s %s\n' \
+printf '%s %s %s %s %s %s\n' \
   "${GATEWAY_STREAM_KEEPALIVE_INTERVAL}" \
   "${GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED}" \
   "${GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT}" \
   "${GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS}" \
-  "${GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS}"
+  "${GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS}" \
+  "${GATEWAY_RESPONSES_MAX_BODY_SIZE}"
 BASH
 })"
-[ "${runtime_values}" = "5 true 10 10 6" ] || {
+[ "${runtime_values}" = "5 true 10 10 6 4194304" ] || {
   echo "deploy.sh did not load stream governance overrides from ENV_FILE: ${runtime_values}" >&2
   exit 1
 }
@@ -142,19 +147,21 @@ runtime_values="$({
   GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT=20 \
   GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS=12 \
   GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS=7 \
+  GATEWAY_RESPONSES_MAX_BODY_SIZE=0 \
   ENV_FILE="${runtime_env}" bash -s "${testable_deploy_script}" <<'BASH'
 source "$1"
 load_connection_defaults
 validate_runtime_overrides
-printf '%s %s %s %s %s\n' \
+printf '%s %s %s %s %s %s\n' \
   "${GATEWAY_STREAM_KEEPALIVE_INTERVAL}" \
   "${GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED}" \
   "${GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT}" \
   "${GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS}" \
-  "${GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS}"
+  "${GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS}" \
+  "${GATEWAY_RESPONSES_MAX_BODY_SIZE}"
 BASH
 })"
-[ "${runtime_values}" = "10 false 20 12 7" ] || {
+[ "${runtime_values}" = "10 false 20 12 7 0" ] || {
   echo "deploy.sh did not preserve shell stream governance overrides: ${runtime_values}" >&2
   exit 1
 }

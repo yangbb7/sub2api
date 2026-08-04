@@ -4,11 +4,11 @@
 
 ## 观测基线
 
-流式 `/v1/responses` 现在会在 Ops System Logs 持久记录一条 `component=stream_attempts`、`message=stream_attempt.completed` 事件。事件只含：网关请求 ID、CF-Ray、客户端类型分桶、请求体大小分桶、模型、选中账户 ID/平台/次数、上游响应头/首语义事件/首下游字节的相对毫秒、取消阶段和最终结果。
+流式 `/v1/responses` 现在会在 Ops System Logs 持久记录一条 `component=stream_attempts`、`message=stream_attempt.completed` 事件。事件只含：网关请求 ID、CF-Ray、客户端类型分桶、请求体大小分桶、模型、规范化的推理档位、选中账户 ID/平台/次数、上游响应头/首语义事件/首下游字节的相对毫秒、取消阶段和最终结果。
 
 不会记录请求或响应正文、`Authorization`、API key、账户名、上游 URL 或原始 User-Agent。首输出前的取消也会写入此记录，即使它没有进入成功用量统计。
 
-按 1 小时和 24 小时窗口，分别按 `client_type`、`model`、`selected_account_id`、`request_body_bucket` 聚合：
+按 1 小时和 24 小时窗口，分别按 `client_type`、`model`、`reasoning_effort`、`selected_account_id`、`request_body_bucket` 聚合：
 
 - 正常推理请求：首语义事件 TTFT P95 < 8 秒，P99 < 10 秒；高推理档位单独看板。
 - `cancel_phase` 在 `before_upstream_headers` 或 `after_headers_before_semantic` 的占比：1 小时 < 0.5%，24 小时 < 0.2%。
@@ -64,7 +64,9 @@ GATEWAY_STREAM_KEEPALIVE_INTERVAL=0
 
 ## 请求体与资源治理
 
-入口继续保留 `Content-Length`/现有最大请求体保护，并仅按大小分桶观测。后续针对 Codex 重复上下文、工具回填和附件在客户端做压缩或截断；服务端不得删除未知字段或用户正文。
+入口继续保留 `Content-Length`/现有最大请求体保护，并仅按大小分桶观测。`gateway.responses_max_body_size`（环境变量 `GATEWAY_RESPONSES_MAX_BODY_SIZE`）可为 `/v1/responses` 配置更小的业务预算；`0` 表示沿用 `gateway.max_body_size`。启用时，已知 `Content-Length` 会在读取 JSON 前以 `413` 拒绝，chunked 上传和 Content-Encoding 解压后的正文也受同一预算约束。
+
+不要在 Codex 客户端尚不能收到 `413` 后压缩并重试时贸然启用低阈值；那会把慢请求变成确定性失败。正确的客户端治理是压缩或截断重复上下文、工具回填和附件，而非让网关删除未知字段或用户正文。
 
 运行基线为 2C2G：Gateway `896m`、`GOMEMLIMIT=640MiB`、`GOMAXPROCS=2`；Caddy `96m`、Postgres `320m`、Redis `128m`。总容器上限约 1.44GiB，给宿主页缓存和突发保留约 0.5GiB。
 
