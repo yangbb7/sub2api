@@ -13,6 +13,11 @@ HEALTH_ATTEMPTS="${HEALTH_ATTEMPTS:-60}"
 HEALTH_SLEEP="${HEALTH_SLEEP:-0.2}"
 HEALTH_MIN_SUCCESS="${HEALTH_MIN_SUCCESS:-10}"
 HEALTH_REQUIRED_STREAK="${HEALTH_REQUIRED_STREAK:-5}"
+# local is the normal path: it proves the deploy operator can reach the
+# public edge. remote is an explicit break-glass path for a workstation whose
+# network stack is unhealthy; the protected source host still goes through
+# Cloudflare and Caddy, so it does not bypass public-route verification.
+PUBLIC_VERIFICATION_SOURCE="${PUBLIC_VERIFICATION_SOURCE:-local}"
 KEEP_ROLLBACKS="${KEEP_ROLLBACKS:-1}"
 DEPLOY_STRATEGY="${DEPLOY_STRATEGY:-auto}"
 # A 2GiB host cannot retain two full 896MiB gateways during a blue-green
@@ -93,7 +98,7 @@ default_from_env_file() {
 load_connection_defaults() {
   local name
   for name in \
-    TARGET_REGION DOMAIN REMOTE_DIR SSH_TARGET SSH_PORT SSH_KEY SSH_PASSWORD SSH_PASS SUDO_PASSWORD SSH_BIND_ADDRESS \
+    TARGET_REGION DOMAIN REMOTE_DIR SSH_TARGET SSH_PORT SSH_KEY SSH_PASSWORD SSH_PASS SUDO_PASSWORD SSH_BIND_ADDRESS PUBLIC_VERIFICATION_SOURCE \
     DEPLOY_STRATEGY SERIAL_CANARY_MEMORY_LIMIT BLUE_GREEN_MIN_MEMORY_KB \
     GATEWAY_MEMORY_LIMIT GATEWAY_GOMAXPROCS GATEWAY_GOMEMLIMIT \
     GATEWAY_STREAM_KEEPALIVE_INTERVAL GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED \
@@ -111,6 +116,7 @@ load_connection_defaults() {
   GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT="${GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT:-10}"
   GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS="${GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS:-10}"
   GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS="${GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS:-6}"
+  PUBLIC_VERIFICATION_SOURCE="${PUBLIC_VERIFICATION_SOURCE:-local}"
 
   SSH_PASSWORD="${SSH_PASSWORD:-${SSH_PASS:-}}"
   case "${TARGET_REGION}" in
@@ -186,6 +192,10 @@ validate_runtime_overrides() {
   case "${DEPLOY_STRATEGY}" in
     auto|bluegreen|serial) ;;
     *) die "DEPLOY_STRATEGY must be auto, bluegreen, or serial." ;;
+  esac
+  case "${PUBLIC_VERIFICATION_SOURCE}" in
+    local|remote) ;;
+    *) die "PUBLIC_VERIFICATION_SOURCE must be local or remote." ;;
   esac
   case "${BLUE_GREEN_MIN_MEMORY_KB}" in
     ''|*[!0-9]*) die "BLUE_GREEN_MIN_MEMORY_KB must be a positive integer." ;;
@@ -577,6 +587,33 @@ switch_back() {
     "${SCRIPT_DIR}/rollback.sh" to "${target}" >/dev/null || true
 }
 
+public_health_code() {
+  if [ "${PUBLIC_VERIFICATION_SOURCE}" = remote ]; then
+    run_ssh "curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 2 --max-time 5 $(single_quote "https://${DOMAIN}/health")"
+  else
+    curl -sS -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 5 "https://${DOMAIN}/health"
+  fi
+}
+
+public_login() {
+  if [ "${PUBLIC_VERIFICATION_SOURCE}" = remote ]; then
+    run_ssh "curl -fsS --connect-timeout 8 --max-time 20 $(single_quote "https://${DOMAIN}/login")"
+  else
+    curl -fsS --connect-timeout 8 --max-time 20 "https://${DOMAIN}/login"
+  fi
+}
+
+public_responses_code() {
+  if [ "${PUBLIC_VERIFICATION_SOURCE}" = remote ]; then
+    run_ssh "curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 8 --max-time 20 -H 'Content-Type: application/json' -d '{\"model\":\"gpt-5\",\"input\":\"ping\"}' $(single_quote "https://${DOMAIN}/v1/responses")"
+  else
+    curl -sS -o /dev/null -w "%{http_code}" --connect-timeout 8 --max-time 20 \
+      -H 'Content-Type: application/json' \
+      -d '{"model":"gpt-5","input":"ping"}' \
+      "https://${DOMAIN}/v1/responses"
+  fi
+}
+
 verify_public() {
   local active_gateway="$1"
   local fail=0
@@ -585,7 +622,7 @@ verify_public() {
   local max_streak=0
   local code
   for i in $(seq 1 "${HEALTH_ATTEMPTS}"); do
-    code="$(curl -sS -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 5 "https://${DOMAIN}/health" || echo curl_fail)"
+    code="$(public_health_code || echo curl_fail)"
     if [ "${code}" = 200 ]; then
       success=$((success + 1))
       streak=$((streak + 1))
@@ -603,15 +640,12 @@ verify_public() {
   fi
   echo "Public health loop passed: success=${success} fail=${fail} max_streak=${max_streak}"
 
-  curl -fsS --connect-timeout 8 --max-time 20 "https://${DOMAIN}/login" | grep -q '<div id="app"' || {
+  public_login | grep -q '<div id="app"' || {
     switch_back "${active_gateway}"
     die "Login page did not render the frontend app."
   }
 
-  code="$(curl -sS -o /dev/null -w "%{http_code}" --connect-timeout 8 --max-time 20 \
-    -H 'Content-Type: application/json' \
-    -d '{"model":"gpt-5","input":"ping"}' \
-    "https://${DOMAIN}/v1/responses" || echo curl_fail)"
+  code="$(public_responses_code || echo curl_fail)"
   case "${code}" in
     400|401|403) ;;
     *)
@@ -692,6 +726,7 @@ main() {
   [ -n "${GATEWAY_GOMEMLIMIT:-}" ] && echo "Gateway runtime GOMEMLIMIT: ${GATEWAY_GOMEMLIMIT}"
   echo "Gateway stream keepalive interval: ${GATEWAY_STREAM_KEEPALIVE_INTERVAL}s"
   echo "Gateway stream governance: enabled=${GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED} rollout=${GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT}% total=${GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS}s first=${GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS}s"
+  echo "Public verification source: ${PUBLIC_VERIFICATION_SOURCE}"
 
   build_remote_image
   case "${deploy_strategy}" in
