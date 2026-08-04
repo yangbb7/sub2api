@@ -385,6 +385,7 @@ GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS=$(single_quote "${GATEWAY_
 GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS=$(single_quote "${GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS}")
 
 test "\$(docker inspect "\${ACTIVE_GATEWAY}" --format '{{.State.Health.Status}}')" = healthy
+ACTIVE_MEMORY_SWAP="\$(docker inspect "\${ACTIVE_GATEWAY}" --format '{{.HostConfig.MemorySwap}}')"
 available_kb="\$(awk '/^MemAvailable:/ {print \$2; exit}' /proc/meminfo)"
 case "\${available_kb}" in
   ''|*[!0-9]*)
@@ -406,12 +407,32 @@ fi
 env_file="\$(mktemp /tmp/gateway-serial-env.XXXXXX)"
 restore_active() {
   rm -f "\${env_file}" Caddyfile.1g.next
-  docker rm -f "\${NEXT_GATEWAY}" >/dev/null 2>&1 || true
+  active_ready=false
+  active_state="\$(docker inspect "\${ACTIVE_GATEWAY}" --format '{{.State.Status}}' 2>/dev/null || true)"
+  if [ "\${active_state}" != running ]; then
+    docker start "\${ACTIVE_GATEWAY}" >/dev/null 2>&1 || true
+  fi
+  for i in \$(seq 1 45); do
+    if docker exec "\${ACTIVE_GATEWAY}" wget -q -T 2 -O /dev/null http://127.0.0.1:18080/health && \\
+      docker exec gateway-caddy wget -q -T 2 -O /dev/null "http://\${ACTIVE_GATEWAY}:18080/health"; then
+      active_ready=true
+      break
+    fi
+    sleep 2
+  done
+  if [ "\${active_ready}" != true ]; then
+    echo "WARN: active gateway did not recover; leaving candidate in service." >&2
+    return 0
+  fi
   if [ -f "\${backup}" ]; then
     cp "\${backup}" Caddyfile.1g
-    docker exec -i gateway-caddy sh -c 'cat > /tmp/Caddyfile.rollback && caddy reload --config /tmp/Caddyfile.rollback --adapter caddyfile' < Caddyfile.1g || true
+    if ! docker exec -i gateway-caddy sh -c 'cat > /tmp/Caddyfile.rollback && caddy reload --config /tmp/Caddyfile.rollback --adapter caddyfile' < Caddyfile.1g || \\
+      ! docker exec gateway-caddy wget -q -O- http://127.0.0.1:2019/config/ | grep -q "\${ACTIVE_GATEWAY}:18080"; then
+      echo "WARN: Caddy rollback failed; leaving candidate in service." >&2
+      return 0
+    fi
   fi
-  docker start "\${ACTIVE_GATEWAY}" >/dev/null 2>&1 || true
+  docker rm -f "\${NEXT_GATEWAY}" >/dev/null 2>&1 || true
 }
 failed=true
 cleanup() {
@@ -474,7 +495,14 @@ if [ "\${SERIAL_DRAIN_SECONDS}" -gt 0 ]; then
   sleep "\${SERIAL_DRAIN_SECONDS}"
 fi
 docker stop "\${ACTIVE_GATEWAY}" >/dev/null
-docker update --memory "\${GATEWAY_MEMORY_LIMIT}" "\${NEXT_GATEWAY}" >/dev/null
+case "\${ACTIVE_MEMORY_SWAP}" in
+  ''|*[!0-9]*|0)
+    docker update --memory "\${GATEWAY_MEMORY_LIMIT}" --memory-swap -1 "\${NEXT_GATEWAY}" >/dev/null
+    ;;
+  *)
+    docker update --memory "\${GATEWAY_MEMORY_LIMIT}" --memory-swap "\${ACTIVE_MEMORY_SWAP}" "\${NEXT_GATEWAY}" >/dev/null
+    ;;
+esac
 failed=false
 echo "active=\${NEXT_GATEWAY}"
 echo "rollback=\${ACTIVE_GATEWAY}"

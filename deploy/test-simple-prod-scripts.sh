@@ -18,7 +18,7 @@ assert_contains() {
   local path="$1"
   local pattern="$2"
   local message="$3"
-  if ! grep -Eq "${pattern}" "${path}"; then
+  if ! grep -Eq -- "${pattern}" "${path}"; then
     echo "${message}" >&2
     exit 1
   fi
@@ -28,7 +28,7 @@ assert_not_contains() {
   local path="$1"
   local pattern="$2"
   local message="$3"
-  if grep -Eq "${pattern}" "${path}"; then
+  if grep -Eq -- "${pattern}" "${path}"; then
     echo "${message}" >&2
     exit 1
   fi
@@ -41,8 +41,8 @@ assert_last_order() {
   local message="$4"
   local first_line
   local second_line
-  first_line="$(grep -En "${first_pattern}" "${path}" | tail -n 1 | cut -d: -f1 || true)"
-  second_line="$(grep -En "${second_pattern}" "${path}" | tail -n 1 | cut -d: -f1 || true)"
+  first_line="$(grep -En -- "${first_pattern}" "${path}" | tail -n 1 | cut -d: -f1 || true)"
+  second_line="$(grep -En -- "${second_pattern}" "${path}" | tail -n 1 | cut -d: -f1 || true)"
   if [ -z "${first_line}" ] || [ -z "${second_line}" ] || [ "${first_line}" -ge "${second_line}" ]; then
     echo "${message}" >&2
     exit 1
@@ -228,8 +228,12 @@ assert_contains "${serial_remote_script}" 'MemAvailable' \
   "serial remote cutover must check available host memory before overlap"
 assert_contains "${serial_remote_script}" 'http://\$\{NEXT_GATEWAY\}:18080/health' \
   "serial remote cutover must prove Caddy can reach the candidate before switching"
-assert_contains "${serial_remote_script}" 'docker update --memory "\$\{GATEWAY_MEMORY_LIMIT\}" "\$\{NEXT_GATEWAY\}"' \
+assert_contains "${serial_remote_script}" 'docker update --memory "\$\{GATEWAY_MEMORY_LIMIT\}".*"\$\{NEXT_GATEWAY\}"' \
   "serial remote cutover must restore the candidate's steady-state memory after draining"
+assert_contains "${serial_remote_script}" 'ACTIVE_MEMORY_SWAP' \
+  "serial remote cutover must preserve the active gateway swap limit when restoring memory"
+assert_contains "${serial_remote_script}" '--memory-swap' \
+  "serial remote cutover must update memory and swap together"
 assert_last_order "${serial_remote_script}" 'docker run -d' 'docker stop "\$\{ACTIVE_GATEWAY\}"' \
   "serial remote cutover must start the candidate before stopping the active gateway"
 assert_last_order "${serial_remote_script}" 'caddy reload --config /tmp/Caddyfile.next' 'docker stop "\$\{ACTIVE_GATEWAY\}"' \
