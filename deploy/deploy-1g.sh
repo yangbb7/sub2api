@@ -33,7 +33,7 @@ load_env_file() {
     PLATFORM GATEWAY_IMAGE ADMIN_EMAIL ADMIN_PASSWORD PROXIED DEPLOY_MODE BUILD_STRATEGY REMOTE_DOCKERFILE REMOTE_SUDO SUDO_PASSWORD \
     SKIP_DNS ROLLBACK_ON_FAILURE CF_API_TOKEN CF_ZONE_ID TTL TZ ACME_EMAIL UPDATE_PROXY_URL SSH_CONNECT_TIMEOUT \
     SWAP_SIZE MIN_FREE_KB MIN_DOCKER_FREE_KB DOCKER_INSTALL_METHOD BUILD_NODE_OPTIONS BUILD_GOMAXPROCS PNPM_REGISTRY \
-    LOCAL_BUILD_GOMAXPROCS LOCAL_BUILD_GOMEMLIMIT LOCAL_BUILD_GCFLAGS SOURCE_UPLOAD_IDLE_TIMEOUT SOURCE_UPLOAD_DEADLINE \
+    LOCAL_BUILD_GOMAXPROCS LOCAL_BUILD_GOMEMLIMIT LOCAL_BUILD_GCFLAGS SOURCE_UPLOAD_RETRIES SOURCE_UPLOAD_IDLE_TIMEOUT SOURCE_UPLOAD_DEADLINE SOURCE_UPLOAD_CHUNK_BYTES \
     POSTGRES_PASSWORD JWT_SECRET TOTP_ENCRYPTION_KEY REDIS_PASSWORD
   do
     if [ "${!name+x}" = x ]; then
@@ -81,6 +81,10 @@ LOCAL_BUILD_GCFLAGS="${LOCAL_BUILD_GCFLAGS:-}"
 SOURCE_UPLOAD_RETRIES="${SOURCE_UPLOAD_RETRIES:-3}"
 SOURCE_UPLOAD_IDLE_TIMEOUT="${SOURCE_UPLOAD_IDLE_TIMEOUT:-120}"
 SOURCE_UPLOAD_DEADLINE="${SOURCE_UPLOAD_DEADLINE:-1800}"
+# Some low-cost VPS routes reset a long-running SCP/rsync stream after a few
+# MiB. Upload deterministic small parts and assemble only after checksum
+# verification, so a retry resumes the affected part instead of the archive.
+SOURCE_UPLOAD_CHUNK_BYTES="${SOURCE_UPLOAD_CHUNK_BYTES:-2097152}"
 BUILD_COMMIT="${BUILD_COMMIT:-$(git -C "${ROOT_DIR}" rev-parse --short=12 HEAD 2>/dev/null || printf 'archive')}"
 BUILD_DATE="${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 if [ -z "${REMOTE_DOCKERFILE:-}" ]; then
@@ -677,6 +681,7 @@ validate_positive_int LOCAL_BUILD_GOMAXPROCS "${LOCAL_BUILD_GOMAXPROCS}"
 validate_positive_int SOURCE_UPLOAD_RETRIES "${SOURCE_UPLOAD_RETRIES}"
 validate_positive_int SOURCE_UPLOAD_IDLE_TIMEOUT "${SOURCE_UPLOAD_IDLE_TIMEOUT}"
 validate_positive_int SOURCE_UPLOAD_DEADLINE "${SOURCE_UPLOAD_DEADLINE}"
+validate_positive_int SOURCE_UPLOAD_CHUNK_BYTES "${SOURCE_UPLOAD_CHUNK_BYTES}"
 validate_env_token LOCAL_BUILD_GOMEMLIMIT "${LOCAL_BUILD_GOMEMLIMIT}"
 validate_env_token LOCAL_BUILD_GCFLAGS "${LOCAL_BUILD_GCFLAGS}"
 
@@ -749,6 +754,8 @@ case "${DEPLOY_MODE}" in
     need perl
     need tar
     need gzip
+    need split
+    need openssl
     if [ "${BUILD_STRATEGY}" = local-binary ]; then
       need git
       need go
@@ -765,6 +772,7 @@ case "${DEPLOY_MODE}" in
     need gzip
     need tar
     need openssl
+    need split
     if [ "${BUILD_STRATEGY}" = local-binary ]; then
       need git
       need go
@@ -1033,24 +1041,57 @@ remote_build_image() {
   run_remote_root "set -eu; echo '--- remote memory before build ---'; free -m || true; rm -rf '${remote_upload_dir}/src'; mkdir -p '${remote_upload_dir}/src'; tar -xzf '${remote_upload_dir}/source.tar.gz' -C '${remote_upload_dir}/src'; cd '${remote_upload_dir}/src'; DOCKER_BUILDKIT=0 docker build --build-arg NODE_OPTIONS='${BUILD_NODE_OPTIONS}' --build-arg BUILD_GOMAXPROCS='${BUILD_GOMAXPROCS}' --build-arg PNPM_REGISTRY='${PNPM_REGISTRY}' --build-arg COMMIT='${BUILD_COMMIT}' --build-arg DATE='${BUILD_DATE}' -f '${REMOTE_DOCKERFILE}' -t '${IMAGE_NAME}' .; cd /; rm -rf '${remote_upload_dir}/src' '${remote_upload_dir}/source.tar.gz'; docker image prune -f >/dev/null || true"
 }
 
-upload_source_archive() {
-  local archive="$1"
+sha256_file() {
+  openssl dgst -sha256 -r "$1" | awk '{print $1}'
+}
+
+upload_source_part() {
+  local part="$1"
   local destination="$2"
   local attempt
 
   for ((attempt = 1; attempt <= SOURCE_UPLOAD_RETRIES; attempt++)); do
-    echo "Uploading source archive (attempt ${attempt}/${SOURCE_UPLOAD_RETRIES})..."
-    if run_rsync --partial --timeout="${SOURCE_UPLOAD_IDLE_TIMEOUT}" "${archive}" "${destination}"; then
+    if run_rsync --append-verify --timeout="${SOURCE_UPLOAD_IDLE_TIMEOUT}" "${part}" "${destination}"; then
       return 0
     fi
     if [ "${attempt}" -lt "${SOURCE_UPLOAD_RETRIES}" ]; then
-      echo "Source archive upload interrupted; retrying with the retained partial transfer..." >&2
+      echo "Source part upload interrupted; resuming part $(basename "${part}") (attempt $((attempt + 1))/${SOURCE_UPLOAD_RETRIES})..." >&2
       sleep 3
     fi
   done
 
-  echo "Source archive upload failed after ${SOURCE_UPLOAD_RETRIES} attempt(s)." >&2
+  echo "Source part upload failed after ${SOURCE_UPLOAD_RETRIES} attempt(s): $(basename "${part}")" >&2
   return 1
+}
+
+upload_source_archive() {
+  local archive="$1"
+  local remote_archive="$2"
+  local local_parts_dir="${tmp_dir}/source-parts"
+  local remote_parts_dir="${remote_archive}.parts"
+  local remote_assembling="${remote_archive}.assembling"
+  local part part_name checksum remote_command
+
+  rm -rf "${local_parts_dir}"
+  mkdir -p "${local_parts_dir}"
+  split -b "${SOURCE_UPLOAD_CHUNK_BYTES}" -d -a 6 "${archive}" "${local_parts_dir}/part-"
+  checksum="$(sha256_file "${archive}")"
+  [ -n "${checksum}" ] || {
+    echo "Could not calculate source archive checksum." >&2
+    return 1
+  }
+
+  run_ssh "${SSH_TARGET}" "mkdir -p $(single_quote "${remote_parts_dir}") && rm -f $(single_quote "${remote_assembling}")"
+  for part in "${local_parts_dir}"/part-*; do
+    [ -f "${part}" ] || continue
+    part_name="$(basename "${part}")"
+    echo "Uploading source archive part ${part_name}..."
+    upload_source_part "${part}" "${SSH_TARGET}:${remote_parts_dir}/${part_name}"
+  done
+
+  remote_command="set -eu; cat $(single_quote "${remote_parts_dir}")/part-* > $(single_quote "${remote_assembling}"); actual=\$(openssl dgst -sha256 -r $(single_quote "${remote_assembling}") | awk '{print \$1}'); test \"\${actual}\" = $(single_quote "${checksum}"); mv $(single_quote "${remote_assembling}") $(single_quote "${remote_archive}"); rm -rf $(single_quote "${remote_parts_dir}")"
+  run_ssh "${SSH_TARGET}" "${remote_command}"
+  echo "Source archive uploaded and checksum verified in ${remote_archive}."
 }
 
 remote_validate_caddyfile() {
@@ -1109,7 +1150,7 @@ if [ "${DEPLOY_MODE}" = build ]; then
   run_remote_root_script "${DEPLOY_DIR}/remote-1g-bootstrap.sh" bash "REMOTE_DIR='${REMOTE_DIR}' SWAP_SIZE='${SWAP_SIZE}' DOCKER_INSTALL_METHOD='${DOCKER_INSTALL_METHOD}'"
   create_source_archive
   run_ssh "${SSH_TARGET}" "rm -rf '${remote_upload_dir}' && mkdir -p '${remote_upload_dir}'"
-  upload_source_archive "${tmp_dir}/source.tar.gz" "${SSH_TARGET}:${remote_upload_dir}/source.tar.gz"
+  upload_source_archive "${tmp_dir}/source.tar.gz" "${remote_upload_dir}/source.tar.gz"
   remote_build_image
   run_ssh "${SSH_TARGET}" "rm -rf '${remote_upload_dir}'" >/dev/null 2>&1 || true
   remote_upload_committed=true
