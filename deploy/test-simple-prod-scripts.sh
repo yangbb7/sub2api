@@ -198,9 +198,11 @@ SERIAL_CANARY_MEMORY_LIMIT=256m \
 bash -s "${testable_deploy_script}" <<'BASH'
 source "$1"
 run_remote_root_script() { cp "$1" "$REMOTE_SCRIPT_OUTPUT"; }
-promote_serial_candidate gateway-green-old abcdef123456
+promote_serial_candidate gateway-green-old abcdef123456 gateway-green-abcdef123456-rollout
 BASH
 bash -n "${serial_remote_script}"
+assert_contains "${serial_remote_script}" "NEXT_GATEWAY='gateway-green-abcdef123456-rollout'" \
+  "serial cutover must accept a unique rollout container name"
 assert_contains "${serial_remote_script}" 'docker stop.*ACTIVE_GATEWAY' \
   "serial remote cutover must stop the active gateway before the replacement starts"
 assert_contains "${serial_remote_script}" 'docker run -d' \

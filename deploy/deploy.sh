@@ -351,7 +351,7 @@ REMOTE
 promote_serial_candidate() {
   local active_gateway="$1"
   local commit="$2"
-  local next_gateway="gateway-green-${commit}"
+  local next_gateway="$3"
   local tmp
   tmp="$(mktemp)"
   cat > "${tmp}" <<REMOTE
@@ -499,7 +499,7 @@ build_remote_image() {
 promote_new_container() {
   local active_gateway="$1"
   local commit="$2"
-  local next_gateway="gateway-green-${commit}"
+  local next_gateway="$3"
   local tmp
   tmp="$(mktemp)"
   cat > "${tmp}" <<REMOTE
@@ -713,8 +713,13 @@ main() {
   validate_runtime_overrides
   require_clean_head
 
-  local commit active_gateway deploy_strategy
+  local commit active_gateway deploy_strategy deployed_gateway
   commit="$(git -C "${ROOT_DIR}" rev-parse --short=12 HEAD)"
+  # A configuration-only rollout can use the same image revision as the
+  # currently active gateway.  The container name must still be unique: on a
+  # 2GiB serial cutover, reusing the active name would delete the only serving
+  # container before its replacement is ready.
+  deployed_gateway="gateway-green-${commit}-$(date -u +%Y%m%d%H%M%S)-$$"
   active_gateway="$(remote_current_gateway)"
   [ -n "${active_gateway}" ] || die "Could not determine active Caddy upstream."
   deploy_strategy="$(select_deploy_strategy)"
@@ -731,21 +736,21 @@ main() {
   build_remote_image
   case "${deploy_strategy}" in
     bluegreen)
-      promote_new_container "${active_gateway}" "${commit}"
+      promote_new_container "${active_gateway}" "${commit}" "${deployed_gateway}"
       ;;
     serial)
       echo "2GiB-safe serial mode: stopping inactive rollback containers before candidate preflight."
       stop_inactive_gateways "${active_gateway}"
       start_serial_candidate "${active_gateway}" "${commit}"
-      promote_serial_candidate "${active_gateway}" "${commit}"
+      promote_serial_candidate "${active_gateway}" "${commit}" "${deployed_gateway}"
       ;;
     *) die "Unexpected deployment strategy: ${deploy_strategy}" ;;
   esac
   apply_steady_state_resource_limits
   verify_public "${active_gateway}"
-  cleanup_old_gateways "gateway-green-${commit}" "${active_gateway}" "${KEEP_ROLLBACKS}"
+  cleanup_old_gateways "${deployed_gateway}" "${active_gateway}" "${KEEP_ROLLBACKS}"
 
-  echo "Deploy complete: gateway-green-${commit}"
+  echo "Deploy complete: ${deployed_gateway}"
   echo "Rollback command: deploy/rollback.sh to ${active_gateway}"
 }
 

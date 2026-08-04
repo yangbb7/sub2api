@@ -11,6 +11,10 @@ SSH_CONNECT_TIMEOUT="${SSH_CONNECT_TIMEOUT:-15}"
 SSH_BIND_ADDRESS="${SSH_BIND_ADDRESS:-}"
 HEALTH_ATTEMPTS="${HEALTH_ATTEMPTS:-40}"
 HEALTH_SLEEP="${HEALTH_SLEEP:-0.2}"
+# Normally public verification runs from the operator workstation.  The
+# remote path is an explicit break-glass option when that workstation's
+# network stack is unavailable; it still verifies the public Cloudflare route.
+PUBLIC_VERIFICATION_SOURCE="${PUBLIC_VERIFICATION_SOURCE:-local}"
 
 usage() {
   cat <<'EOF'
@@ -71,12 +75,14 @@ default_from_env_file() {
 load_connection_defaults() {
   local name
   for name in \
-    TARGET_REGION DOMAIN REMOTE_DIR SSH_TARGET SSH_PORT SSH_KEY SSH_PASSWORD SSH_PASS SUDO_PASSWORD SSH_BIND_ADDRESS \
+    TARGET_REGION DOMAIN REMOTE_DIR SSH_TARGET SSH_PORT SSH_KEY SSH_PASSWORD SSH_PASS SUDO_PASSWORD SSH_BIND_ADDRESS PUBLIC_VERIFICATION_SOURCE \
     JP_SSH_TARGET JP_SSH_PORT JP_SSH_KEY JP_SSH_PASSWORD JP_SSH_PASS \
     HK_SSH_TARGET HK_SSH_PORT HK_SSH_KEY HK_SSH_PASSWORD HK_SSH_PASS
   do
     default_from_env_file "${name}"
   done
+
+  PUBLIC_VERIFICATION_SOURCE="${PUBLIC_VERIFICATION_SOURCE:-local}"
 
   SSH_PASSWORD="${SSH_PASSWORD:-${SSH_PASS:-}}"
   case "${TARGET_REGION}" in
@@ -105,6 +111,10 @@ load_connection_defaults() {
       *[!0-9.]*|.*|*..*|*.) die "SSH_BIND_ADDRESS must be an IPv4 address." ;;
     esac
   fi
+  case "${PUBLIC_VERIFICATION_SOURCE}" in
+    local|remote) ;;
+    *) die "PUBLIC_VERIFICATION_SOURCE must be local or remote." ;;
+  esac
 }
 
 ssh_args() {
@@ -243,9 +253,17 @@ if [ "\${current}" = "\${TARGET}" ]; then
 fi
 target_was_stopped=false
 target_state="\$(docker inspect "\${TARGET}" --format '{{.State.Status}}')"
+current_exists=false
+if docker inspect "\${current}" >/dev/null 2>&1; then
+  current_exists=true
+fi
+stop_current() {
+  [ "\${current_exists}" = true ] || return 0
+  docker stop "\${current}" >/dev/null 2>&1 || true
+}
 restore_current() {
   docker stop "\${TARGET}" >/dev/null 2>&1 || true
-  docker start "\${current}" >/dev/null 2>&1 || true
+  [ "\${current_exists}" = true ] && docker start "\${current}" >/dev/null 2>&1 || true
 }
 if [ "\${target_state}" != running ]; then
   [ "\${target_state}" = exited ] || {
@@ -254,9 +272,9 @@ if [ "\${target_state}" != running ]; then
   }
   # Serial deployments keep the old container stopped to fit in 2GiB. Do not
   # briefly run both full-size gateways when restoring it.
-  docker stop "\${current}" >/dev/null
+  stop_current
   if ! docker start "\${TARGET}" >/dev/null; then
-    docker start "\${current}" >/dev/null 2>&1 || true
+    [ "\${current_exists}" = true ] && docker start "\${current}" >/dev/null 2>&1 || true
     exit 1
   fi
   target_was_stopped=true
@@ -300,11 +318,30 @@ REMOTE
   rm -f "${tmp}"
 }
 
+public_health_code() {
+  if [ "${PUBLIC_VERIFICATION_SOURCE}" = remote ]; then
+    run_ssh "curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 2 --max-time 5 $(single_quote "https://${DOMAIN}/health")"
+  else
+    curl -sS -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 5 "https://${DOMAIN}/health"
+  fi
+}
+
+public_responses_code() {
+  if [ "${PUBLIC_VERIFICATION_SOURCE}" = remote ]; then
+    run_ssh "curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 8 --max-time 20 -H 'Content-Type: application/json' -d '{\"model\":\"gpt-5\",\"input\":\"ping\"}' $(single_quote "https://${DOMAIN}/v1/responses")"
+  else
+    curl -sS -o /dev/null -w "%{http_code}" --connect-timeout 8 --max-time 20 \
+      -H 'Content-Type: application/json' \
+      -d '{"model":"gpt-5","input":"ping"}' \
+      "https://${DOMAIN}/v1/responses"
+  fi
+}
+
 verify_public() {
   local fail=0
   local code
   for i in $(seq 1 "${HEALTH_ATTEMPTS}"); do
-    code="$(curl -sS -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 5 "https://${DOMAIN}/health" || echo curl_fail)"
+    code="$(public_health_code || echo curl_fail)"
     if [ "${code}" != 200 ]; then
       echo "health check failed: try=${i} code=${code}" >&2
       fail=$((fail + 1))
@@ -313,10 +350,7 @@ verify_public() {
   done
   [ "${fail}" -eq 0 ] || die "Public health loop failed ${fail} time(s)."
 
-  code="$(curl -sS -o /dev/null -w "%{http_code}" --connect-timeout 8 --max-time 20 \
-    -H 'Content-Type: application/json' \
-    -d '{"model":"gpt-5","input":"ping"}' \
-    "https://${DOMAIN}/v1/responses" || echo curl_fail)"
+  code="$(public_responses_code || echo curl_fail)"
   case "${code}" in
     400|401|403) ;;
     *) die "/v1/responses returned ${code}; expected auth/client error, not an origin failure." ;;
