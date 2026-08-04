@@ -748,7 +748,13 @@ main() {
   esac
   apply_steady_state_resource_limits
   verify_public "${active_gateway}"
-  cleanup_old_gateways "${deployed_gateway}" "${active_gateway}" "${KEEP_ROLLBACKS}"
+  # Stale-container pruning is housekeeping, not a correctness gate.  Once
+  # Caddy, the new gateway and public probes are verified, an inability to
+  # remove an already-stopped historical container must not report the whole
+  # deploy as failed or trigger an unnecessary recovery action.
+  if ! cleanup_old_gateways "${deployed_gateway}" "${active_gateway}" "${KEEP_ROLLBACKS}"; then
+    echo "WARN: deployment is healthy, but stale gateway cleanup did not complete." >&2
+  fi
 
   echo "Deploy complete: ${deployed_gateway}"
   echo "Rollback command: deploy/rollback.sh to ${active_gateway}"
