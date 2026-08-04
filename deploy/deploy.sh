@@ -36,6 +36,7 @@ GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED="${GATEWAY_OPENAI_STREAM_GOVERNANCE_ENA
 GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT="${GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT:-}"
 GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS="${GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS:-}"
 GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS="${GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS:-}"
+DEPLOY_LOCK_DIR="${DEPLOY_LOCK_DIR:-${TMPDIR:-/tmp}/sub2api-deploy.lock}"
 
 usage() {
   cat <<'EOF'
@@ -59,8 +60,24 @@ EOF
 }
 
 die() {
-  echo "ERROR: $*" >&2
-  exit 1
+	echo "ERROR: $*" >&2
+	exit 1
+}
+
+# A full production build can take several minutes. Do not allow a second
+# invocation from the same workstation to retain a stale Caddy upstream and
+# later stop the container selected by the first invocation.
+release_deploy_lock() {
+	rm -f "${DEPLOY_LOCK_DIR}/owner" 2>/dev/null || true
+	rmdir "${DEPLOY_LOCK_DIR}" 2>/dev/null || true
+}
+
+acquire_deploy_lock() {
+	if ! mkdir "${DEPLOY_LOCK_DIR}" 2>/dev/null; then
+		die "Another deploy/deploy.sh invocation is active (lock: ${DEPLOY_LOCK_DIR}). Wait for it to finish before retrying."
+	fi
+	printf 'pid=%s started_at=%s\n' "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${DEPLOY_LOCK_DIR}/owner"
+	trap release_deploy_lock EXIT
 }
 
 need() {
@@ -774,6 +791,7 @@ main() {
   load_connection_defaults
   validate_runtime_overrides
   require_clean_head
+  acquire_deploy_lock
 
   local commit active_gateway deploy_strategy deployed_gateway
   commit="$(git -C "${ROOT_DIR}" rev-parse --short=12 HEAD)"
@@ -796,6 +814,11 @@ main() {
   echo "Public verification source: ${PUBLIC_VERIFICATION_SOURCE}"
 
   build_remote_image
+  local current_gateway
+  current_gateway="$(remote_current_gateway)"
+  if [ "${current_gateway}" != "${active_gateway}" ]; then
+    die "Caddy upstream changed while the image was building (${active_gateway} -> ${current_gateway}); refusing a stale cutover. Wait for the other deployment to finish, then retry."
+  fi
   case "${deploy_strategy}" in
     bluegreen)
       promote_new_container "${active_gateway}" "${commit}" "${deployed_gateway}"

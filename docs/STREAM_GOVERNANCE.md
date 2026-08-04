@@ -68,6 +68,6 @@ GATEWAY_STREAM_KEEPALIVE_INTERVAL=0
 
 运行基线为 2C2G：Gateway `896m`、`GOMEMLIMIT=640MiB`、`GOMAXPROCS=2`；Caddy `96m`、Postgres `320m`、Redis `128m`。总容器上限约 1.44GiB，给宿主页缓存和突发保留约 0.5GiB。
 
-`deploy/deploy.sh` 默认 `DEPLOY_STRATEGY=auto`：主机内存低于约 3.5GiB 时自动使用受限重叠切换，而不是运行两个完整 `896m` Gateway。串行模式先以 `SERIAL_CANARY_MEMORY_LIMIT=256m` 无网络执行新镜像的 `--version` 校验；然后在同一上限启动可访问的候选容器并做本地和 Caddy 网络健康检查。仅在候选健康后才重载 Caddy，再等待 `SERIAL_DRAIN_SECONDS=15` 秒让已建立连接排水，停止旧 Gateway，最后把新实例提升至完整 `896m`。候选与旧实例重叠时的 Gateway cgroup 上限合计为 1152MiB；Caddy/Postgres/Redis 仍分别限制为 96/320/128MiB。发布前还要求 `MemAvailable` 不低于 `SERIAL_MIN_AVAILABLE_KB=524288`，不足时在切流前安全退出而不制造 502/503。旧容器保持停止状态，供 `rollback.sh previous` 使用。
+`deploy/deploy.sh` 默认 `DEPLOY_STRATEGY=auto`：主机内存低于约 3.5GiB 时自动使用受限重叠切换，而不是运行两个完整 `896m` Gateway。脚本在本机持有互斥锁，并会在长镜像构建后重新确认 Caddy 上游未变化；发现其他发布已切流时，会在停止任何容器前退出。串行模式先以 `SERIAL_CANARY_MEMORY_LIMIT=256m` 无网络执行新镜像的 `--version` 校验；然后在同一上限启动可访问的候选容器并做本地和 Caddy 网络健康检查。仅在候选健康后才重载 Caddy，再等待 `SERIAL_DRAIN_SECONDS=15` 秒让已建立连接排水，停止旧 Gateway，最后把新实例提升至完整 `896m`。候选与旧实例重叠时的 Gateway cgroup 上限合计为 1152MiB；Caddy/Postgres/Redis 仍分别限制为 96/320/128MiB。发布前还要求 `MemAvailable` 不低于 `SERIAL_MIN_AVAILABLE_KB=524288`，不足时在切流前安全退出而不制造 502/503。旧容器保持停止状态，供 `rollback.sh previous` 使用。
 
 内存充足的主机才使用蓝绿。上线前还必须验证云厂商控制台或堡垒机的备用入口：完成一次健康探测和回滚演练后，才允许推广流量。

@@ -98,10 +98,13 @@ assert_contains "${DEPLOY_SCRIPT}" 'set_env_override GATEWAY_OPENAI_STREAM_GOVER
 runtime_env="$(mktemp)"
 testable_deploy_script="$(mktemp)"
 serial_remote_script="$(mktemp)"
+deploy_lock_dir="$(mktemp -d)"
 cleanup_runtime_env() {
   rm -f "${runtime_env}" "${testable_deploy_script}" "${serial_remote_script}"
+  rmdir "${deploy_lock_dir}" 2>/dev/null || true
 }
 trap cleanup_runtime_env EXIT
+rmdir "${deploy_lock_dir}"
 sed '$d' "${DEPLOY_SCRIPT}" > "${testable_deploy_script}"
 cat > "${runtime_env}" <<'EOF'
 SSH_TARGET=deploy@example.net
@@ -155,6 +158,21 @@ BASH
   echo "deploy.sh did not preserve shell stream governance overrides: ${runtime_values}" >&2
   exit 1
 }
+DEPLOY_LOCK_DIR="${deploy_lock_dir}" bash -s "${testable_deploy_script}" <<'BASH'
+source "$1"
+acquire_deploy_lock
+if DEPLOY_LOCK_DIR="${DEPLOY_LOCK_DIR}" bash -s "$1" 2>/dev/null <<'CHILD'
+source "$1"
+acquire_deploy_lock
+CHILD
+then
+  echo "deploy.sh did not reject a concurrent local deploy" >&2
+  exit 1
+fi
+[ -f "${DEPLOY_LOCK_DIR}/owner" ]
+release_deploy_lock
+[ ! -e "${DEPLOY_LOCK_DIR}" ]
+BASH
 assert_contains "${DEPLOY_SCRIPT}" 'caddy reload' \
   "deploy.sh must hot-reload Caddy instead of recreating it"
 assert_contains "${DEPLOY_SCRIPT}" 'https://\$\{DOMAIN\}/v1/responses' \
@@ -173,6 +191,10 @@ assert_contains "${DEPLOY_SCRIPT}" 'DEPLOY_STRATEGY=.*auto' \
   "deploy.sh must automatically use serial deployment on memory-constrained hosts"
 assert_contains "${DEPLOY_SCRIPT}" 'stop_inactive_gateways' \
   "deploy.sh serial mode must release inactive rollback containers before cutover"
+assert_contains "${DEPLOY_SCRIPT}" 'acquire_deploy_lock' \
+  "deploy.sh must reject concurrent local production deployments"
+assert_contains "${DEPLOY_SCRIPT}" 'Caddy upstream changed while the image was building' \
+  "deploy.sh must refuse a stale cutover when another deploy changed Caddy"
 assert_contains "${DEPLOY_SCRIPT}" 'docker run --rm --network none --memory' \
   "deploy.sh serial mode must validate the image without a second gateway server"
 assert_contains "${DEPLOY_SCRIPT}" 'SERIAL_MIN_AVAILABLE_KB' \
