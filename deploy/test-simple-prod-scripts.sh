@@ -100,10 +100,14 @@ assert_contains "${DEPLOY_SCRIPT}" 'GATEWAY_RESPONSES_MAX_BODY_SIZE' \
 runtime_env="$(mktemp)"
 testable_deploy_script="$(mktemp)"
 serial_remote_script="$(mktemp)"
+serial_preflight_script="$(mktemp)"
+serial_preflight_log="$(mktemp)"
+serial_preflight_dir="$(mktemp -d)"
 missing_governance_env="$(mktemp)"
 deploy_lock_dir="$(mktemp -d)"
 cleanup_runtime_env() {
-  rm -f "${runtime_env}" "${testable_deploy_script}" "${serial_remote_script}" "${missing_governance_env}"
+  rm -f "${runtime_env}" "${testable_deploy_script}" "${serial_remote_script}" "${serial_preflight_script}" "${serial_preflight_log}" "${missing_governance_env}"
+  rm -rf "${serial_preflight_dir}"
   rmdir "${deploy_lock_dir}" 2>/dev/null || true
 }
 trap cleanup_runtime_env EXIT
@@ -239,6 +243,67 @@ BASH
   exit 1
 }
 
+REMOTE_SCRIPT_OUTPUT="${serial_preflight_script}" \
+REMOTE_DIR="${serial_preflight_dir}" \
+SERIAL_CANARY_MEMORY_LIMIT=256m \
+bash -s "${testable_deploy_script}" <<'BASH'
+source "$1"
+run_remote_root_script() { cp "$1" "$REMOTE_SCRIPT_OUTPUT"; }
+start_serial_candidate gateway-green-old abcdef123456
+BASH
+bash -n "${serial_preflight_script}"
+assert_contains "${serial_preflight_script}" 'serial_supporting_limit_before' \
+  "serial image preflight must audit legacy supporting-service cgroup limits"
+assert_contains "${serial_preflight_script}" 'docker update --memory "\$\{memory_limit\}" --memory-swap "\$\{memory_limit\}" "\$\{service\}"' \
+  "serial image preflight must set finite Caddy, Postgres, and Redis memory/swap limits"
+assert_contains "${serial_preflight_script}" 'serial_host_budget_bytes' \
+  "serial image preflight must calculate a bounded 2GiB host budget"
+assert_last_order "${serial_preflight_script}" 'preflight_serial_supporting_limits' 'docker run --rm' \
+  "serial image preflight must limit legacy services before any candidate container starts"
+
+mkdir -p "${serial_preflight_dir}/bin"
+cat > "${serial_preflight_dir}/bin/docker" <<'BASH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "${DOCKER_LOG}"
+case "$1" in
+  inspect)
+    case "$*" in
+      *gateway:cloud*) printf '%s\n' abcdef123456 ;;
+      *gateway-green-old*State.Health*) printf '%s\n' healthy ;;
+      *gateway-green-old*) printf '%s\n' 1610612736 ;;
+      *) printf '%s\n' 1 ;;
+    esac
+    ;;
+  update) ;;
+  run)
+    echo "candidate docker run must be unreachable after an over-budget preflight" >&2
+    exit 99
+    ;;
+  *)
+    echo "unexpected docker command: $*" >&2
+    exit 98
+    ;;
+esac
+BASH
+chmod +x "${serial_preflight_dir}/bin/docker"
+set +e
+PATH="${serial_preflight_dir}/bin:${PATH}" DOCKER_LOG="${serial_preflight_log}" bash "${serial_preflight_script}" >/dev/null 2>&1
+serial_preflight_status=$?
+set -e
+[ "${serial_preflight_status}" -ne 0 ] || {
+  echo "serial image preflight accepted an over-budget legacy stack" >&2
+  exit 1
+}
+grep -Fq 'update --memory 96m --memory-swap 96m gateway-caddy' "${serial_preflight_log}" || {
+  echo "serial image preflight did not limit Caddy before rejecting an over-budget stack" >&2
+  exit 1
+}
+if grep -Fq 'run ' "${serial_preflight_log}"; then
+  echo "serial image preflight started a candidate after rejecting an over-budget legacy stack" >&2
+  exit 1
+fi
+
 REMOTE_SCRIPT_OUTPUT="${serial_remote_script}" \
 REMOTE_DIR=/opt/gateway \
 GATEWAY_MEMORY_LIMIT=896m \
@@ -264,12 +329,6 @@ assert_contains "${serial_remote_script}" 'docker run -d' \
   "serial remote cutover must start a live replacement gateway"
 assert_contains "${serial_remote_script}" 'MemAvailable' \
   "serial remote cutover must check available host memory before overlap"
-assert_contains "${serial_remote_script}" 'serial_supporting_limit_before' \
-  "serial cutover must audit legacy supporting-service cgroup limits before candidate launch"
-assert_contains "${serial_remote_script}" 'docker update --memory "\$\{memory_limit\}" --memory-swap "\$\{memory_limit\}" "\$\{service\}"' \
-  "serial cutover must set finite Caddy, Postgres, and Redis memory/swap limits before candidate launch"
-assert_contains "${serial_remote_script}" 'serial_host_budget_bytes' \
-  "serial cutover must calculate a bounded 2GiB host budget before candidate launch"
 assert_contains "${serial_remote_script}" "GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED='true'" \
   "serial cutover must preserve the enabled governance canary from ENV_FILE"
 assert_contains "${serial_remote_script}" 'set_env_override GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED "\$\{GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED\}"' \
@@ -286,8 +345,6 @@ assert_contains "${serial_remote_script}" '--memory-swap' \
   "serial remote cutover must update memory and swap together"
 assert_last_order "${serial_remote_script}" 'docker run -d' 'docker stop "\$\{ACTIVE_GATEWAY\}"' \
   "serial remote cutover must start the candidate before stopping the active gateway"
-assert_last_order "${serial_remote_script}" 'preflight_serial_supporting_limits' 'docker run -d' \
-  "serial remote cutover must limit legacy supporting services before starting the candidate"
 assert_last_order "${serial_remote_script}" 'caddy reload --config /tmp/Caddyfile.next' 'docker stop "\$\{ACTIVE_GATEWAY\}"' \
   "serial remote cutover must switch Caddy before stopping the active gateway"
 assert_contains "${serial_remote_script}" 'restore_active' \

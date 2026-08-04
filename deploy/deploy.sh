@@ -377,41 +377,6 @@ CANARY_MEMORY_LIMIT=$(single_quote "${SERIAL_CANARY_MEMORY_LIMIT}")
 
 test "\$(docker inspect "\${ACTIVE_GATEWAY}" --format '{{.State.Health.Status}}')" = healthy
 test "\$(docker inspect gateway:cloud --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "\${EXPECTED_REVISION}"
-# This isolated check proves that the built image can execute before launching
-# the bounded live candidate used for the no-gap serial cutover below.
-docker run --rm --network none --memory "\${CANARY_MEMORY_LIMIT}" gateway:cloud --version >/dev/null
-echo "serial_image_preflight_memory_limit=\${CANARY_MEMORY_LIMIT}"
-REMOTE
-  run_remote_root_script "${tmp}"
-  rm -f "${tmp}"
-}
-
-promote_serial_candidate() {
-  local active_gateway="$1"
-  local commit="$2"
-  local next_gateway="$3"
-  local tmp
-  tmp="$(mktemp)"
-  cat > "${tmp}" <<REMOTE
-#!/usr/bin/env bash
-set -euo pipefail
-cd $(single_quote "${REMOTE_DIR}")
-ACTIVE_GATEWAY=$(single_quote "${active_gateway}")
-NEXT_GATEWAY=$(single_quote "${next_gateway}")
-GATEWAY_MEMORY_LIMIT=$(single_quote "${GATEWAY_MEMORY_LIMIT}")
-GATEWAY_GOMAXPROCS=$(single_quote "${GATEWAY_GOMAXPROCS:-}")
-GATEWAY_GOMEMLIMIT=$(single_quote "${GATEWAY_GOMEMLIMIT:-}")
-CANARY_MEMORY_LIMIT=$(single_quote "${SERIAL_CANARY_MEMORY_LIMIT}")
-SERIAL_DRAIN_SECONDS=$(single_quote "${SERIAL_DRAIN_SECONDS}")
-SERIAL_MIN_AVAILABLE_KB=$(single_quote "${SERIAL_MIN_AVAILABLE_KB}")
-GATEWAY_STREAM_KEEPALIVE_INTERVAL=$(single_quote "${GATEWAY_STREAM_KEEPALIVE_INTERVAL}")
-GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED=$(single_quote "${GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED}")
-GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT=$(single_quote "${GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT}")
-GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS=$(single_quote "${GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS}")
-GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS=$(single_quote "${GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS}")
-GATEWAY_RESPONSES_MAX_BODY_SIZE=$(single_quote "${GATEWAY_RESPONSES_MAX_BODY_SIZE}")
-
-test "\$(docker inspect "\${ACTIVE_GATEWAY}" --format '{{.State.Health.Status}}')" = healthy
 ACTIVE_MEMORY="\$(docker inspect "\${ACTIVE_GATEWAY}" --format '{{.HostConfig.Memory}}')"
 case "\${ACTIVE_MEMORY}" in
   ''|*[!0-9]*|0)
@@ -463,6 +428,41 @@ if [ "\${serial_total_memory_bytes}" -gt 2147483648 ]; then
   exit 1
 fi
 echo "serial_host_budget_bytes=\${serial_total_memory_bytes}"
+# This isolated check proves that the built image can execute before launching
+# the bounded live candidate used for the no-gap serial cutover below.
+docker run --rm --network none --memory "\${CANARY_MEMORY_LIMIT}" gateway:cloud --version >/dev/null
+echo "serial_image_preflight_memory_limit=\${CANARY_MEMORY_LIMIT}"
+REMOTE
+  run_remote_root_script "${tmp}"
+  rm -f "${tmp}"
+}
+
+promote_serial_candidate() {
+  local active_gateway="$1"
+  local commit="$2"
+  local next_gateway="$3"
+  local tmp
+  tmp="$(mktemp)"
+  cat > "${tmp}" <<REMOTE
+#!/usr/bin/env bash
+set -euo pipefail
+cd $(single_quote "${REMOTE_DIR}")
+ACTIVE_GATEWAY=$(single_quote "${active_gateway}")
+NEXT_GATEWAY=$(single_quote "${next_gateway}")
+GATEWAY_MEMORY_LIMIT=$(single_quote "${GATEWAY_MEMORY_LIMIT}")
+GATEWAY_GOMAXPROCS=$(single_quote "${GATEWAY_GOMAXPROCS:-}")
+GATEWAY_GOMEMLIMIT=$(single_quote "${GATEWAY_GOMEMLIMIT:-}")
+CANARY_MEMORY_LIMIT=$(single_quote "${SERIAL_CANARY_MEMORY_LIMIT}")
+SERIAL_DRAIN_SECONDS=$(single_quote "${SERIAL_DRAIN_SECONDS}")
+SERIAL_MIN_AVAILABLE_KB=$(single_quote "${SERIAL_MIN_AVAILABLE_KB}")
+GATEWAY_STREAM_KEEPALIVE_INTERVAL=$(single_quote "${GATEWAY_STREAM_KEEPALIVE_INTERVAL}")
+GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED=$(single_quote "${GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED}")
+GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT=$(single_quote "${GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT}")
+GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS=$(single_quote "${GATEWAY_OPENAI_STREAM_GOVERNANCE_TOTAL_BUDGET_SECONDS}")
+GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS=$(single_quote "${GATEWAY_OPENAI_STREAM_GOVERNANCE_FIRST_ATTEMPT_BUDGET_SECONDS}")
+GATEWAY_RESPONSES_MAX_BODY_SIZE=$(single_quote "${GATEWAY_RESPONSES_MAX_BODY_SIZE}")
+
+test "\$(docker inspect "\${ACTIVE_GATEWAY}" --format '{{.State.Health.Status}}')" = healthy
 available_kb="\$(awk '/^MemAvailable:/ {print \$2; exit}' /proc/meminfo)"
 case "\${available_kb}" in
   ''|*[!0-9]*)

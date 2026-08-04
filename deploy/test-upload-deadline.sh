@@ -82,7 +82,7 @@ started="$(date +%s)"
 set +e
 "${HELPER}" 1 /bin/sh -c '
   trap "" TERM
-  ( trap "" TERM; while :; do sleep 1; done ) &
+  ( trap "" TERM; while :; do sleep 1; done ) >/dev/null 2>&1 &
   printf "%s\\n" "$!" > "$1"
   while :; do sleep 1; done
 ' sh "${child_pid_file}"
@@ -112,7 +112,7 @@ early_exit_child_pid_file="${tmp_dir}/early-exit-child.pid"
 started="$(date +%s)"
 set +e
 "${HELPER}" 1 /bin/sh -c '
-  ( trap "" TERM; while :; do sleep 1; done ) &
+  ( trap "" TERM; while :; do sleep 1; done ) >/dev/null 2>&1 &
   printf "%s\\n" "$!" > "$1"
   exit 0
 ' sh "${early_exit_child_pid_file}"
@@ -140,7 +140,7 @@ fi
 # its command leader has already exited.
 signal_child_pid_file="${tmp_dir}/signal-child.pid"
 "${HELPER}" 30 /bin/sh -c '
-  ( trap "" TERM; while :; do sleep 1; done ) &
+  ( trap "" TERM; while :; do sleep 1; done ) >/dev/null 2>&1 &
   printf "%s\\n" "$!" > "$1"
   exit 0
 ' sh "${signal_child_pid_file}" &
