@@ -84,7 +84,7 @@ SOURCE_UPLOAD_DEADLINE="${SOURCE_UPLOAD_DEADLINE:-1800}"
 # Some low-cost VPS routes reset a long-running SCP/rsync stream after a few
 # MiB. Upload deterministic small parts and assemble only after checksum
 # verification, so a retry resumes the affected part instead of the archive.
-SOURCE_UPLOAD_CHUNK_BYTES="${SOURCE_UPLOAD_CHUNK_BYTES:-2097152}"
+SOURCE_UPLOAD_CHUNK_BYTES="${SOURCE_UPLOAD_CHUNK_BYTES:-1048576}"
 BUILD_COMMIT="${BUILD_COMMIT:-$(git -C "${ROOT_DIR}" rev-parse --short=12 HEAD 2>/dev/null || printf 'archive')}"
 BUILD_DATE="${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 if [ -z "${REMOTE_DOCKERFILE:-}" ]; then
