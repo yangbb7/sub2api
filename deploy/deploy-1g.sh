@@ -33,7 +33,7 @@ load_env_file() {
     PLATFORM GATEWAY_IMAGE ADMIN_EMAIL ADMIN_PASSWORD PROXIED DEPLOY_MODE BUILD_STRATEGY REMOTE_DOCKERFILE REMOTE_SUDO SUDO_PASSWORD \
     SKIP_DNS ROLLBACK_ON_FAILURE CF_API_TOKEN CF_ZONE_ID TTL TZ ACME_EMAIL UPDATE_PROXY_URL SSH_CONNECT_TIMEOUT \
     SWAP_SIZE MIN_FREE_KB MIN_DOCKER_FREE_KB DOCKER_INSTALL_METHOD BUILD_NODE_OPTIONS BUILD_GOMAXPROCS PNPM_REGISTRY \
-    LOCAL_BUILD_GOMAXPROCS LOCAL_BUILD_GOMEMLIMIT LOCAL_BUILD_GCFLAGS SOURCE_UPLOAD_RETRIES SOURCE_UPLOAD_IDLE_TIMEOUT SOURCE_UPLOAD_DEADLINE SOURCE_UPLOAD_CHUNK_BYTES \
+    LOCAL_BUILD_GOMAXPROCS LOCAL_BUILD_GOMEMLIMIT LOCAL_BUILD_GCFLAGS SOURCE_UPLOAD_RETRIES SOURCE_UPLOAD_IDLE_TIMEOUT SOURCE_UPLOAD_DEADLINE SOURCE_UPLOAD_CHUNK_BYTES SOURCE_UPLOAD_PART_PAUSE_SECONDS \
     POSTGRES_PASSWORD JWT_SECRET TOTP_ENCRYPTION_KEY REDIS_PASSWORD
   do
     if [ "${!name+x}" = x ]; then
@@ -85,6 +85,9 @@ SOURCE_UPLOAD_DEADLINE="${SOURCE_UPLOAD_DEADLINE:-1800}"
 # MiB. Upload deterministic small parts and assemble only after checksum
 # verification, so a retry resumes the affected part instead of the archive.
 SOURCE_UPLOAD_CHUNK_BYTES="${SOURCE_UPLOAD_CHUNK_BYTES:-1048576}"
+# A small pause prevents macOS clients with a narrow ephemeral-port range from
+# accumulating hundreds of TIME_WAIT sockets while uploading many parts.
+SOURCE_UPLOAD_PART_PAUSE_SECONDS="${SOURCE_UPLOAD_PART_PAUSE_SECONDS:-3}"
 BUILD_COMMIT="${BUILD_COMMIT:-$(git -C "${ROOT_DIR}" rev-parse --short=12 HEAD 2>/dev/null || printf 'archive')}"
 BUILD_DATE="${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 if [ -z "${REMOTE_DOCKERFILE:-}" ]; then
@@ -682,6 +685,7 @@ validate_positive_int SOURCE_UPLOAD_RETRIES "${SOURCE_UPLOAD_RETRIES}"
 validate_positive_int SOURCE_UPLOAD_IDLE_TIMEOUT "${SOURCE_UPLOAD_IDLE_TIMEOUT}"
 validate_positive_int SOURCE_UPLOAD_DEADLINE "${SOURCE_UPLOAD_DEADLINE}"
 validate_positive_int SOURCE_UPLOAD_CHUNK_BYTES "${SOURCE_UPLOAD_CHUNK_BYTES}"
+validate_positive_int SOURCE_UPLOAD_PART_PAUSE_SECONDS "${SOURCE_UPLOAD_PART_PAUSE_SECONDS}"
 validate_env_token LOCAL_BUILD_GOMEMLIMIT "${LOCAL_BUILD_GOMEMLIMIT}"
 validate_env_token LOCAL_BUILD_GCFLAGS "${LOCAL_BUILD_GCFLAGS}"
 
@@ -1090,6 +1094,7 @@ upload_source_archive() {
     part_name="$(basename "${part}")"
     echo "Uploading source archive part ${part_name}..."
     upload_source_part "${part}" "${SSH_TARGET}:${remote_parts_dir}/${part_name}"
+    sleep "${SOURCE_UPLOAD_PART_PAUSE_SECONDS}"
   done
 
   remote_command="set -eu; cat $(single_quote "${remote_parts_dir}")/part-* > $(single_quote "${remote_assembling}"); actual=\$(openssl dgst -sha256 -r $(single_quote "${remote_assembling}") | awk '{print \$1}'); test \"\${actual}\" = $(single_quote "${checksum}"); mv $(single_quote "${remote_assembling}") $(single_quote "${remote_archive}"); rm -rf $(single_quote "${remote_parts_dir}")"

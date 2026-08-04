@@ -14,6 +14,8 @@ fail() {
 [ -f "${DEPLOY_SCRIPT}" ] || fail "Missing 1G deploy script: ${DEPLOY_SCRIPT}"
 grep -Fq 'SOURCE_UPLOAD_CHUNK_BYTES' "${DEPLOY_SCRIPT}" ||
   fail "source uploads must use a bounded chunk size on unstable links"
+grep -Fq 'SOURCE_UPLOAD_PART_PAUSE_SECONDS' "${DEPLOY_SCRIPT}" ||
+  fail "source uploads must pace short connections to avoid local port exhaustion"
 grep -Fq 'split -b "${SOURCE_UPLOAD_CHUNK_BYTES}"' "${DEPLOY_SCRIPT}" ||
   fail "source uploads must split the archive into resumable fixed-size parts"
 grep -Fq 'run_rsync --append --timeout="${SOURCE_UPLOAD_IDLE_TIMEOUT}"' "${DEPLOY_SCRIPT}" ||
@@ -55,6 +57,7 @@ tmp_dir="$TEST_DIR"
 SOURCE_UPLOAD_CHUNK_BYTES=2097152
 SOURCE_UPLOAD_RETRIES=2
 SOURCE_UPLOAD_IDLE_TIMEOUT=5
+SOURCE_UPLOAD_PART_PAUSE_SECONDS=0
 SSH_TARGET=fake
 run_rsync() {
   local source="${@: -2:1}"
