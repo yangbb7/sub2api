@@ -254,6 +254,7 @@ export default {
         account: '账号',
         accountId: '账号 ID',
         status: '状态码',
+        upstreamStatus: '上游状态码',
         message: '响应内容',
         ip: 'IP',
         latency: '请求时长',

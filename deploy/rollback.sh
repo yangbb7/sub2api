@@ -182,6 +182,12 @@ remote_current_gateway() {
 #!/usr/bin/env bash
 set -euo pipefail
 cd $(single_quote "${REMOTE_DIR}")
+live_config="\$(docker exec gateway-caddy wget -q -O- http://127.0.0.1:2019/config/ 2>/dev/null || true)"
+live_gateway="\$(printf '%s\\n' "\${live_config}" | grep -Eo 'gateway(-[A-Za-z0-9._-]+)?:18080' | sed 's/:18080$//' | head -1 || true)"
+if [ -n "\${live_gateway}" ]; then
+  printf '%s\\n' "\${live_gateway}"
+  exit 0
+fi
 grep -Eo 'reverse_proxy[[:space:]]+[^[:space:]]+:18080' Caddyfile.1g | awk '{print \$2}' | sed 's/:18080$//' | head -1
 REMOTE
   run_remote_root_script "${tmp}"
@@ -195,7 +201,9 @@ list_targets() {
 #!/usr/bin/env bash
 set -euo pipefail
 cd $(single_quote "${REMOTE_DIR}")
-current="\$(grep -Eo 'reverse_proxy[[:space:]]+[^[:space:]]+:18080' Caddyfile.1g | awk '{print \$2}' | sed 's/:18080$//' | head -1 || true)"
+live_config="\$(docker exec gateway-caddy wget -q -O- http://127.0.0.1:2019/config/ 2>/dev/null || true)"
+current="\$(printf '%s\\n' "\${live_config}" | grep -Eo 'gateway(-[A-Za-z0-9._-]+)?:18080' | sed 's/:18080$//' | head -1 || true)"
+[ -n "\${current}" ] || current="\$(grep -Eo 'reverse_proxy[[:space:]]+[^[:space:]]+:18080' Caddyfile.1g | awk '{print \$2}' | sed 's/:18080$//' | head -1 || true)"
 printf 'CURRENT %s\\n' "\${current:-unknown}"
 docker ps -a --format '{{.Names}}' | grep -E '^(gateway$|gateway-(green|blue|next|rollback))' | while read -r name; do
   state="\$(docker inspect "\${name}" --format '{{.State.Status}}')"
@@ -218,7 +226,9 @@ select_previous_target() {
 #!/usr/bin/env bash
 set -euo pipefail
 cd $(single_quote "${REMOTE_DIR}")
-current="\$(grep -Eo 'reverse_proxy[[:space:]]+[^[:space:]]+:18080' Caddyfile.1g | awk '{print \$2}' | sed 's/:18080$//' | head -1 || true)"
+live_config="\$(docker exec gateway-caddy wget -q -O- http://127.0.0.1:2019/config/ 2>/dev/null || true)"
+current="\$(printf '%s\\n' "\${live_config}" | grep -Eo 'gateway(-[A-Za-z0-9._-]+)?:18080' | sed 's/:18080$//' | head -1 || true)"
+[ -n "\${current}" ] || current="\$(grep -Eo 'reverse_proxy[[:space:]]+[^[:space:]]+:18080' Caddyfile.1g | awk '{print \$2}' | sed 's/:18080$//' | head -1 || true)"
 docker ps -a --format '{{.Names}}' | grep -E '^(gateway$|gateway-(green|blue|next|rollback))' | while read -r name; do
   [ "\${name}" != "\${current}" ] || continue
   state="\$(docker inspect "\${name}" --format '{{.State.Status}}')"
@@ -245,7 +255,9 @@ switch_caddy() {
 set -euo pipefail
 cd $(single_quote "${REMOTE_DIR}")
 TARGET=$(single_quote "${target}")
-current="\$(grep -Eo 'reverse_proxy[[:space:]]+[^[:space:]]+:18080' Caddyfile.1g | awk '{print \$2}' | sed 's/:18080$//' | head -1 || true)"
+live_config="\$(docker exec gateway-caddy wget -q -O- http://127.0.0.1:2019/config/ 2>/dev/null || true)"
+current="\$(printf '%s\\n' "\${live_config}" | grep -Eo 'gateway(-[A-Za-z0-9._-]+)?:18080' | sed 's/:18080$//' | head -1 || true)"
+[ -n "\${current}" ] || current="\$(grep -Eo 'reverse_proxy[[:space:]]+[^[:space:]]+:18080' Caddyfile.1g | awk '{print \$2}' | sed 's/:18080$//' | head -1 || true)"
 test -n "\${current}"
 if [ "\${current}" = "\${TARGET}" ]; then
   echo "already=\${TARGET}"

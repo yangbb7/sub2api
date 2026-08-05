@@ -1209,8 +1209,11 @@ TOTP_ENCRYPTION_KEY=${TOTP_ENCRYPTION_KEY}
 ADMIN_EMAIL=${ADMIN_EMAIL}
 ADMIN_PASSWORD=${ADMIN_PASSWORD}
 TZ=${TZ:-Asia/Shanghai}
-GOMAXPROCS=1
-GOMEMLIMIT=192MiB
+# Keep the legacy direct entry aligned with the 2C2G runtime baseline. The
+# filename remains for migration compatibility, but production must not
+# silently downgrade the gateway to the old 1C1G process settings.
+GOMAXPROCS=2
+GOMEMLIMIT=640MiB
 DATABASE_MAX_OPEN_CONNS=8
 DATABASE_MAX_IDLE_CONNS=2
 POSTGRES_MAX_CONNECTIONS=30

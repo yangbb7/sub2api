@@ -36,6 +36,9 @@ type StreamAttempt struct {
 	upstreamHeadersAt         time.Time
 	firstSemanticAt           time.Time
 	firstDownstreamAt         time.Time
+	lastDownstreamActivityAt  time.Time
+	maxDownstreamIdleAfterHdr int64
+	downstreamKeepaliveCount  int
 	cancelPhase               string
 	outcome                   string
 	presemanticCancelReported bool
@@ -143,6 +146,53 @@ func StreamAttemptMarkFirstDownstreamByte(c *gin.Context) {
 	attempt.mu.Unlock()
 }
 
+// StreamAttemptMarkDownstreamActivity records a successful downstream flush
+// without retaining the flushed data. The elapsed value begins when upstream
+// response headers arrive, so it exposes gaps that an SSE keepalive should
+// have covered.
+func StreamAttemptMarkDownstreamActivity(c *gin.Context) {
+	attempt := streamAttemptFromContext(c)
+	if attempt == nil {
+		return
+	}
+	attempt.mu.Lock()
+	streamAttemptMarkDownstreamActivityLocked(attempt, time.Now())
+	attempt.mu.Unlock()
+}
+
+func streamAttemptMarkDownstreamActivityLocked(attempt *StreamAttempt, at time.Time) {
+	if attempt == nil || attempt.upstreamHeadersAt.IsZero() {
+		return
+	}
+	streamAttemptObserveDownstreamIdleLocked(attempt, at)
+	attempt.lastDownstreamActivityAt = at
+}
+
+func streamAttemptObserveDownstreamIdleLocked(attempt *StreamAttempt, at time.Time) {
+	if attempt == nil || attempt.upstreamHeadersAt.IsZero() {
+		return
+	}
+	previous := attempt.lastDownstreamActivityAt
+	if previous.IsZero() {
+		previous = attempt.upstreamHeadersAt
+	}
+	if idle := at.Sub(previous).Milliseconds(); idle > attempt.maxDownstreamIdleAfterHdr {
+		attempt.maxDownstreamIdleAfterHdr = idle
+	}
+}
+
+// StreamAttemptMarkDownstreamKeepalive records a successfully flushed SSE
+// comment. It is a count only: no event content or client data is retained.
+func StreamAttemptMarkDownstreamKeepalive(c *gin.Context) {
+	attempt := streamAttemptFromContext(c)
+	if attempt == nil {
+		return
+	}
+	attempt.mu.Lock()
+	attempt.downstreamKeepaliveCount++
+	attempt.mu.Unlock()
+}
+
 func StreamAttemptMarkClientCanceled(c *gin.Context) {
 	attempt := streamAttemptFromContext(c)
 	if attempt == nil {
@@ -231,26 +281,36 @@ func FinalizeStreamAttempt(c *gin.Context) {
 			attempt.outcome = "failed"
 		}
 	}
+	streamAttemptObserveDownstreamIdleLocked(attempt, now)
 	fields := map[string]any{
-		"request_id":                   attempt.requestID,
-		"cf_ray":                       attempt.cfRay,
-		"client_type":                  attempt.clientType,
-		"request_body_bucket":          attempt.bodyBucket,
-		"model":                        attempt.model,
-		"reasoning_effort":             attempt.reasoningEffort,
-		"stream":                       attempt.stream,
-		"selected_account_id":          attempt.accountID,
-		"platform":                     attempt.platform,
-		"account_attempt_count":        attempt.attempts,
-		"upstream_response_headers_ms": streamAttemptElapsedMs(attempt.startedAt, attempt.upstreamHeadersAt),
-		"first_semantic_event_ms":      streamAttemptElapsedMs(attempt.startedAt, attempt.firstSemanticAt),
-		"first_downstream_byte_ms":     streamAttemptElapsedMs(attempt.startedAt, attempt.firstDownstreamAt),
-		"cancel_phase":                 attempt.cancelPhase,
-		"final_outcome":                attempt.outcome,
-		"duration_ms":                  now.Sub(attempt.startedAt).Milliseconds(),
+		"request_id":                           attempt.requestID,
+		"cf_ray":                               attempt.cfRay,
+		"client_type":                          attempt.clientType,
+		"request_body_bucket":                  attempt.bodyBucket,
+		"model":                                attempt.model,
+		"reasoning_effort":                     attempt.reasoningEffort,
+		"stream":                               attempt.stream,
+		"selected_account_id":                  attempt.accountID,
+		"platform":                             attempt.platform,
+		"account_attempt_count":                attempt.attempts,
+		"upstream_response_headers_ms":         streamAttemptElapsedMs(attempt.startedAt, attempt.upstreamHeadersAt),
+		"first_semantic_event_ms":              streamAttemptElapsedMs(attempt.startedAt, attempt.firstSemanticAt),
+		"first_downstream_byte_ms":             streamAttemptElapsedMs(attempt.startedAt, attempt.firstDownstreamAt),
+		"max_downstream_idle_after_headers_ms": streamAttemptDownstreamIdleMs(attempt),
+		"downstream_keepalive_count":           attempt.downstreamKeepaliveCount,
+		"cancel_phase":                         attempt.cancelPhase,
+		"final_outcome":                        attempt.outcome,
+		"duration_ms":                          now.Sub(attempt.startedAt).Milliseconds(),
 	}
 	attempt.mu.Unlock()
 	logger.WriteSinkEvent("info", "stream_attempts", "stream_attempt.completed", fields)
+}
+
+func streamAttemptDownstreamIdleMs(attempt *StreamAttempt) any {
+	if attempt == nil || attempt.upstreamHeadersAt.IsZero() {
+		return nil
+	}
+	return attempt.maxDownstreamIdleAfterHdr
 }
 
 func streamAttemptElapsedMs(startedAt, markedAt time.Time) any {

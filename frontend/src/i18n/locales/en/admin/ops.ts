@@ -254,6 +254,7 @@ export default {
         account: 'Account',
         accountId: 'Account ID',
         status: 'Status',
+        upstreamStatus: 'Upstream Status',
         message: 'Message',
         ip: 'IP',
         latency: 'Request Duration',

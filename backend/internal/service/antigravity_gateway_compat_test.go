@@ -615,3 +615,37 @@ func TestAntigravityCompatKeepaliveAfterFirstEvent(t *testing.T) {
 	require.Contains(t, recorder.Header().Get("Content-Type"), "text/event-stream")
 	require.NoError(t, reader.Close())
 }
+
+func TestAntigravityCompatKeepaliveBeforeFirstEvent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := newAntigravityCompatService(
+		config.GatewayConfig{MaxLineSize: defaultMaxLineSize, StreamKeepaliveInterval: 1},
+		nil,
+	)
+	c, recorder := newAntigravityCompatContext(http.MethodPost, "/v1/responses", nil)
+	StartStreamAttempt(c, time.Now(), []byte(`{"model":"gemini-3.1-pro-high","stream":true,"input":"probe"}`), "gemini-3.1-pro-high", true)
+	StreamAttemptMarkUpstreamResponseHeaders(c)
+	reader, writer := io.Pipe()
+	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: reader}
+	done := make(chan error, 1)
+
+	go func() {
+		_, err := svc.handleResponsesStreamingFromAntigravity(c, resp, time.Now(), "gemini-3.1-pro-high")
+		done <- err
+	}()
+
+	time.Sleep(1200 * time.Millisecond)
+	_, err := io.WriteString(
+		writer,
+		`data: {"response":{"responseId":"resp_3757","candidates":[{"content":{"parts":[{"text":"partial"}]}}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":1}}}`+"\n\n",
+	)
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+	require.NoError(t, <-done)
+	require.True(t, strings.HasPrefix(recorder.Body.String(), ": ping\n\n"), "heartbeat must arrive before the delayed first upstream event")
+	attempt := streamAttemptFromContext(c)
+	require.NotNil(t, attempt)
+	require.GreaterOrEqual(t, attempt.downstreamKeepaliveCount, 1)
+	require.False(t, attempt.firstDownstreamAt.IsZero())
+	require.NoError(t, reader.Close())
+}

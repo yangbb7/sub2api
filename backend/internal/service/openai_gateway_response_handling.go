@@ -132,6 +132,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		}
 		flusher.Flush()
 		StreamAttemptMarkFirstDownstreamByte(c)
+		StreamAttemptMarkDownstreamActivity(c)
 		return nil
 	}
 
@@ -163,10 +164,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		intervalCh = intervalTicker.C
 	}
 
-	keepaliveInterval := time.Duration(0)
-	if s.cfg != nil && s.cfg.Gateway.StreamKeepaliveInterval > 0 {
-		keepaliveInterval = time.Duration(s.cfg.Gateway.StreamKeepaliveInterval) * time.Second
-	}
+	keepaliveInterval := responsesStreamKeepaliveInterval(c, s.cfg)
 	// 下游 keepalive 仅用于防止代理空闲断开
 	var keepaliveTicker *time.Ticker
 	if keepaliveInterval > 0 {
@@ -748,6 +746,8 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				}
 				flusher.Flush()
 				StreamAttemptMarkFirstDownstreamByte(c)
+				StreamAttemptMarkDownstreamActivity(c)
+				StreamAttemptMarkDownstreamKeepalive(c)
 				lastDownstreamWriteAt = time.Now()
 				continue
 			}
@@ -762,6 +762,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				reportPresemanticCancel()
 				logger.LegacyPrintf("service.openai_gateway", "Client disconnected during keepalive flush, continuing to drain upstream for billing")
 			} else {
+				StreamAttemptMarkDownstreamKeepalive(c)
 				lastDownstreamWriteAt = time.Now()
 			}
 		}

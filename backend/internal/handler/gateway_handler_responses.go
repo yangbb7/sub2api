@@ -91,6 +91,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		return
 	}
 	if reqStream {
+		service.ConfigureResponsesStreamKeepaliveCohort(c, h.cfg)
 		service.StartStreamAttempt(c, requestStart, body, reqModel, true)
 		defer service.FinalizeStreamAttempt(c)
 	}
@@ -295,6 +296,14 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 				// Can't failover if streaming content already sent
 				if c.Writer.Size() != writerSizeBeforeForward {
 					h.handleResponsesFailoverExhausted(c, failoverErr, true)
+					return
+				}
+				// A Responses request may have been accepted upstream even when no
+				// semantic output reached this client. Do not turn that ambiguous
+				// result into a second request against another account.
+				if !openAIResponsesSafePreOutputReplay(c, body) {
+					service.StreamAttemptMarkOutcome(c, "retry_blocked_unsafe")
+					h.handleResponsesFailoverExhausted(c, failoverErr, streamStarted)
 					return
 				}
 				action := fs.HandleFailoverError(requestCtx, h.gatewayService, account.ID, account.Platform, account.GetPoolModeRetryCount(), failoverErr)

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -132,6 +133,37 @@ func TestHandleResponsesStreamingResponse_RestoresNamespaceTool(t *testing.T) {
 	require.Contains(t, rec.Body.String(), `"name":"read_thread"`)
 	require.Contains(t, rec.Body.String(), `"namespace":"codex_app"`)
 	require.NotContains(t, rec.Body.String(), `"name":"codex_app__read_thread"`)
+}
+
+func TestHandleResponsesStreamingResponse_KeepaliveBeforeFirstUpstreamEvent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	StartStreamAttempt(c, time.Now(), []byte(`{"model":"claude-fable-5","stream":true,"input":"probe"}`), "claude-fable-5", true)
+	StreamAttemptMarkUpstreamResponseHeaders(c)
+
+	pr, pw := io.Pipe()
+	resp := &http.Response{Body: pr}
+	svc := &GatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{
+		MaxLineSize:             defaultMaxLineSize,
+		StreamKeepaliveInterval: 1,
+	}}}
+	go func() {
+		defer func() { _ = pw.Close() }()
+		time.Sleep(1200 * time.Millisecond)
+		_, _ = io.WriteString(pw, namespaceToolAnthropicStream())
+	}()
+
+	result, err := svc.handleResponsesStreamingResponse(resp, c, "claude-fable-5", "claude-fable-5", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, strings.HasPrefix(rec.Body.String(), ":\n\n"), "heartbeat must arrive before the delayed first upstream event")
+	attempt := streamAttemptFromContext(c)
+	require.NotNil(t, attempt)
+	require.GreaterOrEqual(t, attempt.downstreamKeepaliveCount, 1)
+	require.False(t, attempt.firstDownstreamAt.IsZero())
 }
 
 func TestExtractResponsesReasoningEffortFromBody(t *testing.T) {

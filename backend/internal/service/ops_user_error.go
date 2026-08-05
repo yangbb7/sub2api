@@ -107,7 +107,7 @@ func ToUserErrorRequest(e *OpsErrorLog) *UserErrorRequest {
 		CreatedAt:       e.CreatedAt,
 		Model:           model,
 		InboundEndpoint: e.InboundEndpoint,
-		StatusCode:      e.StatusCode,
+		StatusCode:      opsStatusCodeValue(e.StatusCode),
 		Category:        MapUserErrorCategory(e.Phase, e.Type),
 		Platform:        e.Platform,
 		Message:         e.Message,
@@ -119,6 +119,13 @@ func ToUserErrorRequest(e *OpsErrorLog) *UserErrorRequest {
 		Stream:          e.Stream,
 		UserAgent:       e.UserAgent,
 	}
+}
+
+func opsStatusCodeValue(statusCode *int) int {
+	if statusCode == nil {
+		return 0
+	}
+	return *statusCode
 }
 
 // UserErrorRequestDetail 是错误请求详情的脱敏视图(点击单行查看)。

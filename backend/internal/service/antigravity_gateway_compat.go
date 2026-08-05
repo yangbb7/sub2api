@@ -307,6 +307,7 @@ func (s *AntigravityGatewayService) consumeAntigravityCompatResponse(
 	resp *http.Response,
 ) (*ForwardResult, error) {
 	defer func() { _ = resp.Body.Close() }()
+	StreamAttemptMarkUpstreamResponseHeaders(c)
 	if resp.StatusCode >= http.StatusBadRequest {
 		return nil, s.handleAntigravityCompatHTTPError(ctx, c, account, call, resp)
 	}

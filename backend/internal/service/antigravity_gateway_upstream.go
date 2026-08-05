@@ -213,7 +213,7 @@ func (s *AntigravityGatewayService) streamUpstreamResponse(c *gin.Context, resp 
 
 	// 下游 keepalive：防止代理/Cloudflare Tunnel 因连接空闲而断开
 	keepaliveInterval := time.Duration(0)
-	if s.settingService.cfg != nil && s.settingService.cfg.Gateway.StreamKeepaliveInterval > 0 {
+	if responsesStreamKeepaliveCohortEnabled(c) && s.settingService.cfg != nil && s.settingService.cfg.Gateway.StreamKeepaliveInterval > 0 {
 		keepaliveInterval = time.Duration(s.settingService.cfg.Gateway.StreamKeepaliveInterval) * time.Second
 	}
 	var keepaliveTicker *time.Ticker

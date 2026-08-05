@@ -1,5 +1,10 @@
 # 1G VPS Deployment
 
+> Deprecated for production. The production host is 2C2G and must use
+> `deploy/deploy.sh` with the 2C2G resource baseline. Do not run
+> `deploy/deploy-1g.sh` for a production release. This document remains only
+> for recovery and historical configuration reference.
+
 This deployment profile is for a 1 vCPU / 1 GB RAM server. It runs Caddy,
 AI Gateway, PostgreSQL, and Redis on one host with conservative memory limits.
 The default container memory caps total about 704 MB, leaving room for the OS,

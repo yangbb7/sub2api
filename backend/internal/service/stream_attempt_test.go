@@ -32,9 +32,15 @@ func TestStreamAttemptFinalizationIsPrivacySafeAndCapturesPreSemanticCancel(t *t
 	c.Request.Header.Set("User-Agent", "Codex Desktop")
 
 	body := []byte(`{"reasoning":{"effort":"HIGH"},"input":"` + strings.Repeat("x", 5*1024*1024) + `"}`)
-	StartStreamAttempt(c, time.Now().Add(-10*time.Millisecond), body, "gpt-5", true)
+	attempt := StartStreamAttempt(c, time.Now().Add(-10*time.Millisecond), body, "gpt-5", true)
 	StreamAttemptMarkSelectedAccount(c, &Account{ID: 42, Platform: PlatformOpenAI, Name: "never-recorded"})
 	StreamAttemptMarkUpstreamResponseHeaders(c)
+	attempt.mu.Lock()
+	attempt.upstreamHeadersAt = time.Now().Add(-5 * time.Millisecond)
+	attempt.mu.Unlock()
+	StreamAttemptMarkDownstreamActivity(c)
+	StreamAttemptMarkDownstreamKeepalive(c)
+	StreamAttemptMarkDownstreamKeepalive(c)
 	cancel()
 	FinalizeStreamAttempt(c)
 
@@ -50,6 +56,9 @@ func TestStreamAttemptFinalizationIsPrivacySafeAndCapturesPreSemanticCancel(t *t
 	require.Equal(t, int64(42), event.Fields["selected_account_id"])
 	require.Equal(t, "after_headers_before_semantic", event.Fields["cancel_phase"])
 	require.Equal(t, "client_canceled", event.Fields["final_outcome"])
+	require.IsType(t, int64(0), event.Fields["max_downstream_idle_after_headers_ms"])
+	require.GreaterOrEqual(t, event.Fields["max_downstream_idle_after_headers_ms"].(int64), int64(5))
+	require.Equal(t, 2, event.Fields["downstream_keepalive_count"])
 	require.NotContains(t, event.Fields, "selected_account_name")
 	require.NotContains(t, event.Fields, "request_body")
 }

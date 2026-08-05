@@ -13,9 +13,9 @@
 - 正常推理请求：首语义事件 TTFT P95 < 8 秒，P99 < 10 秒；高推理档位单独看板。
 - `cancel_phase` 在 `before_upstream_headers` 或 `after_headers_before_semantic` 的占比：1 小时 < 0.5%，24 小时 < 0.2%。
 - `upstream_response_headers_ms`、`first_semantic_event_ms`、`first_downstream_byte_ms` 分别显示，避免把上游等待和代理缓冲混为一谈。
-- 上游响应头已到达时，灰度中的连续 5 秒窗口必须至少有一个下游 SSE 心跳或语义事件。
+- 上游响应头已到达时，灰度中的连续 5 秒窗口必须至少有一个下游 SSE 心跳或语义事件；`downstream_keepalive_count` 用于核对实际发出的心跳数，`max_downstream_idle_after_headers_ms` 的 P95 和最大值用于发现超过该窗口的真实下游静默间隔。
 
-在数据库核对时可从 `ops_system_logs` 筛选 `component = 'stream_attempts'`，字段在 `extra` JSON 中；优先使用运维 UI/只读副本，避免在生产主库执行大范围 JSON 扫描。
+在数据库核对时可从 `ops_system_logs` 筛选 `component = 'stream_attempts'`，字段在 `extra` JSON 中；优先使用运维 UI/只读副本，避免在生产主库执行大范围 JSON 扫描。可直接使用只读聚合脚本 [stream-attempts-report.sql](../deploy/stream-attempts-report.sql)，以 `-v window='1 hour'` 或 `-v window='24 hours'` 生成统一口径。
 
 ## 受控链路隔离
 
@@ -48,10 +48,10 @@ ORIGIN_PROBE_CLIENT_KEY=/secure/path/client.key \
 ## 灰度顺序与开关
 
 1. 先保持 `GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED=false`、`GATEWAY_STREAM_KEEPALIVE_INTERVAL=0`，积累影子观测和隔离实验。
-2. 就绪后在 10% 确定性请求 cohort 启用首输出预算：`GATEWAY_STREAM_KEEPALIVE_INTERVAL=5`、`GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED=true`、`GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT=10`。启用后账户健康熔断会为全部流式选路重排候选，但熔断账户仍保留为回退；只有 10 秒首输出预算受该 cohort 限制。
+2. 就绪后在 10% 确定性请求 cohort 启用首输出预算：`GATEWAY_STREAM_KEEPALIVE_INTERVAL=5`、`GATEWAY_OPENAI_STREAM_GOVERNANCE_ENABLED=true`、`GATEWAY_OPENAI_STREAM_GOVERNANCE_ROLLOUT_PERCENT=10`。首输出预算使用该 cohort；账户健康熔断在 governance 启用时为全部流式选路重排候选，但熔断账户仍保留为回退。SSE keepalive 只由 `GATEWAY_STREAM_KEEPALIVE_INTERVAL` 控制，`rollout_percent=0` 时仍会在上游响应头到达后发送 5 秒 comment frame，便于预算回滚期间保持连接。只有首输出预算受 rollout 限制。
 3. 连续 24 小时指标无回归后再扩大。心跳只在收到上游响应头后发出，能避免代理空闲断开，不能修复“上游响应头未到”。
 
-首输出调度总预算为 10 秒：第一个候选账户最多 6 秒，第二个候选账户最多 4 秒。跨账户重放只允许尚未向客户端输出、没有 `tools`、没有 `previous_response_id`，并且携带 `Idempotency-Key` 的请求；其他请求只依靠账户健康路由避开慢账户。账户健康窗口按近 5/15 分钟 TTFT、首输出超时率和首语义输出前取消率熔断；熔断账户仍保留为容量不足时的后备。
+首输出调度总预算为 10 秒，并在首次真实上游 HTTP 尝试即将发送前开始计时；解析、鉴权、安全审计、排队、计费、请求构造和签名不消耗该预算。当前 HTTP 流式路径不会自动跨账户重放：客户端的 `Idempotency-Key` 既不在网关持久去重，也没有可验证的跨上游账号去重契约，首输出超时后的第二次请求可能产生重复计费。因而所有请求都将完整 10 秒交给首账户；账户健康窗口按近 5/15 分钟 TTFT、首输出超时率和首语义输出前取消率提前避开慢账户。`high`、`xhigh`、`max` 推理档位使用其专用首输出 timeout，不受通用 10 秒预算截断。6+4 秒调度器保留在代码中，只有在完成跨账号幂等与计费对账验证后才能为明确安全的请求类启用。
 
 任何阶段取消率、5xx 或重复计费上升时，立即设置：
 

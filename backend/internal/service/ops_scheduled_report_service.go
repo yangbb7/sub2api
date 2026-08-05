@@ -714,7 +714,7 @@ func buildOpsErrorDigestEmailHTML(title string, start, end time.Time, list *OpsE
 			"<tr><td>%s</td><td>%s</td><td>%d</td><td>%s</td></tr>",
 			htmlEscape(item.CreatedAt.UTC().Format(time.RFC3339)),
 			htmlEscape(item.Platform),
-			item.StatusCode,
+			opsStatusCodeValue(item.StatusCode),
 			htmlEscape(truncateString(item.Message, 180)),
 		)
 	}

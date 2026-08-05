@@ -607,7 +607,46 @@ remote_current_gateway() {
 #!/usr/bin/env bash
 set -euo pipefail
 cd $(single_quote "${REMOTE_DIR}")
+live_config="\$(docker exec gateway-caddy wget -q -O- http://127.0.0.1:2019/config/ 2>/dev/null || true)"
+live_gateway="\$(printf '%s\\n' "\${live_config}" | grep -Eo 'gateway(-[A-Za-z0-9._-]+)?:18080' | sed 's/:18080$//' | head -1 || true)"
+if [ -n "\${live_gateway}" ]; then
+  printf '%s\\n' "\${live_gateway}"
+  exit 0
+fi
 grep -Eo 'reverse_proxy[[:space:]]+[^[:space:]]+:18080' Caddyfile.1g | awk '{print \$2}' | sed 's/:18080$//' | head -1
+REMOTE
+  run_remote_root_script "${tmp}"
+  rm -f "${tmp}"
+}
+
+# Caddy hot reloads update its admin configuration, but its bind-mounted
+# Caddyfile remains the restart source of truth. Repair any drift before a
+# release so a later Caddy restart cannot resurrect a stopped gateway.
+sync_persisted_caddy_upstream() {
+  local expected_gateway="$1"
+  local tmp
+  tmp="$(mktemp)"
+  cat > "${tmp}" <<REMOTE
+#!/usr/bin/env bash
+set -euo pipefail
+cd $(single_quote "${REMOTE_DIR}")
+EXPECTED_GATEWAY=$(single_quote "${expected_gateway}")
+live_config="\$(docker exec gateway-caddy wget -q -O- http://127.0.0.1:2019/config/ 2>/dev/null || true)"
+live_gateway="\$(printf '%s\\n' "\${live_config}" | grep -Eo 'gateway(-[A-Za-z0-9._-]+)?:18080' | sed 's/:18080$//' | head -1 || true)"
+test -n "\${live_gateway}"
+test "\${live_gateway}" = "\${EXPECTED_GATEWAY}"
+persisted_gateway="\$(grep -Eo 'reverse_proxy[[:space:]]+[^[:space:]]+:18080' Caddyfile.1g | awk '{print \$2}' | sed 's/:18080$//' | head -1)"
+test -n "\${persisted_gateway}"
+if [ "\${persisted_gateway}" = "\${live_gateway}" ]; then
+  exit 0
+fi
+backup="Caddyfile.1g.before-sync-\${live_gateway}-\$(date -u +%Y%m%dT%H%M%SZ).bak"
+cp Caddyfile.1g "\${backup}"
+sed "s/reverse_proxy \${persisted_gateway}:18080/reverse_proxy \${live_gateway}:18080/" "\${backup}" > Caddyfile.1g.next
+docker exec -i gateway-caddy sh -c 'cat > /tmp/Caddyfile.next && caddy validate --config /tmp/Caddyfile.next --adapter caddyfile' < Caddyfile.1g.next
+grep -q "reverse_proxy \${live_gateway}:18080" Caddyfile.1g.next
+mv Caddyfile.1g.next Caddyfile.1g
+printf 'persisted_caddy_upstream_synced=%s\\n' "\${live_gateway}"
 REMOTE
   run_remote_root_script "${tmp}"
   rm -f "${tmp}"
@@ -859,6 +898,7 @@ main() {
   deployed_gateway="gateway-green-${commit}-$(date -u +%Y%m%d%H%M%S)-$$"
   active_gateway="$(remote_current_gateway)"
   [ -n "${active_gateway}" ] || die "Could not determine active Caddy upstream."
+  sync_persisted_caddy_upstream "${active_gateway}"
   deploy_strategy="$(select_deploy_strategy)"
   echo "Current production gateway: ${active_gateway}"
   echo "Deploying revision: ${commit}"

@@ -88,9 +88,14 @@
           <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.errorDetail.status') }}</div>
           <div class="mt-1">
             <span :class="['inline-flex items-center rounded-lg px-2 py-1 text-xs font-black ring-1 ring-inset shadow-sm', statusClass]">
-              {{ detail.status_code }}
+              {{ detail.status_code ?? '-' }}
             </span>
           </div>
+        </div>
+
+        <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
+          <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.errorLog.upstreamStatus') }}</div>
+          <div class="mt-1 font-mono text-sm text-gray-900 dark:text-gray-100">{{ detail.upstream_status_code ?? '-' }}</div>
         </div>
 
         <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">

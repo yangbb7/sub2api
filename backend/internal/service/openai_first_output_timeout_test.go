@@ -89,6 +89,48 @@ func TestOpenAIForwardFirstOutputTimeoutIncludesResponseHeaderWait(t *testing.T)
 	}
 }
 
+func TestOpenAIForwardGovernanceArmsAfterRequestConstruction(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstream := &blockingOpenAIResponseHeaderUpstream{canceled: make(chan struct{})}
+	svc := &OpenAIGatewayService{
+		cfg: &config.Config{Gateway: config.GatewayConfig{
+			OpenAIFirstOutputTimeoutSeconds: 2,
+			MaxLineSize:                     defaultMaxLineSize,
+			OpenAIStreamGovernance: config.GatewayOpenAIStreamGovernanceConfig{
+				Enabled: true, RolloutPercent: 100, TotalBudgetSeconds: 1, FirstAttemptBudgetSeconds: 1,
+			},
+		}},
+		httpUpstream: upstream,
+		beforeOpenAIUpstreamAttempt: func() {
+			time.Sleep(1100 * time.Millisecond)
+		},
+	}
+	body := []byte(`{"model":"gpt-5.5","stream":true,"reasoning":{"effort":"low"},"input":"hello"}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	governedCtx := svc.WithOpenAIStreamGovernancePlan(c, false)
+	c.Request = c.Request.WithContext(governedCtx)
+	account := &Account{
+		ID: 1, Name: "oauth-test", Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Status: StatusActive, Schedulable: true, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "test-token", "chatgpt_account_id": "test-account"},
+	}
+
+	started := time.Now()
+	_, err := svc.Forward(governedCtx, c, account, body)
+	require.Error(t, err)
+	require.GreaterOrEqual(t, time.Since(started), 2*time.Second,
+		"the 1s upstream allowance must start after the 1.1s construction delay")
+	require.Equal(t, time.Nanosecond, svc.armOpenAIFirstOutputTimeoutForAttempt(governedCtx, "low"),
+		"a retry after the first real upstream deadline must stop immediately")
+	select {
+	case <-upstream.canceled:
+	default:
+		t.Fatal("header guard did not cancel the real upstream request")
+	}
+}
+
 func TestOpenAINativeFirstOutputTimeoutDisabledPreservesSynchronousStream(t *testing.T) {
 	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{
 		OpenAIFirstOutputTimeoutSeconds: 0,

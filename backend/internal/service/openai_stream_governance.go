@@ -17,6 +17,7 @@ type openAIStreamGovernanceContextKey struct{}
 
 type openAIStreamGovernancePlan struct {
 	enabled                bool
+	totalBudget            time.Duration
 	totalDeadline          time.Time
 	firstAttemptBudget     time.Duration
 	backupAttemptBudget    time.Duration
@@ -37,6 +38,13 @@ func (p *openAIStreamGovernancePlan) claimAttempt(now time.Time) (time.Duration,
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	// The governance deadline begins only when the first real upstream attempt
+	// is about to wait for output. Parsing, auth, security audit, queueing and
+	// billing may legitimately consume significant request time without taking
+	// from an upstream account's first-output budget.
+	if p.totalDeadline.IsZero() && p.totalBudget > 0 {
+		p.totalDeadline = now.Add(p.totalBudget)
+	}
 	remaining := p.totalDeadline.Sub(now)
 	if remaining <= 0 {
 		p.currentAttemptTimeout = time.Nanosecond
@@ -55,7 +63,15 @@ func (p *openAIStreamGovernancePlan) claimAttempt(now time.Time) (time.Duration,
 			deadline = firstDeadline
 		}
 	} else {
-		deadline = now.Add(p.backupAttemptBudget)
+		// A no-backup plan is used when cross-account replay is forbidden. Its
+		// recoverable retry stays on the same account and may use whatever is
+		// left of the shared total deadline; only an already-expired deadline
+		// receives the immediate-stop nanosecond sentinel above.
+		if p.backupAttemptBudget <= 0 {
+			deadline = p.totalDeadline
+		} else {
+			deadline = now.Add(p.backupAttemptBudget)
+		}
 	}
 	if deadline.After(p.totalDeadline) {
 		deadline = p.totalDeadline
@@ -113,17 +129,16 @@ func (s *OpenAIGatewayService) openAIStreamHealthRoutingEnabled() bool {
 		return false
 	}
 	cfg := s.cfg.Gateway.OpenAIStreamGovernance
-	return cfg.Enabled && cfg.RolloutPercent > 0
+	return cfg.Enabled
 }
 
 // WithOpenAIStreamGovernancePlan applies the deterministic rollout decision to
 // this request. The decision is keyed by the gateway request ID so retries do
-// not drift between cohorts. reserveBackup is true only when the handler has
-// established that a pre-semantic cross-account replay is safe. Stateful
-// Responses turns (tools, continuations, and requests without caller
-// idempotency) cannot use a backup account, so their sole attempt receives the
+// not drift between cohorts. reserveBackup is reserved for a future handler
+// with a durable, verified cross-account idempotency contract. The current
+// HTTP Responses handler always passes false, so its sole attempt receives the
 // complete total budget rather than being cut off at the first-attempt budget.
-func (s *OpenAIGatewayService) WithOpenAIStreamGovernancePlan(c *gin.Context, startedAt time.Time, reserveBackup bool) context.Context {
+func (s *OpenAIGatewayService) WithOpenAIStreamGovernancePlan(c *gin.Context, reserveBackup bool) context.Context {
 	if c == nil || c.Request == nil || s == nil || s.cfg == nil {
 		return nil
 	}
@@ -131,9 +146,6 @@ func (s *OpenAIGatewayService) WithOpenAIStreamGovernancePlan(c *gin.Context, st
 	cfg := s.cfg.Gateway.OpenAIStreamGovernance
 	if !cfg.Enabled || cfg.RolloutPercent <= 0 || !openAIStreamGovernanceInRollout(ctx, cfg.RolloutPercent) {
 		return ctx
-	}
-	if startedAt.IsZero() {
-		startedAt = time.Now()
 	}
 	firstAttemptBudget := time.Duration(cfg.FirstAttemptBudgetSeconds) * time.Second
 	backupAttemptBudget := time.Duration(cfg.TotalBudgetSeconds-cfg.FirstAttemptBudgetSeconds) * time.Second
@@ -143,7 +155,7 @@ func (s *OpenAIGatewayService) WithOpenAIStreamGovernancePlan(c *gin.Context, st
 	}
 	plan := &openAIStreamGovernancePlan{
 		enabled:             true,
-		totalDeadline:       startedAt.Add(time.Duration(cfg.TotalBudgetSeconds) * time.Second),
+		totalBudget:         time.Duration(cfg.TotalBudgetSeconds) * time.Second,
 		firstAttemptBudget:  firstAttemptBudget,
 		backupAttemptBudget: backupAttemptBudget,
 	}
@@ -168,7 +180,23 @@ func openAIStreamGovernanceInRollout(ctx context.Context, percent int) bool {
 }
 
 func (s *OpenAIGatewayService) openAIFirstOutputTimeoutForRequest(ctx context.Context, reasoningEffort string) time.Duration {
-	timeout := s.openAIFirstOutputTimeout(reasoningEffort)
+	return s.openAIFirstOutputConfiguredTimeout(reasoningEffort)
+}
+
+func (s *OpenAIGatewayService) openAIFirstOutputConfiguredTimeout(reasoningEffort string) time.Duration {
+	return s.openAIFirstOutputTimeout(reasoningEffort)
+}
+
+// armOpenAIFirstOutputTimeoutForAttempt claims a governance slice only at the
+// point a fully constructed request is about to enter the upstream transport.
+func (s *OpenAIGatewayService) armOpenAIFirstOutputTimeoutForAttempt(ctx context.Context, reasoningEffort string) time.Duration {
+	timeout := s.openAIFirstOutputConfiguredTimeout(reasoningEffort)
+	// High-effort reasoning is intentionally governed by its dedicated timeout.
+	// Applying the universal ten-second rollout cap makes legitimate reasoning
+	// requests fail before their configured first-output allowance.
+	if openAIHighReasoningEffort(reasoningEffort) {
+		return timeout
+	}
 	if plan := openAIStreamGovernancePlanFromContext(ctx); plan != nil && plan.enabled {
 		budget, _ := plan.claimAttempt(time.Now())
 		if timeout <= 0 || budget < timeout {
@@ -178,13 +206,22 @@ func (s *OpenAIGatewayService) openAIFirstOutputTimeoutForRequest(ctx context.Co
 	return timeout
 }
 
+func openAIHighReasoningEffort(reasoningEffort string) bool {
+	switch strings.ToLower(strings.TrimSpace(reasoningEffort)) {
+	case "high", "xhigh", "max":
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *OpenAIGatewayService) openAIFirstOutputTimeoutForCurrentAttempt(ctx context.Context, reasoningEffort string) time.Duration {
 	if plan := openAIStreamGovernancePlanFromContext(ctx); plan != nil && plan.enabled {
 		if timeout, _, ok := plan.currentAttempt(); ok {
 			return timeout
 		}
 	}
-	return s.openAIFirstOutputTimeoutForRequest(ctx, reasoningEffort)
+	return s.openAIFirstOutputConfiguredTimeout(reasoningEffort)
 }
 
 func openAIFirstOutputDeadlineForRequest(ctx context.Context, startTime time.Time, timeout time.Duration) time.Time {

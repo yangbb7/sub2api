@@ -479,6 +479,16 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 	}
 	scanner.Buffer(make([]byte, 0, 64*1024), maxLineSize)
 
+	keepaliveInterval := responsesStreamKeepaliveInterval(c, s.cfg)
+	var keepaliveTicker *time.Ticker
+	var keepaliveCh <-chan time.Time
+	if keepaliveInterval > 0 {
+		keepaliveTicker = time.NewTicker(keepaliveInterval)
+		defer keepaliveTicker.Stop()
+		keepaliveCh = keepaliveTicker.C
+	}
+	lastDownstreamWriteAt := time.Now()
+
 	resultWithUsage := func() *ForwardResult {
 		return &ForwardResult{
 			RequestID:       requestID,
@@ -511,6 +521,8 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 
 		// Convert to Responses events
 		events := apicompat.AnthropicEventToResponsesEvents(event, state)
+		wroteOutput := false
+		semanticOutput := false
 		for _, evt := range events {
 			payload, err := json.Marshal(evt)
 			if err != nil {
@@ -538,76 +550,134 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 					)
 					return true // client disconnected
 				}
-				StreamAttemptMarkFirstDownstreamByte(c)
+				wroteOutput = true
 				if openAIStreamDataStartsClientOutput(string(restored), eventType) {
-					StreamAttemptMarkFirstSemanticEvent(c)
+					semanticOutput = true
 				}
 			}
 		}
-		if len(events) > 0 {
+		if wroteOutput {
 			c.Writer.Flush()
+			StreamAttemptMarkFirstDownstreamByte(c)
+			StreamAttemptMarkDownstreamActivity(c)
+			if semanticOutput {
+				StreamAttemptMarkFirstSemanticEvent(c)
+			}
+			lastDownstreamWriteAt = time.Now()
 		}
 		return false
 	}
 
 	finalizeStream := func() (*ForwardResult, error) {
 		if finalEvents := apicompat.FinalizeAnthropicResponsesStream(state); len(finalEvents) > 0 {
+			wroteOutput := false
 			for _, evt := range finalEvents {
 				sse, err := apicompat.ResponsesEventToSSE(evt)
 				if err != nil {
 					continue
 				}
 				out := string(reverseToolNamesIfPresent(c, []byte(sse)))
-				fmt.Fprint(c.Writer, out) //nolint:errcheck
+				if _, err := fmt.Fprint(c.Writer, out); err != nil {
+					StreamAttemptMarkClientCanceled(c)
+					return resultWithUsage(), nil
+				}
+				wroteOutput = true
 			}
-			c.Writer.Flush()
+			if wroteOutput {
+				c.Writer.Flush()
+				StreamAttemptMarkFirstDownstreamByte(c)
+				StreamAttemptMarkDownstreamActivity(c)
+				lastDownstreamWriteAt = time.Now()
+			}
 		}
 		return resultWithUsage(), nil
 	}
 
-	// Read Anthropic SSE events
-	for scanner.Scan() {
-		line := scanner.Text()
-		eventType, ok := parseAnthropicSSEField(line, "event")
-		if !ok {
-			continue
+	type streamEvent struct {
+		event *apicompat.AnthropicStreamEvent
+		err   error
+	}
+	events := make(chan streamEvent, 16)
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		defer close(events)
+		send := func(event streamEvent) bool {
+			select {
+			case events <- event:
+				return true
+			case <-done:
+				return false
+			}
 		}
+		for scanner.Scan() {
+			line := scanner.Text()
+			eventType, ok := parseAnthropicSSEField(line, "event")
+			if !ok {
+				continue
+			}
+			if !scanner.Scan() {
+				break
+			}
+			payload, ok := parseAnthropicSSEField(scanner.Text(), "data")
+			if !ok {
+				continue
+			}
+			var event apicompat.AnthropicStreamEvent
+			if err := json.Unmarshal([]byte(payload), &event); err != nil {
+				logger.L().Warn("forward_as_responses stream: failed to parse event",
+					zap.Error(err),
+					zap.String("request_id", requestID),
+					zap.String("event_type", eventType),
+				)
+				continue
+			}
+			if !send(streamEvent{event: &event}) {
+				return
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			_ = send(streamEvent{err: err})
+		}
+	}()
 
-		// Read data line
-		if !scanner.Scan() {
-			break
-		}
-		dataLine := scanner.Text()
-		payload, ok := parseAnthropicSSEField(dataLine, "data")
-		if !ok {
-			continue
-		}
+	for {
+		select {
+		case event, open := <-events:
+			if !open {
+				return finalizeStream()
+			}
+			if event.err != nil {
+				if !errors.Is(event.err, context.Canceled) && !errors.Is(event.err, context.DeadlineExceeded) {
+					logger.L().Warn("forward_as_responses stream: read error",
+						zap.Error(event.err),
+						zap.String("request_id", requestID),
+					)
+				}
+				return finalizeStream()
+			}
+			if processEvent(event.event) {
+				return resultWithUsage(), nil
+			}
 
-		var event apicompat.AnthropicStreamEvent
-		if err := json.Unmarshal([]byte(payload), &event); err != nil {
-			logger.L().Warn("forward_as_responses stream: failed to parse event",
-				zap.Error(err),
-				zap.String("request_id", requestID),
-				zap.String("event_type", eventType),
-			)
-			continue
-		}
-
-		if processEvent(&event) {
-			return resultWithUsage(), nil
+		case <-keepaliveCh:
+			if time.Since(lastDownstreamWriteAt) < keepaliveInterval {
+				continue
+			}
+			if _, err := c.Writer.Write([]byte(":\n\n")); err != nil {
+				StreamAttemptMarkClientCanceled(c)
+				logger.L().Info("forward_as_responses stream: client disconnected during keepalive",
+					zap.String("request_id", requestID),
+				)
+				return resultWithUsage(), nil
+			}
+			c.Writer.Flush()
+			StreamAttemptMarkFirstDownstreamByte(c)
+			StreamAttemptMarkDownstreamActivity(c)
+			StreamAttemptMarkDownstreamKeepalive(c)
+			lastDownstreamWriteAt = time.Now()
 		}
 	}
-
-	if err := scanner.Err(); err != nil {
-		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-			logger.L().Warn("forward_as_responses stream: read error",
-				zap.Error(err),
-				zap.String("request_id", requestID),
-			)
-		}
-	}
-
-	return finalizeStream()
 }
 
 // appendRawJSON appends a JSON fragment string to existing raw JSON.

@@ -278,6 +278,11 @@ if ! grep -Fq 'BUILD_STRATEGY="${BUILD_STRATEGY:-local-binary}"' "${DEPLOY_DIR}/
   echo "deploy-1g.sh must default 1G deployments to local binary builds" >&2
   exit 1
 fi
+if ! grep -Fq 'GOMAXPROCS=2' "${DEPLOY_DIR}/deploy-1g.sh" ||
+  ! grep -Fq 'GOMEMLIMIT=640MiB' "${DEPLOY_DIR}/deploy-1g.sh"; then
+  echo "deploy-1g.sh must not overwrite the 2C2G gateway runtime baseline" >&2
+  exit 1
+fi
 if ! grep -Fq 'ensure_clean_git_tree_for_local_binary' "${DEPLOY_DIR}/deploy-1g.sh"; then
   echo "deploy-1g.sh must require a clean worktree before local binary deployments" >&2
   exit 1

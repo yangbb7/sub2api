@@ -30,6 +30,8 @@ type antigravityClientWriter struct {
 	disconnected     bool
 	prefix           string // 日志前缀，标识来源方法
 	beforeFirstWrite func()
+	afterFlush       func()
+	onDisconnected   func()
 }
 
 func newAntigravityClientWriter(w gin.ResponseWriter, flusher http.Flusher, prefix string) *antigravityClientWriter {
@@ -47,6 +49,9 @@ func (cw *antigravityClientWriter) Write(p []byte) bool {
 		return false
 	}
 	cw.flusher.Flush()
+	if cw.afterFlush != nil {
+		cw.afterFlush()
+	}
 	return true
 }
 
@@ -61,6 +66,9 @@ func (cw *antigravityClientWriter) Fprintf(format string, args ...any) bool {
 		return false
 	}
 	cw.flusher.Flush()
+	if cw.afterFlush != nil {
+		cw.afterFlush()
+	}
 	return true
 }
 
@@ -77,6 +85,9 @@ func (cw *antigravityClientWriter) prepareFirstWrite() {
 
 func (cw *antigravityClientWriter) markDisconnected() {
 	cw.disconnected = true
+	if cw.onDisconnected != nil {
+		cw.onDisconnected()
+	}
 	logger.LegacyPrintf("service.antigravity_gateway", "Client disconnected during streaming (%s), continuing to drain upstream for billing", cw.prefix)
 }
 
@@ -171,7 +182,7 @@ func (s *AntigravityGatewayService) handleGeminiStreamingResponse(c *gin.Context
 
 	// 下游 keepalive：防止代理/Cloudflare Tunnel 因连接空闲而断开
 	keepaliveInterval := time.Duration(0)
-	if s.settingService.cfg != nil && s.settingService.cfg.Gateway.StreamKeepaliveInterval > 0 {
+	if responsesStreamKeepaliveCohortEnabled(c) && s.settingService.cfg != nil && s.settingService.cfg.Gateway.StreamKeepaliveInterval > 0 {
 		keepaliveInterval = time.Duration(s.settingService.cfg.Gateway.StreamKeepaliveInterval) * time.Second
 	}
 	var keepaliveTicker *time.Ticker
@@ -1053,7 +1064,7 @@ func (s *AntigravityGatewayService) handleClaudeStreamingResponse(c *gin.Context
 
 	// 下游 keepalive：防止代理/Cloudflare Tunnel 因连接空闲而断开
 	keepaliveInterval := time.Duration(0)
-	if s.settingService.cfg != nil && s.settingService.cfg.Gateway.StreamKeepaliveInterval > 0 {
+	if responsesStreamKeepaliveCohortEnabled(c) && s.settingService.cfg != nil && s.settingService.cfg.Gateway.StreamKeepaliveInterval > 0 {
 		keepaliveInterval = time.Duration(s.settingService.cfg.Gateway.StreamKeepaliveInterval) * time.Second
 	}
 	var keepaliveTicker *time.Ticker

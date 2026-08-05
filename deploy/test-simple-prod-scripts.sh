@@ -70,6 +70,12 @@ assert_not_contains "${DEPLOY_SCRIPT}" 'DEPLOY_MODE=deploy' \
   "deploy.sh must not call the full compose deploy path"
 assert_contains "${DEPLOY_SCRIPT}" 'docker inspect .*ACTIVE_GATEWAY.*Config\.Env' \
   "deploy.sh must copy runtime environment from the active healthy gateway"
+assert_contains "${DEPLOY_SCRIPT}" 'http://127\.0\.0\.1:2019/config/' \
+  "deploy.sh must use Caddy's live configuration as the active upstream source"
+assert_contains "${DEPLOY_SCRIPT}" 'sync_persisted_caddy_upstream' \
+  "deploy.sh must repair persisted Caddy upstream drift before deployment"
+assert_contains "${ROLLBACK_SCRIPT}" 'http://127\.0\.0\.1:2019/config/' \
+  "rollback.sh must use Caddy's live configuration as the active upstream source"
 assert_contains "${DEPLOY_SCRIPT}" 'docker run -d' \
   "deploy.sh must start a parallel gateway container"
 assert_contains "${DEPLOY_SCRIPT}" 'GATEWAY_MEMORY_LIMIT=.*896m' \

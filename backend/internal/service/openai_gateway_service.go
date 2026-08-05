@@ -450,6 +450,9 @@ type OpenAIGatewayService struct {
 	codexModelsManifestCache            codexModelsManifestCache
 	openaiCompatSessionResponses        sync.Map
 	openaiCompatAnthropicDigestSessions sync.Map
+	// Test seam for proving that request construction does not arm the upstream
+	// first-output budget. Production wiring leaves this nil.
+	beforeOpenAIUpstreamAttempt func()
 }
 
 // NewOpenAIGatewayService creates a new OpenAIGatewayService

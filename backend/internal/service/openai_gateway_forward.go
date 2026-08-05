@@ -777,39 +777,42 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if reasoningEffort != nil {
 		reasoningEffortValue = *reasoningEffort
 	}
-	firstOutputTimeout := time.Duration(0)
-	if reqStream && account.Platform == PlatformOpenAI {
-		firstOutputTimeout = s.openAIFirstOutputTimeoutForRequest(ctx, reasoningEffortValue)
-	}
-	firstOutputDeadline := openAIFirstOutputDeadlineForRequest(ctx, startTime, firstOutputTimeout)
-
 	httpInvalidEncryptedContentRetryTried := false
 	agentTaskRecoveryTried := false
 	rejectedFieldRetryState := newOpenAIResponsesRejectedFieldRetryState(body)
 	for {
 		// Build upstream request
 		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
-		var headerGuard *openAIFirstOutputHeaderGuard
-		if firstOutputTimeout > 0 {
-			upstreamCtx, headerGuard = newOpenAIFirstOutputHeaderGuard(
-				upstreamCtx, releaseUpstreamCtx, firstOutputDeadline,
-			)
-		}
 		upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, body, token, reqStream, promptCacheKey, isCodexCLI)
-		if headerGuard == nil {
-			releaseUpstreamCtx()
-		}
 		if err != nil {
-			if headerGuard != nil {
-				headerGuard.close()
-			}
+			releaseUpstreamCtx()
 			return nil, err
+		}
+		if s.beforeOpenAIUpstreamAttempt != nil {
+			s.beforeOpenAIUpstreamAttempt()
 		}
 
 		// Get proxy URL
 		proxyURL := ""
 		if account.ProxyID != nil && account.Proxy != nil {
 			proxyURL = account.Proxy.URL()
+		}
+
+		// The upstream request is now fully constructed. Arm only immediately
+		// before Do so signing, adapters and request construction do not consume
+		// the first-output governance allowance.
+		firstOutputTimeout := time.Duration(0)
+		if reqStream && account.Platform == PlatformOpenAI {
+			firstOutputTimeout = s.armOpenAIFirstOutputTimeoutForAttempt(ctx, reasoningEffortValue)
+		}
+		firstOutputDeadline := openAIFirstOutputDeadlineForRequest(ctx, startTime, firstOutputTimeout)
+		var headerGuard *openAIFirstOutputHeaderGuard
+		if firstOutputTimeout > 0 {
+			guardedCtx, guard := newOpenAIFirstOutputHeaderGuard(upstreamReq.Context(), releaseUpstreamCtx, firstOutputDeadline)
+			headerGuard = guard
+			upstreamReq = upstreamReq.WithContext(guardedCtx)
+		} else {
+			releaseUpstreamCtx()
 		}
 
 		// Send request

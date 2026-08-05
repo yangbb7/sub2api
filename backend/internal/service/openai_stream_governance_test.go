@@ -28,25 +28,23 @@ func TestOpenAIStreamGovernanceReservesSecondAttemptBudget(t *testing.T) {
 	require.Equal(t, 4*time.Second, second)
 }
 
-func TestOpenAIStreamGovernanceBudgetIncludesHeaderWaitFromRequestStart(t *testing.T) {
+func TestOpenAIStreamGovernanceBudgetStartsAtFirstUpstreamAttempt(t *testing.T) {
 	startedAt := time.Now()
 	plan := &openAIStreamGovernancePlan{
 		enabled:             true,
-		totalDeadline:       startedAt.Add(10 * time.Second),
+		totalBudget:         10 * time.Second,
 		firstAttemptBudget:  6 * time.Second,
 		backupAttemptBudget: 4 * time.Second,
 	}
 
-	// Request parsing and account selection already used two seconds. The first
-	// upstream header wait must therefore end at request-start + six seconds,
-	// rather than granting six new seconds after selection.
-	first, firstDeadline := plan.claimAttempt(startedAt.Add(2 * time.Second))
-	require.Equal(t, 4*time.Second, first)
-	require.Equal(t, startedAt.Add(6*time.Second), firstDeadline)
+	// A 20-second pre-upstream path must not shrink the first upstream budget.
+	first, firstDeadline := plan.claimAttempt(startedAt.Add(20 * time.Second))
+	require.Equal(t, 6*time.Second, first)
+	require.Equal(t, startedAt.Add(26*time.Second), firstDeadline)
 
-	second, secondDeadline := plan.claimAttempt(startedAt.Add(6 * time.Second))
+	second, secondDeadline := plan.claimAttempt(startedAt.Add(26 * time.Second))
 	require.Equal(t, 4*time.Second, second)
-	require.Equal(t, startedAt.Add(10*time.Second), secondDeadline)
+	require.Equal(t, startedAt.Add(30*time.Second), secondDeadline)
 }
 
 func TestOpenAIStreamGovernanceRolloutIsRequestIDDeterministic(t *testing.T) {
@@ -72,12 +70,32 @@ func TestWithOpenAIStreamGovernancePlanUsesTotalBudgetWhenReplayIsUnsafe(t *test
 	}}}
 	startedAt := time.Now()
 
-	ctx := svc.WithOpenAIStreamGovernancePlan(c, startedAt, false)
+	ctx := svc.WithOpenAIStreamGovernancePlan(c, false)
 	plan := openAIStreamGovernancePlanFromContext(ctx)
 	require.NotNil(t, plan)
 	first, deadline := plan.claimAttempt(startedAt)
 	require.Equal(t, 10*time.Second, first)
 	require.Equal(t, startedAt.Add(10*time.Second), deadline)
+}
+
+func TestOpenAIStreamGovernanceNoBackupRetryUsesRemainingSharedDeadline(t *testing.T) {
+	startedAt := time.Now()
+	plan := &openAIStreamGovernancePlan{
+		enabled:             true,
+		totalBudget:         10 * time.Second,
+		firstAttemptBudget:  10 * time.Second,
+		backupAttemptBudget: 0,
+	}
+
+	first, deadline := plan.claimAttempt(startedAt)
+	second, secondDeadline := plan.claimAttempt(startedAt.Add(3 * time.Second))
+	postDeadline, _ := plan.claimAttempt(deadline)
+
+	require.Equal(t, 10*time.Second, first)
+	require.Equal(t, startedAt.Add(10*time.Second), deadline)
+	require.Equal(t, 7*time.Second, second, "same-account retry must use remaining total budget")
+	require.Equal(t, deadline, secondDeadline)
+	require.Equal(t, time.Nanosecond, postDeadline, "only post-deadline retries stop immediately")
 }
 
 func TestWithOpenAIStreamGovernancePlanReservesBackupForSafeReplay(t *testing.T) {
@@ -94,7 +112,7 @@ func TestWithOpenAIStreamGovernancePlanReservesBackupForSafeReplay(t *testing.T)
 	}}}
 	startedAt := time.Now()
 
-	ctx := svc.WithOpenAIStreamGovernancePlan(c, startedAt, true)
+	ctx := svc.WithOpenAIStreamGovernancePlan(c, true)
 	plan := openAIStreamGovernancePlanFromContext(ctx)
 	require.NotNil(t, plan)
 	first, firstDeadline := plan.claimAttempt(startedAt)
@@ -103,6 +121,60 @@ func TestWithOpenAIStreamGovernancePlanReservesBackupForSafeReplay(t *testing.T)
 	require.Equal(t, startedAt.Add(6*time.Second), firstDeadline)
 	require.Equal(t, 4*time.Second, second)
 	require.Equal(t, startedAt.Add(10*time.Second), secondDeadline)
+}
+
+func TestOpenAIStreamGovernanceRetriesShareFirstUpstreamDeadline(t *testing.T) {
+	firstAttemptAt := time.Now().Add(20 * time.Second)
+	plan := &openAIStreamGovernancePlan{
+		enabled:             true,
+		totalBudget:         10 * time.Second,
+		firstAttemptBudget:  6 * time.Second,
+		backupAttemptBudget: 4 * time.Second,
+	}
+
+	first, firstDeadline := plan.claimAttempt(firstAttemptAt)
+	second, secondDeadline := plan.claimAttempt(firstDeadline)
+	postDeadline, _ := plan.claimAttempt(secondDeadline)
+
+	require.Equal(t, 6*time.Second, first, "a pre-upstream wait must not consume the first claim")
+	require.Equal(t, firstAttemptAt.Add(6*time.Second), firstDeadline)
+	require.Equal(t, 4*time.Second, second, "retry must use the same total deadline")
+	require.Equal(t, firstAttemptAt.Add(10*time.Second), secondDeadline)
+	require.Equal(t, time.Nanosecond, postDeadline, "only a retry claimed after the shared deadline stops immediately")
+}
+
+func TestOpenAIStreamGovernanceDoesNotCapHighReasoningEffort(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{
+		OpenAIFirstOutputTimeoutSeconds:           20,
+		OpenAIHighEffortFirstOutputTimeoutSeconds: 45,
+		OpenAIStreamGovernance: config.GatewayOpenAIStreamGovernanceConfig{
+			Enabled: true, RolloutPercent: 100, TotalBudgetSeconds: 10, FirstAttemptBudgetSeconds: 6,
+		},
+	}}}
+	ctx := svc.WithOpenAIStreamGovernancePlan(c, false)
+	require.Equal(t, 45*time.Second, svc.armOpenAIFirstOutputTimeoutForAttempt(ctx, "high"))
+	plan := openAIStreamGovernancePlanFromContext(ctx)
+	require.NotNil(t, plan)
+	require.False(t, plan.firstAttemptClaimed, "high reasoning must not claim the universal budget")
+}
+
+func TestOpenAIStreamHealthRoutingAndKeepaliveDoNotDependOnBudgetRollout(t *testing.T) {
+	cfg := &config.Config{Gateway: config.GatewayConfig{
+		StreamKeepaliveInterval: 5,
+		OpenAIStreamGovernance: config.GatewayOpenAIStreamGovernanceConfig{
+			Enabled: true, RolloutPercent: 0,
+		},
+	}}
+	svc := &OpenAIGatewayService{cfg: cfg}
+	require.True(t, svc.openAIStreamHealthRoutingEnabled())
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	ConfigureResponsesStreamKeepaliveCohort(c, cfg)
+	require.Equal(t, 5*time.Second, responsesStreamKeepaliveInterval(c, cfg))
 }
 
 func TestOpenAIStreamHealthCircuitMovesAccountBehindHealthyCandidates(t *testing.T) {

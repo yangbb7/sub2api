@@ -107,14 +107,15 @@ type antigravityCompatScanEvent struct {
 }
 
 type antigravityCompatStreamSession struct {
-	processor      *antigravity.StreamingProcessor
-	adapter        antigravityCompatStreamAdapter
-	writer         *antigravityClientWriter
-	usage          *ClaudeUsage
-	pendingEvents  []apicompat.AnthropicStreamEvent
-	firstTokenMs   *int
-	startTime      time.Time
-	meaningfulData bool
+	processor       *antigravity.StreamingProcessor
+	adapter         antigravityCompatStreamAdapter
+	writer          *antigravityClientWriter
+	usage           *ClaudeUsage
+	pendingEvents   []apicompat.AnthropicStreamEvent
+	firstTokenMs    *int
+	startTime       time.Time
+	meaningfulData  bool
+	onFirstSemantic func()
 }
 
 func newAntigravityCompatStreamSession(
@@ -122,13 +123,15 @@ func newAntigravityCompatStreamSession(
 	startTime time.Time,
 	adapter antigravityCompatStreamAdapter,
 	writer *antigravityClientWriter,
+	onFirstSemantic func(),
 ) *antigravityCompatStreamSession {
 	return &antigravityCompatStreamSession{
-		processor: antigravity.NewStreamingProcessor(model),
-		adapter:   adapter,
-		writer:    writer,
-		usage:     &ClaudeUsage{},
-		startTime: startTime,
+		processor:       antigravity.NewStreamingProcessor(model),
+		adapter:         adapter,
+		writer:          writer,
+		usage:           &ClaudeUsage{},
+		startTime:       startTime,
+		onFirstSemantic: onFirstSemantic,
 	}
 }
 
@@ -213,6 +216,9 @@ func (s *antigravityCompatStreamSession) emitOrBuffer(event apicompat.AnthropicS
 	for i := range s.pendingEvents {
 		s.adapter.Emit(&s.pendingEvents[i], s.writer)
 	}
+	if !s.writer.Disconnected() && s.onFirstSemantic != nil {
+		s.onFirstSemantic()
+	}
 	s.pendingEvents = nil
 }
 
@@ -267,6 +273,13 @@ func (s *AntigravityGatewayService) handleAntigravityCompatStream(
 	}
 
 	writer := newAntigravityClientWriter(c.Writer, flusher, prefix)
+	writer.afterFlush = func() {
+		StreamAttemptMarkFirstDownstreamByte(c)
+		StreamAttemptMarkDownstreamActivity(c)
+	}
+	writer.onDisconnected = func() {
+		StreamAttemptMarkClientCanceled(c)
+	}
 	writer.beforeFirstWrite = func() {
 		c.Header("Content-Type", "text/event-stream")
 		c.Header("Cache-Control", "no-cache")
@@ -274,7 +287,9 @@ func (s *AntigravityGatewayService) handleAntigravityCompatStream(
 		c.Header("X-Accel-Buffering", "no")
 		c.Status(http.StatusOK)
 	}
-	session := newAntigravityCompatStreamSession(originalModel, startTime, adapter, writer)
+	session := newAntigravityCompatStreamSession(originalModel, startTime, adapter, writer, func() {
+		StreamAttemptMarkFirstSemanticEvent(c)
+	})
 	events, stopScanner, maxLineSize := s.startAntigravityCompatScanner(resp.Body)
 	defer stopScanner()
 
@@ -283,7 +298,7 @@ func (s *AntigravityGatewayService) handleAntigravityCompatStream(
 	if timeoutTimer != nil {
 		defer timeoutTimer.Stop()
 	}
-	keepaliveTicker, keepaliveCh := s.newAntigravityCompatKeepaliveTicker()
+	keepaliveTicker, keepaliveCh := s.newAntigravityCompatKeepaliveTicker(c)
 	if keepaliveTicker != nil {
 		defer keepaliveTicker.Stop()
 	}
@@ -315,8 +330,8 @@ func (s *AntigravityGatewayService) handleAntigravityCompatStream(
 			return session.collectResult(false), fmt.Errorf("stream data interval timeout")
 
 		case <-keepaliveCh:
-			if session.hasMeaningfulData() && !writer.Disconnected() {
-				writer.Write([]byte(": ping\n\n"))
+			if !writer.Disconnected() && writer.Write([]byte(": ping\n\n")) {
+				StreamAttemptMarkDownstreamKeepalive(c)
 			}
 		}
 	}
@@ -365,8 +380,8 @@ func (s *AntigravityGatewayService) antigravityCompatStreamTimeout() time.Durati
 	return time.Duration(s.settingService.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
 }
 
-func (s *AntigravityGatewayService) newAntigravityCompatKeepaliveTicker() (*time.Ticker, <-chan time.Time) {
-	if s.settingService == nil || s.settingService.cfg == nil {
+func (s *AntigravityGatewayService) newAntigravityCompatKeepaliveTicker(c *gin.Context) (*time.Ticker, <-chan time.Time) {
+	if !responsesStreamKeepaliveCohortEnabled(c) || s.settingService == nil || s.settingService.cfg == nil {
 		return nil, nil
 	}
 	interval := time.Duration(s.settingService.cfg.Gateway.StreamKeepaliveInterval) * time.Second

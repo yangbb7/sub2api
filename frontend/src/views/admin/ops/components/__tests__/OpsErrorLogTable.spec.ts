@@ -45,6 +45,25 @@ function mountTable(row: Partial<OpsErrorLog>) {
 }
 
 describe('OpsErrorLogTable user/api-key/account columns', () => {
+  it('renders independent gateway and upstream statuses', () => {
+    const wrapper = mount(OpsErrorLogTable, {
+      props: {
+        rows: [{
+          id: 1, created_at: '2026-06-05T23:59:50Z', phase: 'upstream', type: '', error_owner: 'provider', error_source: 'upstream_http', severity: 'error',
+          status_code: 200, upstream_status_code: 529, platform: 'anthropic', model: 'claude-opus-4-8', resolved: false,
+          client_request_id: '', request_id: 'req-1', message: 'boom', user_email: '', account_name: '', group_name: '',
+        }],
+        total: 1, loading: false, page: 1, pageSize: 20, visibleColumnKeys: ['status', 'upstream_status'],
+      },
+      global: { stubs: { 'el-tooltip': TooltipStub, Pagination: PaginationStub } },
+    })
+
+    expect(wrapper.text()).toContain('200')
+    expect(wrapper.text()).toContain('529')
+    expect(wrapper.text()).toContain('admin.ops.errorLog.status')
+    expect(wrapper.text()).toContain('admin.ops.errorLog.upstreamStatus')
+  })
+
   // 回归:上游错误行(phase=upstream, owner=provider)以前在单一「用户」列里只显示账号、
   // 丢失用户;现在用户/API Key/账号各占独立列,三者同时可见。
   it('renders user, api key and account in separate columns for an upstream row', () => {
@@ -84,10 +103,11 @@ describe('OpsErrorLogTable user/api-key/account columns', () => {
 describe('OpsErrorLogTable i18n keys exist in the errorLog namespace', () => {
   const locales: Record<string, any> = { zh: zhLocale, en: enLocale }
   for (const [name, msgs] of Object.entries(locales)) {
-    it(`has apiKey & keyDeletedBadge for ${name}`, () => {
+    it(`has apiKey, keyDeletedBadge & upstreamStatus for ${name}`, () => {
       const errorLog = msgs?.admin?.ops?.errorLog
       expect(errorLog?.apiKey).toBeTruthy()
       expect(errorLog?.keyDeletedBadge).toBeTruthy()
+      expect(errorLog?.upstreamStatus).toBeTruthy()
     })
   }
 })

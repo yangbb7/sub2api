@@ -22,7 +22,7 @@ func (s *stubOpsRepoForUserErr) ListErrorLogs(ctx context.Context, f *OpsErrorLo
 	return &OpsErrorLogList{
 		Errors: []*OpsErrorLog{{
 			Phase: "request", Type: "rate_limit_error",
-			Model: "m", RequestedModel: "rm", StatusCode: 429,
+			Model: "m", RequestedModel: "rm", StatusCode: intPtr(429),
 			Message: "secret", UserEmail: "a@b.c",
 		}},
 		Total: 1, Page: 1, PageSize: 20,
@@ -83,19 +83,19 @@ func TestGetUserErrorRequestDetail_OwnershipEnforced(t *testing.T) {
 
 	detail := &OpsErrorLogDetail{
 		OpsErrorLog: OpsErrorLog{
-			ID:              42,
-			Phase:           "upstream",
-			Type:            "api_error",
-			Model:           "gpt-4",
-			RequestedModel:  "gpt-4-turbo",
-			InboundEndpoint: "/v1/chat/completions",
-			StatusCode:      502,
-			Platform:        "openai",
-			Message:         "upstream failed",
-			UserID:          &ownerUID,
+			ID:                 42,
+			Phase:              "upstream",
+			Type:               "api_error",
+			Model:              "gpt-4",
+			RequestedModel:     "gpt-4-turbo",
+			InboundEndpoint:    "/v1/chat/completions",
+			StatusCode:         intPtr(502),
+			Platform:           "openai",
+			Message:            "upstream failed",
+			UserID:             &ownerUID,
+			UpstreamStatusCode: &upstreamStatus,
 		},
-		ErrorBody:          `{"error":"upstream"}`,
-		UpstreamStatusCode: &upstreamStatus,
+		ErrorBody: `{"error":"upstream"}`,
 	}
 
 	stub := &stubOpsRepoForUserErr{detailToReturn: detail}

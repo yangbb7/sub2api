@@ -329,13 +329,13 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	}
 	safePreOutputReplay := false
 	if reqStream {
-		// The stream budget depends on whether the handler may safely replay a
-		// pre-semantic attempt on another account. Stateful Codex turns cannot
-		// do that, so they must keep the full total budget on their sole account.
+		// Cross-account replay remains disabled until a durable, cross-account
+		// idempotency contract exists. The sole account receives the full budget.
 		safePreOutputReplay = openAIResponsesSafePreOutputReplay(c, body)
+		service.ConfigureResponsesStreamKeepaliveCohort(c, h.cfg)
 		service.StartStreamAttempt(c, requestStart, body, reqModel, true)
 		defer service.FinalizeStreamAttempt(c)
-		if governedCtx := h.gatewayService.WithOpenAIStreamGovernancePlan(c, requestStart, safePreOutputReplay); governedCtx != nil {
+		if governedCtx := h.gatewayService.WithOpenAIStreamGovernancePlan(c, safePreOutputReplay); governedCtx != nil {
 			c.Request = c.Request.WithContext(governedCtx)
 		}
 	}
@@ -627,18 +627,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}
-					// Cross-account replay is never allowed for a request which may
-					// carry state or side effects. A client-provided idempotency key
-					// protects the remaining stateless, pre-semantic-output retry.
-					if !openAIResponsesSafePreOutputReplay(c, sessionHashBody) {
-						service.StreamAttemptMarkOutcome(c, "retry_blocked_unsafe")
-						h.handleFailoverExhausted(c, failoverErr, streamStarted)
-						return
-					}
-					if openAIFirstOutputFailoverExhausted(failoverErr, &firstOutputTimeoutSwitchCount) {
-						h.handleFailoverExhausted(c, failoverErr, streamStarted)
-						return
-					}
 					// 池模式：同账号重试
 					if failoverErr.RetryableOnSameAccount {
 						retryLimit := account.GetPoolModeRetryCount()
@@ -655,6 +643,19 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 							}
 							continue
 						}
+					}
+					if openAIFirstOutputFailoverExhausted(failoverErr, &firstOutputTimeoutSwitchCount) {
+						h.handleFailoverExhausted(c, failoverErr, streamStarted)
+						return
+					}
+					// This is the cross-account boundary. Same-account pool retries above
+					// reuse the selected credential and are not a replay to another account.
+					// HTTP Responses has no durable cross-account idempotency contract, so
+					// reject the switch before marking the account failed or selecting one.
+					if !openAIResponsesSafePreOutputReplay(c, sessionHashBody) {
+						service.StreamAttemptMarkOutcome(c, "retry_blocked_unsafe")
+						h.handleFailoverExhausted(c, failoverErr, streamStarted)
+						return
 					}
 					h.gatewayService.RecordOpenAIAccountSwitch()
 					failedAccountIDs[account.ID] = struct{}{}
