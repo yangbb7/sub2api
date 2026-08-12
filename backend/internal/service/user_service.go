@@ -187,6 +187,15 @@ type UserTokenVersionRepository interface {
 	IncrementTokenVersion(ctx context.Context, userID int64) (int64, error)
 }
 
+// RegistrationEmailDomainRepository provides the optional atomic domain quota
+// guard used by registration when the non-whitelist domain allowance is on.
+// Keeping it narrow avoids forcing unrelated UserRepository test doubles to
+// implement registration-only behavior.
+type RegistrationEmailDomainRepository interface {
+	CountUsersByEmailDomain(ctx context.Context, domain string) (int, error)
+	CreateWithEmailAliasGuardAndDomainLimit(ctx context.Context, user *User, domain string) error
+}
+
 // RedeemUserAdjustmentRepository provides the atomic, floor-at-zero updates
 // used by negative-value redeem codes. It is intentionally narrower than
 // UserRepository because normal usage billing is allowed to overdraw.
