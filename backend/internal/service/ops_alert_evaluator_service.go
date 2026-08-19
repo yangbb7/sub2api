@@ -63,6 +63,16 @@ type opsAlertRuleState struct {
 	ConsecutiveBreaches int
 }
 
+// opsAlertRateMetricSample keeps the rate numerator and denominator together.
+// A percentage without its request count is not actionable at low traffic.
+type opsAlertRateMetricSample struct {
+	Value              float64
+	SLARequestCount    int64
+	SLAErrorCount      int64
+	UpstreamErrorCount int64
+	HasData            bool
+}
+
 func NewOpsAlertEvaluatorService(
 	opsService *OpsService,
 	opsRepo OpsRepository,
@@ -236,10 +246,16 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 		windowEnd := safeEnd
 
 		var metricValue float64
+		var rateSample *opsAlertRateMetricSample
 		var ok bool
 		targetInactive := false
 		if metricType == "user_concurrency_utilization_percent" {
 			metricValue, ok, targetInactive = s.computeUserConcurrencyRuleMetric(ctx, rule)
+		} else if isOpsAlertRateMetric(metricType) {
+			var sample opsAlertRateMetricSample
+			sample, ok = s.computeRateRuleMetric(ctx, rule, windowStart, windowEnd, scopePlatform, scopeGroupID)
+			metricValue = sample.Value
+			rateSample = &sample
 		} else {
 			metricValue, ok = s.computeRuleMetric(ctx, rule, systemMetrics, windowStart, windowEnd, scopePlatform, scopeGroupID)
 		}
@@ -266,15 +282,32 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 			continue
 		}
 
-		breachedNow := compareMetric(metricValue, rule.Operator, rule.Threshold)
-		required := requiredSustainedBreaches(rule.SustainedMinutes, interval)
-		consecutive := s.updateRuleBreaches(rule.ID, now, interval, breachedNow)
-
 		activeEvent, err := s.opsRepo.GetActiveAlertEvent(ctx, rule.ID)
 		if err != nil {
 			logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] get active event failed (rule=%d): %v", rule.ID, err)
 			continue
 		}
+
+		// Do not turn one failed request into a service incident. A rule can opt
+		// into a minimum SLA denominator through filters.min_sla_requests. When
+		// traffic falls below that threshold, any previously firing rate event is
+		// resolved because its signal is no longer statistically actionable.
+		if rateSample != nil && (!rateSample.HasData || !meetsOpsAlertMinimumSample(rule, *rateSample)) {
+			s.resetRuleState(rule.ID, now)
+			if activeEvent != nil {
+				resolvedAt := now
+				if err := s.opsRepo.UpdateAlertEventStatus(ctx, activeEvent.ID, OpsAlertStatusResolved, &resolvedAt); err != nil {
+					logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] resolve insufficient-sample event failed (event=%d): %v", activeEvent.ID, err)
+				} else {
+					eventsResolved++
+				}
+			}
+			continue
+		}
+
+		breachedNow := compareMetric(metricValue, rule.Operator, rule.Threshold)
+		required := requiredSustainedBreaches(rule.SustainedMinutes, interval)
+		consecutive := s.updateRuleBreaches(rule.ID, now, interval, breachedNow)
 
 		if breachedNow && consecutive >= required {
 			if activeEvent != nil {
@@ -307,10 +340,10 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 				Severity:       strings.TrimSpace(rule.Severity),
 				Status:         OpsAlertStatusFiring,
 				Title:          fmt.Sprintf("%s: %s", strings.TrimSpace(rule.Severity), strings.TrimSpace(rule.Name)),
-				Description:    buildOpsAlertDescription(rule, metricValue, windowMinutes, scopePlatform, scopeGroupID, scopeUserID),
+				Description:    buildOpsAlertDescriptionWithSample(rule, metricValue, windowMinutes, scopePlatform, scopeGroupID, scopeUserID, rateSample),
 				MetricValue:    float64Ptr(metricValue),
 				ThresholdValue: float64Ptr(rule.Threshold),
-				Dimensions:     buildOpsAlertDimensions(scopePlatform, scopeGroupID, scopeUserID),
+				Dimensions:     buildOpsAlertDimensionsWithSample(scopePlatform, scopeGroupID, scopeUserID, rateSample),
 				FiredAt:        now,
 				CreatedAt:      now,
 			}
@@ -614,6 +647,30 @@ func (s *OpsAlertEvaluatorService) computeRuleMetric(
 		return float64(n), true
 	}
 
+	sample, ok := s.computeRateRuleMetric(ctx, rule, start, end, platform, groupID)
+	return sample.Value, ok
+}
+
+func isOpsAlertRateMetric(metricType string) bool {
+	switch strings.TrimSpace(metricType) {
+	case "success_rate", "error_rate", "upstream_error_rate":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *OpsAlertEvaluatorService) computeRateRuleMetric(
+	ctx context.Context,
+	rule *OpsAlertRule,
+	start time.Time,
+	end time.Time,
+	platform string,
+	groupID *int64,
+) (opsAlertRateMetricSample, bool) {
+	if s == nil || s.opsRepo == nil || rule == nil || !isOpsAlertRateMetric(rule.MetricType) {
+		return opsAlertRateMetricSample{}, false
+	}
 	overview, err := s.opsRepo.GetDashboardOverview(ctx, &OpsDashboardFilter{
 		StartTime: start,
 		EndTime:   end,
@@ -622,31 +679,69 @@ func (s *OpsAlertEvaluatorService) computeRuleMetric(
 		QueryMode: OpsQueryModeRaw,
 	})
 	if err != nil {
-		return 0, false
+		return opsAlertRateMetricSample{}, false
 	}
 	if overview == nil {
-		return 0, false
+		return opsAlertRateMetricSample{}, false
 	}
+	sample := opsAlertRateMetricSample{
+		SLARequestCount:    overview.RequestCountSLA,
+		SLAErrorCount:      overview.ErrorCountSLA,
+		UpstreamErrorCount: overview.UpstreamErrorCountExcl429529,
+	}
+	if sample.SLARequestCount <= 0 {
+		return sample, true
+	}
+	sample.HasData = true
 
 	switch strings.TrimSpace(rule.MetricType) {
 	case "success_rate":
-		if overview.RequestCountSLA <= 0 {
-			return 0, false
-		}
-		return overview.SLA * 100, true
+		sample.Value = overview.SLA * 100
+		return sample, true
 	case "error_rate":
-		if overview.RequestCountSLA <= 0 {
-			return 0, false
-		}
-		return overview.ErrorRate * 100, true
+		sample.Value = overview.ErrorRate * 100
+		return sample, true
 	case "upstream_error_rate":
-		if overview.RequestCountSLA <= 0 {
-			return 0, false
-		}
-		return overview.UpstreamErrorRate * 100, true
+		sample.Value = overview.UpstreamErrorRate * 100
+		return sample, true
 	default:
-		return 0, false
+		return opsAlertRateMetricSample{}, false
 	}
+}
+
+func parseOpsAlertMinimumSLARequests(filters map[string]any) int64 {
+	return parsePositiveOpsAlertCountFilter(filters, "min_sla_requests")
+}
+
+func parseOpsAlertMinimumSLAErrors(filters map[string]any) int64 {
+	return parsePositiveOpsAlertCountFilter(filters, "min_sla_errors")
+}
+
+func parsePositiveOpsAlertCountFilter(filters map[string]any, key string) int64 {
+	if len(filters) == 0 {
+		return 0
+	}
+	value, ok := filters[key]
+	if !ok {
+		return 0
+	}
+	minimum, ok := parsePositiveOpsAlertFilterID(value)
+	if !ok {
+		return 0
+	}
+	return minimum
+}
+
+func meetsOpsAlertMinimumSample(rule *OpsAlertRule, sample opsAlertRateMetricSample) bool {
+	if rule == nil {
+		return false
+	}
+	errorCount := sample.SLAErrorCount
+	if strings.TrimSpace(rule.MetricType) == "upstream_error_rate" {
+		errorCount = sample.UpstreamErrorCount
+	}
+	return sample.SLARequestCount >= parseOpsAlertMinimumSLARequests(rule.Filters) &&
+		errorCount >= parseOpsAlertMinimumSLAErrors(rule.Filters)
 }
 
 func (s *OpsAlertEvaluatorService) computeUserConcurrencyRuleMetric(ctx context.Context, rule *OpsAlertRule) (float64, bool, bool) {
@@ -738,7 +833,27 @@ func buildOpsAlertDimensions(platform string, groupID *int64, userID *int64) map
 	return dims
 }
 
+func buildOpsAlertDimensionsWithSample(platform string, groupID *int64, userID *int64, sample *opsAlertRateMetricSample) map[string]any {
+	dims := buildOpsAlertDimensions(platform, groupID, userID)
+	if sample == nil {
+		return dims
+	}
+	if dims == nil {
+		dims = map[string]any{}
+	}
+	dims["sla_request_count"] = sample.SLARequestCount
+	dims["sla_error_count"] = sample.SLAErrorCount
+	if sample.UpstreamErrorCount > 0 {
+		dims["upstream_error_count"] = sample.UpstreamErrorCount
+	}
+	return dims
+}
+
 func buildOpsAlertDescription(rule *OpsAlertRule, value float64, windowMinutes int, platform string, groupID *int64, userID *int64) string {
+	return buildOpsAlertDescriptionWithSample(rule, value, windowMinutes, platform, groupID, userID, nil)
+}
+
+func buildOpsAlertDescriptionWithSample(rule *OpsAlertRule, value float64, windowMinutes int, platform string, groupID *int64, userID *int64, sample *opsAlertRateMetricSample) string {
 	if rule == nil {
 		return ""
 	}
@@ -759,7 +874,7 @@ func buildOpsAlertDescription(rule *OpsAlertRule, value float64, windowMinutes i
 	if windowMinutes <= 0 {
 		windowMinutes = 1
 	}
-	return fmt.Sprintf("%s %s %.2f (current %.2f) over last %dm (%s)",
+	description := fmt.Sprintf("%s %s %.2f (current %.2f) over last %dm (%s)",
 		strings.TrimSpace(rule.MetricType),
 		strings.TrimSpace(rule.Operator),
 		rule.Threshold,
@@ -767,6 +882,19 @@ func buildOpsAlertDescription(rule *OpsAlertRule, value float64, windowMinutes i
 		windowMinutes,
 		strings.TrimSpace(scope),
 	)
+	if sample != nil {
+		description += fmt.Sprintf("; SLA requests=%d, SLA errors=%d", sample.SLARequestCount, sample.SLAErrorCount)
+		if minRequests := parseOpsAlertMinimumSLARequests(rule.Filters); minRequests > 0 {
+			description += fmt.Sprintf(" (minimum requests=%d)", minRequests)
+		}
+		if minErrors := parseOpsAlertMinimumSLAErrors(rule.Filters); minErrors > 0 {
+			description += fmt.Sprintf(" (minimum errors=%d)", minErrors)
+		}
+		if sample.UpstreamErrorCount > 0 {
+			description += fmt.Sprintf(", upstream errors=%d", sample.UpstreamErrorCount)
+		}
+	}
+	return description
 }
 
 func (s *OpsAlertEvaluatorService) maybeSendAlertEmail(ctx context.Context, runtimeCfg *OpsAlertRuntimeSettings, rule *OpsAlertRule, event *OpsAlertEvent) bool {
@@ -798,21 +926,24 @@ func (s *OpsAlertEvaluatorService) maybeSendAlertEmail(ctx context.Context, runt
 		}
 	}
 
-	// Apply/update rate limiter.
+	// Apply/update rate limiter once per incident. Recipients are a fan-out of
+	// one alert, not separate alerts that should consume the global budget.
 	s.emailLimiter.SetLimit(emailCfg.Alert.RateLimitPerHour)
+	validRecipients := make([]string, 0, len(emailCfg.Alert.Recipients))
+	for _, to := range emailCfg.Alert.Recipients {
+		if addr := strings.TrimSpace(to); addr != "" {
+			validRecipients = append(validRecipients, addr)
+		}
+	}
+	if len(validRecipients) == 0 || !s.emailLimiter.Allow(time.Now().UTC()) {
+		return false
+	}
 
 	subject := fmt.Sprintf("[Ops Alert][%s] %s", strings.TrimSpace(rule.Severity), strings.TrimSpace(rule.Name))
 	body := buildOpsAlertEmailBody(rule, event)
 
 	anySent := false
-	for _, to := range emailCfg.Alert.Recipients {
-		addr := strings.TrimSpace(to)
-		if addr == "" {
-			continue
-		}
-		if !s.emailLimiter.Allow(time.Now().UTC()) {
-			continue
-		}
+	for _, addr := range validRecipients {
 		if s.emailService.notificationEmailService != nil {
 			if err := s.emailService.notificationEmailService.Send(ctx, NotificationEmailSendInput{
 				Event:          NotificationEmailEventOpsAlert,

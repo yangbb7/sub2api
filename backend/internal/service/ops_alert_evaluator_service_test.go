@@ -19,6 +19,51 @@ type stubOpsRepo struct {
 	err      error
 }
 
+type rateAlertOpsRepoStub struct {
+	OpsRepository
+	rules       []*OpsAlertRule
+	overview    *OpsDashboardOverview
+	activeEvent *OpsAlertEvent
+	created     *OpsAlertEvent
+	resolvedID  int64
+	status      string
+}
+
+func (s *rateAlertOpsRepoStub) ListAlertRules(context.Context) ([]*OpsAlertRule, error) {
+	return s.rules, nil
+}
+
+func (s *rateAlertOpsRepoStub) GetLatestSystemMetrics(context.Context, int) (*OpsSystemMetricsSnapshot, error) {
+	return nil, nil
+}
+
+func (s *rateAlertOpsRepoStub) GetDashboardOverview(context.Context, *OpsDashboardFilter) (*OpsDashboardOverview, error) {
+	return s.overview, nil
+}
+
+func (s *rateAlertOpsRepoStub) GetActiveAlertEvent(context.Context, int64) (*OpsAlertEvent, error) {
+	return s.activeEvent, nil
+}
+
+func (s *rateAlertOpsRepoStub) GetLatestAlertEvent(context.Context, int64) (*OpsAlertEvent, error) {
+	return nil, nil
+}
+
+func (s *rateAlertOpsRepoStub) CreateAlertEvent(_ context.Context, event *OpsAlertEvent) (*OpsAlertEvent, error) {
+	s.created = event
+	return event, nil
+}
+
+func (s *rateAlertOpsRepoStub) UpdateAlertEventStatus(_ context.Context, eventID int64, status string, _ *time.Time) error {
+	s.resolvedID = eventID
+	s.status = status
+	return nil
+}
+
+func (s *rateAlertOpsRepoStub) UpsertJobHeartbeat(context.Context, *OpsUpsertJobHeartbeatInput) error {
+	return nil
+}
+
 type alertUserRepoStub struct {
 	UserRepository
 	user *User
@@ -102,6 +147,86 @@ func (s *stubOpsRepo) GetDashboardOverview(ctx context.Context, filter *OpsDashb
 		return s.overview, nil
 	}
 	return &OpsDashboardOverview{}, nil
+}
+
+func TestOpsAlertRateSampleMinimum(t *testing.T) {
+	t.Parallel()
+	rule := &OpsAlertRule{MetricType: "error_rate", Filters: map[string]any{
+		"min_sla_requests": float64(30),
+		"min_sla_errors":   "10",
+	}}
+	require.Equal(t, int64(30), parseOpsAlertMinimumSLARequests(rule.Filters))
+	require.Equal(t, int64(10), parseOpsAlertMinimumSLAErrors(rule.Filters))
+	require.False(t, meetsOpsAlertMinimumSample(rule, opsAlertRateMetricSample{SLARequestCount: 30, SLAErrorCount: 9}))
+	require.False(t, meetsOpsAlertMinimumSample(rule, opsAlertRateMetricSample{SLARequestCount: 29, SLAErrorCount: 10}))
+	require.True(t, meetsOpsAlertMinimumSample(rule, opsAlertRateMetricSample{SLARequestCount: 30, SLAErrorCount: 10}))
+}
+
+func TestOpsAlertEvaluatorRateRuleRequiresActionableSample(t *testing.T) {
+	t.Parallel()
+	rule := &OpsAlertRule{
+		ID:               10,
+		Name:             "high error rate",
+		Enabled:          true,
+		Severity:         "P0",
+		MetricType:       "error_rate",
+		Operator:         ">",
+		Threshold:        25,
+		WindowMinutes:    15,
+		SustainedMinutes: 1,
+		Filters: map[string]any{
+			"min_sla_requests": float64(30),
+			"min_sla_errors":   float64(10),
+		},
+	}
+
+	t.Run("insufficient sample resolves an existing event", func(t *testing.T) {
+		repo := &rateAlertOpsRepoStub{
+			rules: []*OpsAlertRule{rule},
+			overview: &OpsDashboardOverview{
+				RequestCountSLA: 3,
+				ErrorCountSLA:   1,
+				ErrorRate:       1.0 / 3.0,
+			},
+			activeEvent: &OpsAlertEvent{ID: 99, RuleID: rule.ID, Status: OpsAlertStatusFiring},
+		}
+		NewOpsAlertEvaluatorService(nil, repo, nil, nil, nil, nil).evaluateOnce(time.Minute)
+		require.Nil(t, repo.created)
+		require.Equal(t, int64(99), repo.resolvedID)
+		require.Equal(t, OpsAlertStatusResolved, repo.status)
+	})
+
+	t.Run("no traffic resolves an existing event", func(t *testing.T) {
+		repo := &rateAlertOpsRepoStub{
+			rules: []*OpsAlertRule{rule},
+			overview: &OpsDashboardOverview{
+				RequestCountSLA: 0,
+			},
+			activeEvent: &OpsAlertEvent{ID: 100, RuleID: rule.ID, Status: OpsAlertStatusFiring},
+		}
+		NewOpsAlertEvaluatorService(nil, repo, nil, nil, nil, nil).evaluateOnce(time.Minute)
+		require.Nil(t, repo.created)
+		require.Equal(t, int64(100), repo.resolvedID)
+		require.Equal(t, OpsAlertStatusResolved, repo.status)
+	})
+
+	t.Run("actionable sustained error captures denominator", func(t *testing.T) {
+		repo := &rateAlertOpsRepoStub{
+			rules: []*OpsAlertRule{rule},
+			overview: &OpsDashboardOverview{
+				RequestCountSLA:              60,
+				ErrorCountSLA:                20,
+				UpstreamErrorCountExcl429529: 18,
+				ErrorRate:                    1.0 / 3.0,
+			},
+		}
+		NewOpsAlertEvaluatorService(nil, repo, nil, nil, nil, nil).evaluateOnce(time.Minute)
+		require.NotNil(t, repo.created)
+		require.Contains(t, repo.created.Description, "SLA requests=60")
+		require.Contains(t, repo.created.Description, "SLA errors=20")
+		require.Equal(t, int64(60), repo.created.Dimensions["sla_request_count"])
+		require.Equal(t, int64(20), repo.created.Dimensions["sla_error_count"])
+	})
 }
 
 func TestComputeGroupAvailableRatio(t *testing.T) {

@@ -525,7 +525,8 @@ export default {
           recommended: '推荐：运算符 {operator}，阈值 {threshold}{unit}',
           userRequired: '该指标必须指定目标用户（user_id）。',
           groupRequired: '该指标为分组级别指标，必须选择分组（group_id）。',
-          groupOptional: '可选：通过 group_id 将规则限定到某个分组。'
+          groupOptional: '可选：通过 group_id 将规则限定到某个分组。',
+          minimumSample: '可选。请求量或错误量未达到门槛时只保留看板数据，不触发该规则。'
         },
         table: {
           name: '名称',
@@ -543,6 +544,8 @@ export default {
           groupId: '分组（group_id）',
           groupPlaceholder: '请选择分组',
           allGroups: '全部分组',
+          minSlaRequests: '最小 SLA 请求数（可选）',
+          minSlaErrors: '最小 SLA 错误数（可选）',
           threshold: '阈值',
           severity: '级别',
           window: '统计窗口（分钟）',
@@ -560,9 +563,10 @@ export default {
           groupIdRequired: '分组级别指标必须指定 group_id',
           operatorRequired: '运算符不能为空',
           thresholdRequired: '阈值必须为数字',
-          windowRange: '统计窗口必须为 1 / 5 / 60 分钟之一',
+          windowRange: '统计窗口必须为 1 / 5 / 15 / 60 分钟之一',
           sustainedRange: '连续样本数必须在 1 到 1440 之间',
-          cooldownRange: '冷却期必须在 0 到 1440 分钟之间'
+          cooldownRange: '冷却期必须在 0 到 1440 分钟之间',
+          minimumSample: '最小样本量必须是正整数'
         }
       },
       runtime: {

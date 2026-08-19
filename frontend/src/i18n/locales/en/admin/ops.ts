@@ -525,7 +525,8 @@ export default {
           recommended: 'Recommended: operator {operator}, threshold {threshold}{unit}',
           userRequired: 'A target user (user_id) is required for this metric.',
           groupRequired: 'This is a group-level metric; selecting a group (group_id) is required.',
-          groupOptional: 'Optional: limit the rule to a specific group via group_id.'
+          groupOptional: 'Optional: limit the rule to a specific group via group_id.',
+          minimumSample: 'Optional. The rule does not fire until the request or error count reaches this threshold.'
         },
         table: {
           name: 'Name',
@@ -543,6 +544,8 @@ export default {
           groupId: 'Group (group_id)',
           groupPlaceholder: 'Select a group',
           allGroups: 'All groups',
+          minSlaRequests: 'Minimum SLA requests (optional)',
+          minSlaErrors: 'Minimum SLA errors (optional)',
           threshold: 'Threshold',
           severity: 'Severity',
           window: 'Window (minutes)',
@@ -560,9 +563,10 @@ export default {
           groupIdRequired: 'group_id is required for group-level metrics',
           operatorRequired: 'Operator is required',
           thresholdRequired: 'Threshold must be a number',
-          windowRange: 'Window must be one of: 1, 5, 60 minutes',
+          windowRange: 'Window must be one of: 1, 5, 15, 60 minutes',
           sustainedRange: 'Sustained must be between 1 and 1440 samples',
-          cooldownRange: 'Cooldown must be between 0 and 1440 minutes'
+          cooldownRange: 'Cooldown must be between 0 and 1440 minutes',
+          minimumSample: 'Minimum sample size must be a positive integer'
         }
       },
       runtime: {

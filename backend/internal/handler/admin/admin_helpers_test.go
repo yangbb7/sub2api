@@ -240,6 +240,20 @@ func TestOpsAlertRuleValidation(t *testing.T) {
 	rule.Filters["group_id"] = float64(3)
 	normalizeOpsAlertRuleFilters(rule)
 	require.Equal(t, map[string]any{"group_id": float64(3)}, rule.Filters)
+
+	raw["metric_type"] = json.RawMessage(`"error_rate"`)
+	raw["filters"] = json.RawMessage(`{"min_sla_requests":30,"min_sla_errors":5}`)
+	_, err = validateOpsAlertRulePayload(raw)
+	require.NoError(t, err)
+
+	raw["filters"] = json.RawMessage(`{"min_sla_requests":0}`)
+	_, err = validateOpsAlertRulePayload(raw)
+	require.ErrorContains(t, err, "min_sla_requests")
+
+	raw["metric_type"] = json.RawMessage(`"cpu_usage_percent"`)
+	raw["filters"] = json.RawMessage(`{"min_sla_requests":30}`)
+	_, err = validateOpsAlertRulePayload(raw)
+	require.ErrorContains(t, err, "only supported")
 }
 
 func TestOpsWSHelpers(t *testing.T) {

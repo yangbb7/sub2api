@@ -105,6 +105,40 @@ func isPercentOrRateMetric(metricType string) bool {
 	}
 }
 
+func isRequestRateOpsAlertMetric(metricType string) bool {
+	switch metricType {
+	case "success_rate", "error_rate", "upstream_error_rate":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateOpsAlertCountFilter(raw map[string]json.RawMessage, metricType string) error {
+	filtersRaw, present := raw["filters"]
+	if !present {
+		return nil
+	}
+	var filters map[string]json.RawMessage
+	if err := json.Unmarshal(filtersRaw, &filters); err != nil || filters == nil {
+		return fmt.Errorf("filters must be an object")
+	}
+	for _, key := range []string{"min_sla_requests", "min_sla_errors"} {
+		value, set := filters[key]
+		if !set {
+			continue
+		}
+		if !isRequestRateOpsAlertMetric(metricType) {
+			return fmt.Errorf("filters.%s is only supported for request rate metrics", key)
+		}
+		var number float64
+		if err := json.Unmarshal(value, &number); err != nil || math.IsNaN(number) || math.IsInf(number, 0) || number < 1 || number > 1000000 || number != math.Trunc(number) {
+			return fmt.Errorf("filters.%s must be an integer between 1 and 1000000", key)
+		}
+	}
+	return nil
+}
+
 func validateOpsAlertRulePayload(raw map[string]json.RawMessage) (*opsAlertRuleValidatedInput, error) {
 	if raw == nil {
 		return nil, fmt.Errorf("invalid request body")
@@ -164,6 +198,9 @@ func validateOpsAlertRulePayload(raw map[string]json.RawMessage) (*opsAlertRuleV
 		if _, ok := parsePositiveOpsAlertFilterID(filters["user_id"]); !ok {
 			return nil, fmt.Errorf("filters.user_id must be a positive integer for metric_type %s", metricType)
 		}
+	}
+	if err := validateOpsAlertCountFilter(raw, metricType); err != nil {
+		return nil, err
 	}
 
 	validated := &opsAlertRuleValidatedInput{
@@ -284,6 +321,10 @@ func normalizeOpsAlertRuleFilters(rule *service.OpsAlertRule) {
 		delete(rule.Filters, "region")
 	} else {
 		delete(rule.Filters, "user_id")
+	}
+	if !isRequestRateOpsAlertMetric(rule.MetricType) {
+		delete(rule.Filters, "min_sla_requests")
+		delete(rule.Filters, "min_sla_errors")
 	}
 	if len(rule.Filters) == 0 {
 		rule.Filters = nil

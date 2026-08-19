@@ -67,6 +67,7 @@ const groupMetricTypes = new Set<MetricType>([
 ])
 
 const userMetricTypes = new Set<MetricType>(['user_concurrency_utilization_percent'])
+const requestRateMetricTypes = new Set<MetricType>(['success_rate', 'error_rate', 'upstream_error_rate'])
 
 watch(
   () => draft.value?.metric_type,
@@ -78,6 +79,10 @@ watch(
       delete draft.value.filters.region
     } else {
       delete draft.value.filters.user_id
+    }
+    if (!requestRateMetricTypes.has(metricType)) {
+      delete draft.value.filters.min_sla_requests
+      delete draft.value.filters.min_sla_errors
     }
     if (Object.keys(draft.value.filters).length === 0) {
       delete draft.value.filters
@@ -112,6 +117,11 @@ const isGroupMetricSelected = computed(() => {
 const isUserMetricSelected = computed(() => {
   const metricType = draft.value?.metric_type
   return metricType ? userMetricTypes.has(metricType) : false
+})
+
+const isRequestRateMetricSelected = computed(() => {
+  const metricType = draft.value?.metric_type
+  return metricType ? requestRateMetricTypes.has(metricType) : false
 })
 
 const draftUserId = computed<number | null>({
@@ -151,6 +161,28 @@ const draftGroupId = computed<number | null>({
     draft.value.filters.group_id = value
   }
 })
+
+function draftCountFilter(key: 'min_sla_requests' | 'min_sla_errors') {
+  return computed<number | null>({
+    get() {
+      return parsePositiveInt(draft.value?.filters?.[key])
+    },
+    set(value) {
+      if (!draft.value) return
+      if (value == null) {
+        if (!draft.value.filters) return
+        delete draft.value.filters[key]
+        if (Object.keys(draft.value.filters).length === 0) delete draft.value.filters
+        return
+      }
+      if (!draft.value.filters) draft.value.filters = {}
+      draft.value.filters[key] = value
+    }
+  })
+}
+
+const draftMinSLARequests = draftCountFilter('min_sla_requests')
+const draftMinSLAErrors = draftCountFilter('min_sla_errors')
 
 const groupOptions = computed<SelectOption[]>(() => {
   if (isGroupMetricSelected.value) return groupOptionsBase.value
@@ -332,7 +364,7 @@ const severityOptions = computed(() => {
 })
 
 const windowOptions = computed(() => {
-  const windows = [1, 5, 60]
+  const windows = [1, 5, 15, 60]
   return windows.map((m) => ({ value: m, label: `${m}m` }))
 })
 
@@ -344,11 +376,15 @@ function newRuleDraft(): AlertRule {
     metric_type: 'error_rate',
     operator: '>',
     threshold: 1,
-    window_minutes: 1,
+    window_minutes: 5,
     sustained_minutes: 2,
     severity: 'P1',
     cooldown_minutes: 10,
-    notify_email: true
+    notify_email: true,
+    filters: {
+      min_sla_requests: 30,
+      min_sla_errors: 5
+    }
   }
 }
 
@@ -376,10 +412,16 @@ const editorValidation = computed(() => {
   if (groupMetricTypes.has(r.metric_type) && !parsePositiveInt(r.filters?.group_id)) {
     errors.push(t('admin.ops.alertRules.validation.groupIdRequired'))
   }
+  if (isRequestRateMetricSelected.value) {
+    for (const key of ['min_sla_requests', 'min_sla_errors'] as const) {
+      const raw = r.filters?.[key]
+      if (raw != null && !parsePositiveInt(raw)) errors.push(t('admin.ops.alertRules.validation.minimumSample'))
+    }
+  }
   if (!r.operator) errors.push(t('admin.ops.alertRules.validation.operatorRequired'))
   if (!(typeof r.threshold === 'number' && Number.isFinite(r.threshold)))
     errors.push(t('admin.ops.alertRules.validation.thresholdRequired'))
-  if (!(typeof r.window_minutes === 'number' && Number.isFinite(r.window_minutes) && [1, 5, 60].includes(r.window_minutes))) {
+  if (!(typeof r.window_minutes === 'number' && Number.isFinite(r.window_minutes) && [1, 5, 15, 60].includes(r.window_minutes))) {
     errors.push(t('admin.ops.alertRules.validation.windowRange'))
   }
   if (!(typeof r.sustained_minutes === 'number' && Number.isFinite(r.sustained_minutes) && r.sustained_minutes >= 1 && r.sustained_minutes <= 1440)) {
@@ -642,6 +684,21 @@ function cancelDelete() {
               {{ isGroupMetricSelected ? t('admin.ops.alertRules.hints.groupRequired') : t('admin.ops.alertRules.hints.groupOptional') }}
             </p>
           </div>
+
+          <template v-if="isRequestRateMetricSelected">
+            <div>
+              <label class="input-label">{{ t('admin.ops.alertRules.form.minSlaRequests') }}</label>
+              <input v-model.number="draftMinSLARequests" class="input" type="number" min="1" max="1000000" step="1" />
+            </div>
+
+            <div>
+              <label class="input-label">{{ t('admin.ops.alertRules.form.minSlaErrors') }}</label>
+              <input v-model.number="draftMinSLAErrors" class="input" type="number" min="1" max="1000000" step="1" />
+            </div>
+            <p class="-mt-2 text-xs text-gray-500 dark:text-gray-400 md:col-span-2">
+              {{ t('admin.ops.alertRules.hints.minimumSample') }}
+            </p>
+          </template>
 
           <div>
             <label class="input-label">{{ t('admin.ops.alertRules.form.threshold') }}</label>

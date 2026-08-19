@@ -113,7 +113,7 @@ func defaultOpsEmailNotificationConfig() *OpsEmailNotificationConfig {
 			Enabled:               true,
 			Recipients:            []string{},
 			MinSeverity:           "",
-			RateLimitPerHour:      0,
+			RateLimitPerHour:      2,
 			BatchingWindowSeconds: 0,
 			IncludeResolvedAlerts: false,
 		},
