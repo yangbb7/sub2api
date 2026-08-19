@@ -142,7 +142,7 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 			responseSnapshot.AppendString("\n")
 
 			// 解析 SSE 事件数据提取 usage
-			s.parseSSEUsagePassthrough(string(sseData), usage)
+			parseSSEUsagePassthrough(string(sseData), usage)
 
 			// 确定 SSE event type
 			eventType := gjson.GetBytes(sseData, "type").String()

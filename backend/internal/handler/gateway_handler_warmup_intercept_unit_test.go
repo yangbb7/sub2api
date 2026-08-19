@@ -174,6 +174,24 @@ func (f *recordingGatewayCache) RefreshSessionTTL(context.Context, int64, string
 func (f *recordingGatewayCache) DeleteSessionAccountID(context.Context, int64, string) error {
 	return nil
 }
+func (f *recordingGatewayCache) SetGrokVideoPendingBilling(context.Context, string, []byte, time.Duration) error {
+	return nil
+}
+func (f *recordingGatewayCache) GetGrokVideoPendingBilling(context.Context, string) ([]byte, error) {
+	return nil, nil
+}
+func (f *recordingGatewayCache) ClaimGrokVideoBilled(context.Context, string, time.Duration) (bool, error) {
+	return true, nil
+}
+func (f *recordingGatewayCache) ReleaseGrokVideoBilled(context.Context, string) error {
+	return nil
+}
+func (f *recordingGatewayCache) SetReasoningContent(context.Context, string, string, time.Duration) error {
+	return nil
+}
+func (f *recordingGatewayCache) GetReasoningContent(context.Context, string) (string, error) {
+	return "", service.ErrReasoningContentNotFound
+}
 
 func newTestGatewayHandler(t *testing.T, group *service.Group, accounts []*service.Account) (*GatewayHandler, func()) {
 	return newTestGatewayHandlerWithCache(t, group, accounts, nil)

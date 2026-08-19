@@ -6,7 +6,7 @@ import (
 )
 
 func TestOpsAlertNoiseGovernanceMigration(t *testing.T) {
-	content, err := FS.ReadFile("222_ops_alert_noise_governance.sql")
+	content, err := FS.ReadFile("228_ops_alert_noise_governance.sql")
 	if err != nil {
 		t.Fatalf("read migration: %v", err)
 	}
