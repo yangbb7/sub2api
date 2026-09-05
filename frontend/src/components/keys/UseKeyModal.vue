@@ -217,6 +217,22 @@
                 : t('keys.useKeyModal.codexModelCatalog.fetch') }}
             </button>
           </div>
+          <label
+            v-if="props.platform === 'openai' && codexCatalogModelSlugs.length"
+            class="flex items-center gap-3 border-t border-gray-200 px-4 py-3 text-sm dark:border-dark-700"
+          >
+            <span>{{ t('keys.useKeyModal.codexModelCatalog.model') }}</span>
+            <select v-model="selectedCodexModel" data-testid="codex-model-select" class="input min-w-0 flex-1">
+              <option v-for="slug in codexCatalogModelSlugs" :key="slug" :value="slug">{{ slug }}</option>
+            </select>
+          </label>
+          <label
+            v-if="props.platform === 'openai' && codexModelCatalogDownloaded"
+            class="flex items-start gap-2 border-t border-gray-200 px-4 py-3 text-sm dark:border-dark-700"
+          >
+            <input v-model="useCodexModelCatalog" data-testid="codex-model-catalog-enable" type="checkbox" class="mt-1" />
+            <span>{{ t('keys.useKeyModal.codexModelCatalog.enable') }}</span>
+          </label>
           <p
             v-if="codexModelManifestState === 'ready'"
             class="border-t border-gray-200 px-4 py-2 text-xs text-emerald-700 dark:border-dark-700 dark:text-emerald-300"
@@ -310,6 +326,9 @@ type CodexModelManifestState = 'idle' | 'loading' | 'ready' | 'error'
 const codexModelManifestState = ref<CodexModelManifestState>('idle')
 const codexModelManifestContent = ref('')
 const codexModelManifestModelCount = ref(0)
+const codexModelCatalogDownloaded = ref(false)
+const useCodexModelCatalog = ref(false)
+const selectedCodexModel = ref('')
 let codexModelManifestController: AbortController | null = null
 let codexModelManifestRequestID = 0
 
@@ -323,6 +342,10 @@ const codexModelCatalogPath = computed(() => {
   const isWindows = activeTab.value === 'windows'
   const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
   return joinConfigPath(configDir, 'codex-models.json', isWindows)
+})
+
+watch(codexModelCatalogPath, () => {
+  useCodexModelCatalog.value = false
 })
 
 const codexManifestContext = computed(() => {
@@ -612,6 +635,9 @@ function resetCodexModelManifest() {
   codexModelManifestState.value = 'idle'
   codexModelManifestContent.value = ''
   codexModelManifestModelCount.value = 0
+  codexModelCatalogDownloaded.value = false
+  useCodexModelCatalog.value = false
+  selectedCodexModel.value = ''
 }
 
 async function loadCodexModelManifest() {
@@ -627,6 +653,7 @@ async function loadCodexModelManifest() {
     const result = await fetchCodexModelsManifest(props.baseUrl, props.apiKey, controller.signal)
     if (requestID !== codexModelManifestRequestID) return
     codexModelManifestContent.value = result.content
+    selectedCodexModel.value = selectCodexCatalogModel('gpt-6-astra')
     codexModelManifestModelCount.value = result.modelCount
     codexModelManifestState.value = 'ready'
   } catch (error) {
@@ -648,6 +675,7 @@ function downloadCodexModelManifest() {
     new Blob([codexModelManifestContent.value], { type: 'application/json;charset=utf-8' }),
     'codex-models.json'
   )
+  codexModelCatalogDownloaded.value = true
 }
 
 const codexCatalogModelSlugs = computed(() =>
@@ -655,15 +683,23 @@ const codexCatalogModelSlugs = computed(() =>
 )
 
 function selectCodexCatalogModel(preferredModel: string): string {
+  if (props.platform === 'openai' && codexCatalogModelSlugs.value.includes(selectedCodexModel.value)) {
+    return selectedCodexModel.value
+  }
   if (codexCatalogModelSlugs.value.includes(preferredModel)) return preferredModel
   return codexCatalogModelSlugs.value[0] || preferredModel
 }
 
 function codexReasoningEffortTomlLine(modelSlug: string): string {
+  const model = findCodexCatalogModel(codexModelManifestContent.value, modelSlug)
   return formatCodexReasoningEffortTomlLine(
-    selectCodexConfigReasoningEffort(findCodexCatalogModel(codexModelManifestContent.value, modelSlug))
+    model ? selectCodexConfigReasoningEffort(model) : modelSlug === 'gpt-6-astra' ? 'high' : null
   )
 }
+
+const optionalCodexCatalogLine = computed(() => useCodexModelCatalog.value
+  ? `model_catalog_json = "${escapeTomlBasicString(codexModelCatalogPath.value)}"\n`
+  : '')
 
 const escapeHtml = (value: string) => value
   .replace(/&/g, '&amp;')
@@ -925,7 +961,7 @@ function generateOpenAIFiles(baseUrl: string, apiKey: string): FileConfig[] {
   const isWindows = activeTab.value === 'windows'
   const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
 
-  const model = selectCodexCatalogModel('gpt-5.5')
+  const model = selectCodexCatalogModel('gpt-6-astra')
   const reasoningEffortLine = codexReasoningEffortTomlLine(model)
 
   // config.toml content
@@ -933,19 +969,12 @@ function generateOpenAIFiles(baseUrl: string, apiKey: string): FileConfig[] {
 model = "${model}"
 review_model = "${model}"
 ${reasoningEffortLine}disable_response_storage = true
-model_catalog_json = "${escapeTomlBasicString(codexModelCatalogPath.value)}"
-service_tier = "fast"
-network_access = "enabled"
-windows_wsl_setup_acknowledged = true
-
+${optionalCodexCatalogLine.value}
 [model_providers.OpenAI]
 name = "OpenAI"
 base_url = "${baseUrl}"
 wire_api = "responses"
-${generateCodexProviderAuthConfig(apiKey)}
-
-[features]
-goals = true`
+${generateCodexProviderAuthConfig(apiKey)}`
 
   return buildOpenAICodexFileConfigs(configDir, configContent, apiKey)
 }
@@ -1271,7 +1300,7 @@ supports_websockets = false`
 function generateOpenAIWsFiles(baseUrl: string, apiKey: string): FileConfig[] {
   const isWindows = activeTab.value === 'windows'
   const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
-  const model = selectCodexCatalogModel('gpt-5.5')
+  const model = selectCodexCatalogModel('gpt-6-astra')
   const reasoningEffortLine = codexReasoningEffortTomlLine(model)
 
   // config.toml content with WebSocket v2
@@ -1279,11 +1308,7 @@ function generateOpenAIWsFiles(baseUrl: string, apiKey: string): FileConfig[] {
 model = "${model}"
 review_model = "${model}"
 ${reasoningEffortLine}disable_response_storage = true
-model_catalog_json = "${escapeTomlBasicString(codexModelCatalogPath.value)}"
-service_tier = "fast"
-network_access = "enabled"
-windows_wsl_setup_acknowledged = true
-
+${optionalCodexCatalogLine.value}
 [model_providers.OpenAI]
 name = "OpenAI"
 base_url = "${baseUrl}"
@@ -1292,8 +1317,7 @@ supports_websockets = true
 ${generateCodexProviderAuthConfig(apiKey)}
 
 [features]
-responses_websockets_v2 = true
-goals = true`
+responses_websockets_v2 = true`
 
   return buildOpenAICodexFileConfigs(configDir, configContent, apiKey)
 }

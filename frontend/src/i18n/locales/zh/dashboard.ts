@@ -144,7 +144,7 @@ export default {
         authModeLegacy: '兼容模式',
         authModeApiKey: 'API Key Mode',
         authModeApiKeyRestartNotice: '保存此配置后，必须完全退出并重启 Codex Desktop 或 CLI，然后新建 task，让客户端重新构建工具注册表。',
-        configTomlHint: '请确保以下内容位于 config.toml 文件的开头部分',
+        configTomlHint: '将根级配置放在 config.toml 的首个 [表名] 之前，已有同名字段或配置表时请合并替换，勿重复添加。',
         note: '请确保配置目录存在。macOS/Linux 用户可运行 mkdir -p ~/.codex 创建目录。',
         noteWindows:
           '按 Win+R，输入 %userprofile%\\.codex 打开配置目录。如目录不存在，请先手动创建。'
@@ -211,7 +211,9 @@ export default {
       },
       codexModelCatalog: {
         title: 'Codex 模型目录',
-        description: '使用当前 API Key 获取目录，并保存到 config.toml 引用的路径。',
+        description: '使用当前 API Key 获取分组模型目录。OpenAI 接入默认使用客户端目录；如需本地目录，请下载并保存到所示路径后勾选启用。本地文件不会自动更新，变更后需重新下载并重启 Codex。',
+        enable: '已将目录保存到所示路径，在配置中启用本地模型目录',
+        model: '模型',
         fetch: '获取目录',
         retry: '重试',
         download: '下载目录',
