@@ -101,6 +101,7 @@ func TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields(t *testing.T) {
 			sqlmock.AnyArg(), // account_stats_cost
 			sqlmock.AnyArg(), // request_snapshot
 			sqlmock.AnyArg(), // response_snapshot
+			sqlmock.AnyArg(), // upstream_request_id
 			sqlmock.AnyArg(), // session_id
 			log.NativeCompactionV2,
 			createdAt,
@@ -197,6 +198,7 @@ func TestUsageLogRepositoryCreate_PersistsServiceTier(t *testing.T) {
 			sqlmock.AnyArg(), // account_stats_cost
 			sqlmock.AnyArg(), // request_snapshot
 			sqlmock.AnyArg(), // response_snapshot
+			sqlmock.AnyArg(), // upstream_request_id
 			sqlmock.AnyArg(), // session_id
 			log.NativeCompactionV2,
 			createdAt,
@@ -273,11 +275,11 @@ func TestPrepareUsageLogInsert_PersistsCallSnapshots(t *testing.T) {
 	prepared := prepareUsageLogInsert(log)
 
 	require.Len(t, prepared.args, len(usageLogInsertArgTypes))
-	requestSnapshotValue, ok := prepared.args[len(prepared.args)-5].(string)
+	requestSnapshotValue, ok := prepared.args[len(prepared.args)-6].(string)
 	require.True(t, ok)
 	require.JSONEq(t, `{"content":"{\"model\":\"gpt-5.5\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}","truncated":false}`, requestSnapshotValue)
 
-	responseSnapshotValue, ok := prepared.args[len(prepared.args)-4].(string)
+	responseSnapshotValue, ok := prepared.args[len(prepared.args)-5].(string)
 	require.True(t, ok)
 	require.JSONEq(t, `{"content":"{\"output_text\":\"world\"}","truncated":true}`, responseSnapshotValue)
 }
@@ -932,14 +934,14 @@ func TestUsageLogSelectColumnsIncludesUpstreamResponseAuditFields(t *testing.T) 
 
 func usageLogScanValues(values ...any) []any {
 	// Keep older tests focused on their target fields while matching usageLogSelectColumns.
-	// request_snapshot and response_snapshot live immediately before session_id and created_at.
-	if len(values) < 2 {
+	// Snapshots precede upstream_request_id, session_id, native_compaction_v2, and created_at.
+	if len(values) < 4 {
 		return values
 	}
 	out := make([]any, 0, len(values)+2)
-	out = append(out, values[:len(values)-2]...)
+	out = append(out, values[:len(values)-4]...)
 	out = append(out, sql.NullString{}, sql.NullString{})
-	out = append(out, values[len(values)-2:]...)
+	out = append(out, values[len(values)-4:]...)
 	return out
 }
 
@@ -1008,12 +1010,17 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},
 			sql.NullString{},
 			sql.NullFloat64{},
-			sql.NullString{},
+			sql.NullString{Valid: true, String: "upstream-image-request"}, // upstream_request_id
+			sql.NullString{Valid: true, String: "image-session"},
 			false, // native_compaction_v2
 			now,
 		)})
 		require.NoError(t, err)
 		require.Equal(t, 2, log.ImageCount)
+		require.NotNil(t, log.UpstreamRequestID)
+		require.Equal(t, "upstream-image-request", *log.UpstreamRequestID)
+		require.NotNil(t, log.SessionID)
+		require.Equal(t, "image-session", *log.SessionID)
 		require.NotNil(t, log.ImageSize)
 		require.Equal(t, "4K", *log.ImageSize)
 		require.NotNil(t, log.ImageInputSize)
@@ -1087,6 +1094,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},  // billing_tier
 			sql.NullString{},  // billing_mode
 			sql.NullFloat64{}, // account_stats_cost
+			sql.NullString{},  // upstream_request_id
 			sql.NullString{},  // session_id
 			false,             // native_compaction_v2
 			now,
@@ -1149,6 +1157,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},  // billing_tier
 			sql.NullString{},  // billing_mode
 			sql.NullFloat64{}, // account_stats_cost
+			sql.NullString{},  // upstream_request_id
 			sql.NullString{},  // session_id
 			true,              // native_compaction_v2
 			now,
@@ -1212,6 +1221,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},  // billing_tier
 			sql.NullString{},  // billing_mode
 			sql.NullFloat64{}, // account_stats_cost
+			sql.NullString{},  // upstream_request_id
 			sql.NullString{},  // session_id
 			false,             // native_compaction_v2
 			now,

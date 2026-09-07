@@ -62,7 +62,8 @@ vi.mock('vue-i18n', async (importOriginal) => {
   }
 })
 
-vi.mock('@/utils/format', () => ({
+vi.mock('@/utils/format', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/utils/format')>(),
   formatNumber: (value: number) => Number(value).toLocaleString('en-US'),
 }))
 
