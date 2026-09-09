@@ -194,6 +194,12 @@ export default {
         codexConfigTomlHint: 'Download the model catalog below, save both files under the Codex config directory, and restart Codex.',
         codexNote: 'Export SUB2API_API_KEY before starting Codex. The downloaded catalog contains model metadata only, not your API key.',
       },
+      minimax: {
+        description: 'Configure Claude Code, Codex, or OpenCode through the current MiniMax group.',
+        codexDescription: 'Configure Codex with API key authentication through the current MiniMax group.',
+        codexConfigTomlHint: 'Download the model catalog below, save both files under the Codex config directory, and restart Codex.',
+        codexNote: 'Export SUB2API_API_KEY before starting Codex. The downloaded catalog contains model metadata only, not your API key.',
+      },
       composite: {
         description: 'Configure supported clients through the current Composite routing group.',
         codexDescription: 'Configure Codex with API key authentication and the complete model catalog for this Composite group.',
@@ -290,6 +296,13 @@ export default {
 
   // Usage
   usage: {
+    callDetails: 'Call details',
+    failedToLoadCallDetails: 'Failed to load call details',
+    requestId: 'Request ID',
+    requestSnapshot: 'Request',
+    responseSnapshot: 'Response',
+    snapshotUnavailable: 'Snapshot unavailable',
+    truncated: 'Truncated',
     title: 'Usage Records',
     description: 'View and analyze your API usage history',
     costDetails: 'Cost Breakdown',
@@ -468,7 +481,8 @@ export default {
       antigravity: 'Antigravity',
       kimi: 'Kimi',
       zhipu: 'Zhipu GLM',
-      deepseek: 'DeepSeek'
+      deepseek: 'DeepSeek',
+      minimax: 'MiniMax'
     },
     // Check modes (how a monitor performs its checks)
     checkMode: {
@@ -755,6 +769,16 @@ export default {
 
   // Profile
   profile: {
+    affiliate: {
+      title: 'Referral rewards',
+      description: 'Invite users and track your referral rewards.',
+      availableQuota: 'Available credit',
+      copyLink: 'Copy referral link',
+      invitedUsers: 'Invited users',
+      linkCopied: 'Referral link copied',
+      rebateRate: 'Reward rate',
+      viewRecords: 'View records',
+    },
     title: 'Profile Settings',
     description: 'Manage your account information and settings',
     accountBalance: 'Account Balance',
@@ -979,6 +1003,7 @@ export default {
   errors: {
     somethingWentWrong: 'Something went wrong',
     pageNotFound: 'Page not found',
+    pageNotFoundDescription: 'The page you requested does not exist or has moved.',
     unauthorized: 'Unauthorized',
     forbidden: 'Forbidden',
     serverError: 'Server error',

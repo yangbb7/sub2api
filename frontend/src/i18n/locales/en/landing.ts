@@ -1,10 +1,17 @@
 export default {
+  securityStatementModal: {
+    title: 'Security statement',
+    summary: 'Read the security statement before continuing to use this service.',
+    openFullStatement: 'Read full statement',
+    acknowledge: 'I understand, continue',
+  },
   batchImageGuide: {
     title: 'Batch Image Generation',
     description: 'Submit multiple prompts in one job and download the generated images when complete'
   },
   // Home Page
   home: {
+    securityStatement: 'Security statement',
     viewOnGithub: 'View on GitHub',
     viewDocs: 'View Documentation',
     docs: 'Docs',

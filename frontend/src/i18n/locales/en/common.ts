@@ -1,5 +1,7 @@
 export default {
   common: {
+    showPassword: 'Show password',
+    hidePassword: 'Hide password',
     loading: 'Loading...',
     submitting: 'Submitting...',
     justNow: 'just now',
@@ -12,6 +14,12 @@ export default {
     delete: 'Delete',
     edit: 'Edit',
     create: 'Create',
+    apply: 'Apply',
+    clear: 'Clear',
+    creating: 'Creating...',
+    required: 'Required',
+    sending: 'Sending...',
+    tryAgain: 'Please try again',
     update: 'Update',
     confirm: 'Confirm',
     reset: 'Reset',
@@ -210,6 +218,9 @@ export default {
 
   // Auth
   auth: {
+    affiliateCodeLabel: 'Referral code',
+    affiliateCodePlaceholder: 'Enter referral code (optional)',
+    sendCodeCountdown: 'Resend in {countdown}s',
     welcomeBack: 'Welcome Back',
     signInToAccount: 'Sign in to your account to continue',
     signIn: 'Sign In',

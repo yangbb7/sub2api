@@ -1,5 +1,7 @@
 export default {
   common: {
+    showPassword: '显示密码',
+    hidePassword: '隐藏密码',
     loading: '加载中...',
     submitting: '提交中...',
     justNow: '刚刚',
@@ -12,6 +14,12 @@ export default {
     delete: '删除',
     edit: '编辑',
     create: '创建',
+    apply: '应用',
+    clear: '清除',
+    creating: '创建中...',
+    required: '必填',
+    sending: '发送中...',
+    tryAgain: '请重试',
     update: '更新',
     confirm: '确认',
     reset: '重置',
@@ -210,6 +218,9 @@ export default {
 
   // Auth
   auth: {
+    affiliateCodeLabel: '邀请码',
+    affiliateCodePlaceholder: '请输入邀请码（选填）',
+    sendCodeCountdown: '{countdown} 秒后重发',
     welcomeBack: '欢迎回来',
     signInToAccount: '登录您的账户以继续',
     signIn: '登录',

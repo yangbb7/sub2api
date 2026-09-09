@@ -1,5 +1,6 @@
 export default {
     ops: {
+      disk: 'Disk',
       title: 'Ops Monitoring',
       description: 'Operational monitoring and troubleshooting',
       // Dashboard
@@ -42,8 +43,11 @@ export default {
         samplingInitial: 'Sampling initial',
         samplingThereafter: 'Sampling thereafter',
         retentionDays: 'Retention days',
+        retentionDaysHint: 'Applied by the scheduled data-cleanup job.',
         caller: 'caller',
         sampling: 'sampling',
+        persistAccessLogs: 'Store access logs in database',
+        persistAccessLogsHint: 'Disabled by default because access logs add one indexed database row per request. Warning, error, and audit logs are always stored.',
         saveAndApply: 'Save and apply',
         resetDefaults: 'Reset defaults',
         latestWriteError: 'Latest write error:',
@@ -177,6 +181,12 @@ export default {
         enter: 'Enter Fullscreen'
       },
       diagnosis: {
+        diskCritical: 'Disk usage is critical ({usage}%)',
+        diskCriticalImpact: 'Insufficient disk space can interrupt database writes and service operation.',
+        diskCriticalAction: 'Free disk space or expand storage immediately.',
+        diskHigh: 'Disk usage is high ({usage}%)',
+        diskHighImpact: 'Available disk space is running low.',
+        diskHighAction: 'Review storage usage and plan cleanup or expansion.',
         title: 'Smart Diagnosis',
         footer: 'Automated diagnostic suggestions based on current metrics',
         idle: 'System is currently idle',
@@ -590,6 +600,16 @@ export default {
         alertTitle: 'Alert Evaluator',
         groupAvailabilityTitle: 'Group Availability Monitor',
         evalIntervalSeconds: 'Evaluation Interval (seconds)',
+        metricThresholds: 'Metric Thresholds',
+        metricThresholdsHint: 'Configure alert thresholds for metrics, values exceeding thresholds will be displayed in red',
+        slaMinPercent: 'SLA Minimum Percentage',
+        slaMinPercentHint: 'SLA below this value will be displayed in red (default: 99.5%)',
+        ttftP99MaxMs: 'TTFT P99 Maximum (ms)',
+        ttftP99MaxMsHint: 'TTFT P99 above this value will be displayed in red (default: 500ms)',
+        requestErrorRateMaxPercent: 'Request Error Rate Maximum (%)',
+        requestErrorRateMaxPercentHint: 'Request error rate above this value will be displayed in red (default: 5%)',
+        upstreamErrorRateMaxPercent: 'Upstream Error Rate Maximum (%)',
+        upstreamErrorRateMaxPercentHint: 'Upstream error rate above this value will be displayed in red (default: 5%)',
         silencing: {
           title: 'Alert Silencing (Maintenance Mode)',
           enabled: 'Enable silencing',
@@ -794,6 +814,7 @@ export default {
         accountError: 'Error'
       },
       tooltips: {
+        disk: 'Disk space used on the application host',
         totalRequests: 'Total number of requests (including both successful and failed requests) in the selected time window.',
         throughputTrend: 'Requests/QPS + Tokens/TPS in the selected window.',
         switchRateTrend: 'Trend of account switches / total requests over the last 5 hours (avg switches).',

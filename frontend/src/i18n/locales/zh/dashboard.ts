@@ -198,6 +198,12 @@ export default {
         codexConfigTomlHint: '下载下方模型目录，将两个文件保存到 Codex 配置目录后重启 Codex。',
         codexNote: '启动 Codex 前先导出 SUB2API_API_KEY。下载的目录只包含模型元数据，不包含 API Key。'
       },
+      minimax: {
+        description: '通过当前 MiniMax 分组配置 Claude Code、Codex 或 OpenCode。',
+        codexDescription: '使用 API Key 配置 Codex，并通过当前 MiniMax 分组发送请求。',
+        codexConfigTomlHint: '下载下方模型目录，将两个文件保存到 Codex 配置目录后重启 Codex。',
+        codexNote: '启动 Codex 前先导出 SUB2API_API_KEY。下载的目录只包含模型元数据，不包含 API Key。'
+      },
       composite: {
         description: '通过当前 Composite 路由分组配置受支持的客户端。',
         codexDescription: '使用 API Key 和当前 Composite 分组的完整模型目录配置 Codex。',
@@ -295,6 +301,13 @@ export default {
 
   // Usage
   usage: {
+    callDetails: '调用详情',
+    failedToLoadCallDetails: '加载调用详情失败',
+    requestId: '请求 ID',
+    requestSnapshot: '请求内容',
+    responseSnapshot: '响应内容',
+    snapshotUnavailable: '暂无快照',
+    truncated: '已截断',
     title: '使用记录',
     description: '查看和分析您的 API 使用历史',
     costDetails: '费用明细',
@@ -473,7 +486,8 @@ export default {
       antigravity: 'Antigravity',
       kimi: 'Kimi',
       zhipu: '智谱 GLM',
-      deepseek: 'DeepSeek'
+      deepseek: 'DeepSeek',
+      minimax: 'MiniMax'
     },
     // 检查模式（监控条目的工作方式）
     checkMode: {
@@ -759,6 +773,16 @@ export default {
 
   // Profile
   profile: {
+    affiliate: {
+      title: '邀请返利',
+      description: '邀请用户并查看返利记录。',
+      availableQuota: '可用额度',
+      copyLink: '复制邀请链接',
+      invitedUsers: '已邀请用户',
+      linkCopied: '邀请链接已复制',
+      rebateRate: '返利比例',
+      viewRecords: '查看记录',
+    },
     title: '个人设置',
     description: '管理您的账户信息和设置',
     accountBalance: '账户余额',
@@ -983,6 +1007,7 @@ export default {
   errors: {
     somethingWentWrong: '出错了',
     pageNotFound: '页面未找到',
+    pageNotFoundDescription: '您访问的页面不存在或已移动。',
     unauthorized: '未授权',
     forbidden: '禁止访问',
     serverError: '服务器错误',

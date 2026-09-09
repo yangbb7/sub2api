@@ -1,5 +1,6 @@
 export default {
     ops: {
+      disk: '磁盘',
       title: '运维监控',
       description: '运维监控与排障',
       // Dashboard
@@ -42,8 +43,11 @@ export default {
         samplingInitial: '采样初始条数',
         samplingThereafter: '后续采样间隔',
         retentionDays: '保留天数',
+        retentionDaysHint: '由定时数据清理任务执行。',
         caller: '调用方',
         sampling: '采样',
+        persistAccessLogs: '将访问日志写入数据库',
+        persistAccessLogsHint: '默认关闭，因为访问日志会为每个请求新增一条带索引的数据库记录。警告、错误和审计日志始终会保留。',
         saveAndApply: '保存并应用',
         resetDefaults: '重置默认值',
         latestWriteError: '最近写入错误：',
@@ -177,6 +181,12 @@ export default {
         enter: '进入全屏'
       },
       diagnosis: {
+        diskCritical: '磁盘使用率严重偏高（{usage}%）',
+        diskCriticalImpact: '磁盘空间不足可能导致数据库写入失败或服务中断。',
+        diskCriticalAction: '请立即释放磁盘空间或扩容。',
+        diskHigh: '磁盘使用率偏高（{usage}%）',
+        diskHighImpact: '可用磁盘空间正在减少。',
+        diskHighAction: '请检查存储占用并安排清理或扩容。',
         title: '智能诊断',
         footer: '基于当前指标的自动诊断建议',
         idle: '系统当前处于待机状态',
@@ -590,6 +600,16 @@ export default {
         alertTitle: '告警评估器',
         groupAvailabilityTitle: '分组可用性监控',
         evalIntervalSeconds: '评估间隔（秒）',
+        metricThresholds: '指标阈值配置',
+        metricThresholdsHint: '配置各项指标的告警阈值，超出阈值时将以红色显示',
+        slaMinPercent: 'SLA 最低百分比',
+        slaMinPercentHint: 'SLA 低于此值时显示为红色（默认：99.5%）',
+        ttftP99MaxMs: 'TTFT P99 最大值（毫秒）',
+        ttftP99MaxMsHint: 'TTFT P99 高于此值时显示为红色（默认：500ms）',
+        requestErrorRateMaxPercent: '请求错误率最大值（%）',
+        requestErrorRateMaxPercentHint: '请求错误率高于此值时显示为红色（默认：5%）',
+        upstreamErrorRateMaxPercent: '上游错误率最大值（%）',
+        upstreamErrorRateMaxPercentHint: '上游错误率高于此值时显示为红色（默认：5%）',
         silencing: {
           title: '告警静默（维护模式）',
           enabled: '启用静默',
@@ -795,6 +815,7 @@ export default {
         accountError: '异常'
       },
       tooltips: {
+        disk: '应用主机的磁盘空间使用情况',
         totalRequests: '当前时间窗口内的总请求数和Token消耗量。',
         throughputTrend: '当前窗口内的请求/QPS 与 token/TPS 趋势。',
         switchRateTrend: '近5小时内账号切换次数 / 请求总数的趋势（平均切换次数）。',

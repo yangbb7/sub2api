@@ -1,10 +1,17 @@
 export default {
+  securityStatementModal: {
+    title: '安全声明',
+    summary: '继续使用本服务前，请阅读安全声明。',
+    openFullStatement: '查看完整声明',
+    acknowledge: '我已了解，继续',
+  },
   batchImageGuide: {
     title: '图片批量生成',
     description: '一次提交多条提示词，任务完成后可统一下载图片结果'
   },
   // Home Page
   home: {
+    securityStatement: '安全声明',
     viewOnGithub: '在 GitHub 上查看',
     viewDocs: '查看文档',
     docs: '文档',
