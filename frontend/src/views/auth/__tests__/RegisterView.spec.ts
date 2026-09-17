@@ -2,24 +2,12 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import RegisterView from '@/views/auth/RegisterView.vue'
 
-const {
-  pushMock,
-  registerMock,
-  showSuccessMock,
-  showErrorMock,
-  getPublicSettingsMock,
-  sendVerifyCodeMock,
-  routeState,
-} = vi.hoisted(() => ({
-  pushMock: vi.fn(),
-  registerMock: vi.fn(),
-  showSuccessMock: vi.fn(),
-  showErrorMock: vi.fn(),
+const { getPublicSettingsMock, registerMock, showErrorMock, pushMock, verifyActionMock } = vi.hoisted(() => ({
   getPublicSettingsMock: vi.fn(),
-  sendVerifyCodeMock: vi.fn(),
-  routeState: {
-    query: {} as Record<string, unknown>,
-  },
+  registerMock: vi.fn(),
+  showErrorMock: vi.fn(),
+  pushMock: vi.fn(),
+  verifyActionMock: vi.fn()
 }))
 
 const publicSettings = {
@@ -28,255 +16,186 @@ const publicSettings = {
   promo_code_enabled: false,
   invitation_code_enabled: false,
   affiliate_enabled: true,
-  turnstile_enabled: false,
-  turnstile_site_key: '',
-  site_name: 'AI Gateway',
+  turnstile_enabled: true,
+  turnstile_site_key: 'site-key',
+  site_name: 'Sub2API',
   registration_email_suffix_whitelist: [],
   linuxdo_oauth_enabled: false,
   wechat_oauth_enabled: false,
-  wechat_oauth_open_enabled: false,
-  wechat_oauth_mp_enabled: false,
   oidc_oauth_enabled: false,
-  oidc_oauth_provider_name: 'OIDC',
   github_oauth_enabled: false,
-  google_oauth_enabled: false,
+  google_oauth_enabled: false
 }
 
-vi.mock('vue-router', async () => {
-  const actual = await vi.importActual<typeof import('vue-router')>('vue-router')
-  return {
-    ...actual,
-    useRouter: () => ({ push: pushMock }),
-    useRoute: () => routeState,
-  }
-})
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: pushMock }),
+  useRoute: () => ({ query: {} })
+}))
 
-vi.mock('vue-i18n', async () => {
-  const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
-  return {
-    ...actual,
-    useI18n: () => ({
-      t: (key: string, _params?: Record<string, string | number>) =>
-        key === 'auth.emailDomainRegistrationLimit'
-          ? '该邮箱域名无法注册新账户。请使用主流邮箱注册；如需使用企业邮箱，请联系客服添加域名白名单。'
-          : key,
-      locale: { value: 'zh-CN' },
-    }),
-  }
-})
+vi.mock('vue-i18n', () => ({
+  createI18n: () => ({
+    global: {
+      t: (key: string) => key
+    }
+  }),
+  useI18n: () => ({
+    t: (key: string) =>
+      key === 'auth.emailDomainRegistrationLimit'
+        ? '该邮箱域名无法注册新账户。请使用主流邮箱注册；如需使用企业邮箱，请联系客服添加域名白名单。'
+        : key,
+    locale: { value: 'en' }
+  })
+}))
 
 vi.mock('@/stores', () => ({
-  useAuthStore: () => ({
-    register: (...args: any[]) => registerMock(...args),
-  }),
+  useAuthStore: () => ({ register: (...args: unknown[]) => registerMock(...args) }),
   useAppStore: () => ({
-    showSuccess: (...args: any[]) => showSuccessMock(...args),
-    showError: (...args: any[]) => showErrorMock(...args),
-    showWarning: vi.fn(),
-    siteName: 'AI Gateway',
-    siteLogo: '',
-    cachedPublicSettings: { site_subtitle: 'AI API Gateway Platform' },
-    fetchPublicSettings: vi.fn().mockResolvedValue(null),
-  }),
+    showError: (...args: unknown[]) => showErrorMock(...args),
+    showSuccess: vi.fn(),
+    showWarning: vi.fn()
+  })
 }))
 
 vi.mock('@/api/auth', async () => {
   const actual = await vi.importActual<typeof import('@/api/auth')>('@/api/auth')
   return {
     ...actual,
-    getPublicSettings: (...args: any[]) => getPublicSettingsMock(...args),
-    sendVerifyCode: (...args: any[]) => sendVerifyCodeMock(...args),
-    validatePromoCode: vi.fn(),
-    validateInvitationCode: vi.fn(),
+    getPublicSettings: (...args: unknown[]) => getPublicSettingsMock(...args)
   }
 })
-
-const mountRegister = () =>
-  mount(RegisterView, {
+function mountRegister() {
+  return mount(RegisterView, {
     global: {
       stubs: {
         AuthLayout: { template: '<div><slot /><slot name="footer" /></div>' },
+        Icon: true,
+        TurnstileWidget: {
+          template: '<div data-testid="turnstile-widget" />',
+          methods: { verifyAction: verifyActionMock, reset: vi.fn() }
+        },
+        LoginAgreementPrompt: true,
         EmailOAuthButtons: true,
         LinuxDoOAuthSection: true,
         WechatOAuthSection: true,
         OidcOAuthSection: true,
-        LoginAgreementPrompt: true,
-        TurnstileWidget: {
-          name: 'TurnstileWidget',
-          template: '<div />',
-          methods: {
-            reset() {},
-          },
-        },
-        Icon: true,
         RouterLink: true,
-        transition: false,
-      },
-    },
+        transition: false
+      }
+    }
   })
+}
 
-describe('RegisterView affiliate referrals', () => {
+describe('RegisterView', () => {
   beforeEach(() => {
-    pushMock.mockReset()
-    registerMock.mockReset()
-    showSuccessMock.mockReset()
-    showErrorMock.mockReset()
     getPublicSettingsMock.mockReset()
-    sendVerifyCodeMock.mockReset()
-    routeState.query = {}
-    localStorage.clear()
-    sessionStorage.clear()
-    registerMock.mockResolvedValue({})
-    sendVerifyCodeMock.mockResolvedValue({ message: 'sent', countdown: 60 })
+    registerMock.mockReset()
+    showErrorMock.mockReset()
+    pushMock.mockReset()
+    verifyActionMock.mockReset()
+    sessionStorage.removeItem('register_data')
+    verifyActionMock.mockResolvedValue({ token: 'ticket', randstr: 'randstr' })
     getPublicSettingsMock.mockResolvedValue(publicSettings)
+    registerMock.mockResolvedValue({})
   })
 
-  it('prefills the affiliate code field from the link and sends it with registration', async () => {
-    routeState.query = { aff: ' AFF123 ' }
+  it.each([
+    ['', 'auth.confirmPasswordRequired'],
+    ['different-password', 'auth.passwordsDoNotMatch']
+  ])('blocks invalid confirmation %j before captcha and allows correction', async (confirmation, error) => {
+    getPublicSettingsMock.mockResolvedValueOnce({
+      ...publicSettings,
+      turnstile_enabled: false,
+      tencent_captcha_enabled: true,
+      tencent_captcha_app_id: 'app-id'
+    })
     const wrapper = mountRegister()
     await flushPromises()
-
-    expect((wrapper.get('#aff_code').element as HTMLInputElement).value).toBe('AFF123')
-    expect(wrapper.text()).not.toContain('auth.affiliateReferralApplied')
-
-    await wrapper.get('#email').setValue('new@example.com')
+    await wrapper.get('#email').setValue('user@example.com')
     await wrapper.get('#password').setValue('secret-123')
-    await wrapper.get('form').trigger('submit')
+    await wrapper.get('#confirmPassword').setValue(confirmation)
+    await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
 
+    expect(showErrorMock).toHaveBeenCalledWith(error)
+    expect(wrapper.get('#confirmPassword').classes()).toContain('input-error')
+    expect(registerMock).not.toHaveBeenCalled()
+    expect(verifyActionMock).not.toHaveBeenCalled()
+    expect(pushMock).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem('register_data')).toBeNull()
+
+    await wrapper.get('#confirmPassword').setValue('secret-123')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(wrapper.get('#confirmPassword').classes()).not.toContain('input-error')
+    expect(verifyActionMock).toHaveBeenCalledOnce()
     expect(registerMock).toHaveBeenCalledWith({
-      email: 'new@example.com',
+      email: 'user@example.com',
       password: 'secret-123',
       turnstile_token: undefined,
+      tencent_captcha_ticket: 'ticket',
+      tencent_captcha_randstr: 'randstr',
       promo_code: undefined,
-      invitation_code: undefined,
-      aff_code: 'AFF123',
+      invitation_code: undefined
     })
-  })
-
-  it('allows registration without an affiliate code', async () => {
-    const wrapper = mountRegister()
-    await flushPromises()
-
-    await wrapper.get('#email').setValue('plain@example.com')
-    await wrapper.get('#password').setValue('secret-plain')
-    await wrapper.get('form').trigger('submit')
-    await flushPromises()
-
-    expect(registerMock).toHaveBeenCalledWith({
-      email: 'plain@example.com',
-      password: 'secret-plain',
-      turnstile_token: undefined,
-      promo_code: undefined,
-      invitation_code: undefined,
-    })
-  })
-
-  it('does not submit a stored affiliate code after the user clears the field', async () => {
-    routeState.query = { aff: 'AFF123' }
-    const wrapper = mountRegister()
-    await flushPromises()
-
-    await wrapper.get('#aff_code').setValue('')
-    await wrapper.get('#email').setValue('clear@example.com')
-    await wrapper.get('#password').setValue('secret-clear')
-    await wrapper.get('form').trigger('submit')
-    await flushPromises()
-
-    expect(registerMock).toHaveBeenCalledWith({
-      email: 'clear@example.com',
-      password: 'secret-clear',
-      turnstile_token: undefined,
-      promo_code: undefined,
-      invitation_code: undefined,
-    })
-  })
-
-  it('sends and submits the verification code on the registration page', async () => {
-    getPublicSettingsMock.mockResolvedValue({
-      registration_enabled: true,
-      email_verify_enabled: true,
-      promo_code_enabled: false,
-      invitation_code_enabled: false,
-      affiliate_enabled: true,
-      turnstile_enabled: false,
-      turnstile_site_key: '',
-      site_name: 'AI Gateway',
-      registration_email_suffix_whitelist: [],
-    })
-    routeState.query = { aff_code: 'REF456' }
-    const wrapper = mountRegister()
-    await flushPromises()
-
-    await wrapper.get('#email').setValue('verify@example.com')
-    await wrapper.get('[data-testid="send-verify-code"]').trigger('click')
-    await flushPromises()
-
-    expect(sendVerifyCodeMock).toHaveBeenCalledWith({
-      email: 'verify@example.com',
-      turnstile_token: undefined,
-    })
-    expect((wrapper.get('[data-testid="send-verify-code"]').element as HTMLButtonElement).disabled).toBe(true)
-
-    await wrapper.get('#password').setValue('secret-456')
-    await wrapper.get('#verify_code').setValue('246810')
-    await wrapper.get('form').trigger('submit')
-    await flushPromises()
-
     expect(pushMock).toHaveBeenCalledWith('/dashboard')
-    expect(sessionStorage.length).toBe(0)
-    expect(registerMock).toHaveBeenCalledWith({
-      email: 'verify@example.com',
-      password: 'secret-456',
-      turnstile_token: undefined,
-      promo_code: undefined,
-      invitation_code: undefined,
-      verify_code: '246810',
-      aff_code: 'REF456',
-    })
   })
 
-  it('does not require a second Turnstile token after sending the registration code', async () => {
-    getPublicSettingsMock.mockResolvedValue({
-      registration_enabled: true,
-      email_verify_enabled: true,
-      promo_code_enabled: false,
-      invitation_code_enabled: false,
-      affiliate_enabled: true,
-      turnstile_enabled: true,
-      turnstile_site_key: 'site-key',
-      site_name: 'AI Gateway',
-      registration_email_suffix_whitelist: [],
+  it('requires matching confirmation before storing only the registration fields for email verification', async () => {
+    getPublicSettingsMock.mockResolvedValueOnce({
+      ...publicSettings,
+      turnstile_enabled: false,
+      email_verify_enabled: true
     })
     const wrapper = mountRegister()
     await flushPromises()
-
-    await wrapper.get('#email').setValue('turnstile@example.com')
-    wrapper.findComponent({ name: 'TurnstileWidget' }).vm.$emit('verify', 'turnstile-token')
+    await wrapper.get('#email').setValue('user@example.com')
+    await wrapper.get('#password').setValue('secret-123')
+    await wrapper.get('#confirmPassword').setValue('different-password')
+    await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
 
-    await wrapper.get('[data-testid="send-verify-code"]').trigger('click')
+    expect(sessionStorage.getItem('register_data')).toBeNull()
+    expect(pushMock).not.toHaveBeenCalled()
+
+    await wrapper.get('#confirmPassword').setValue('secret-123')
+    await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
 
-    expect(sendVerifyCodeMock).toHaveBeenCalledWith({
-      email: 'turnstile@example.com',
-      turnstile_token: 'turnstile-token',
+    expect(JSON.parse(sessionStorage.getItem('register_data')!)).toEqual({
+      email: 'user@example.com',
+      password: 'secret-123'
     })
-    expect((wrapper.get('button[type="submit"]').element as HTMLButtonElement).disabled).toBe(false)
+    expect(pushMock).toHaveBeenCalledWith('/email-verify')
+    expect(registerMock).not.toHaveBeenCalled()
+  })
 
-    await wrapper.get('#password').setValue('secret-turnstile')
-    await wrapper.get('#verify_code').setValue('135790')
-    await wrapper.get('form').trigger('submit')
+  it('keeps the optional affiliate invitation field before Turnstile', async () => {
+    const wrapper = mountRegister()
     await flushPromises()
 
-    expect(registerMock).toHaveBeenCalledWith({
-      email: 'turnstile@example.com',
-      password: 'secret-turnstile',
-      turnstile_token: undefined,
-      promo_code: undefined,
-      invitation_code: undefined,
-      verify_code: '135790',
+    const invitationField = wrapper.get('[data-testid="affiliate-invitation-field"]')
+    const turnstile = wrapper.get('[data-testid="registration-turnstile"]')
+
+    expect(invitationField.get('input').attributes('id')).toBe('affiliate_code')
+    expect(invitationField.text()).toContain('common.optional')
+    expect(
+      invitationField.element.compareDocumentPosition(turnstile.element) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+  })
+
+  it('uses the mandatory invitation field without duplicating the affiliate field', async () => {
+    getPublicSettingsMock.mockResolvedValueOnce({
+      ...publicSettings,
+      invitation_code_enabled: true
     })
+
+    const wrapper = mountRegister()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="affiliate-invitation-field"]').exists()).toBe(false)
+    expect(wrapper.get('#invitation_code').exists()).toBe(true)
   })
 
   it('submits a non-whitelist email domain so the backend can enforce its registration quota', async () => {
@@ -291,6 +210,7 @@ describe('RegisterView affiliate referrals', () => {
     await flushPromises()
     await wrapper.get('#email').setValue('first@custom.example')
     await wrapper.get('#password').setValue('secret-123')
+    await wrapper.get('#confirmPassword').setValue('secret-123')
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
 
@@ -316,6 +236,7 @@ describe('RegisterView affiliate referrals', () => {
     await flushPromises()
     await wrapper.get('#email').setValue('second@custom.example')
     await wrapper.get('#password').setValue('secret-123')
+    await wrapper.get('#confirmPassword').setValue('secret-123')
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
 
@@ -336,6 +257,7 @@ describe('RegisterView affiliate referrals', () => {
     await flushPromises()
     await wrapper.get('#email').setValue('first@custom.example')
     await wrapper.get('#password').setValue('secret-123')
+    await wrapper.get('#confirmPassword').setValue('secret-123')
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
 
@@ -356,6 +278,7 @@ describe('RegisterView affiliate referrals', () => {
     await flushPromises()
     await wrapper.get('#email').setValue('user@allowed.com')
     await wrapper.get('#password').setValue('secret-123')
+    await wrapper.get('#confirmPassword').setValue('secret-123')
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
 

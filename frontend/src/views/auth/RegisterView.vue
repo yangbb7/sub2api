@@ -33,67 +33,23 @@
           <label for="email" class="input-label">
             {{ t('auth.emailLabel') }}
           </label>
-          <div class="flex gap-2">
-            <div class="relative min-w-0 flex-1">
-              <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5">
-                <Icon name="mail" size="md" class="text-gray-400 dark:text-dark-500" />
-              </div>
-              <input
-                id="email"
-                v-model="formData.email"
-                type="email"
-                required
-                autofocus
-                autocomplete="email"
-                :disabled="registrationActionDisabled"
-                class="input pl-11"
-                :class="{ 'input-error': errors.email }"
-                :placeholder="t('auth.emailPlaceholder')"
-              />
+          <div class="relative">
+            <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5">
+              <Icon name="mail" size="md" class="text-gray-400 dark:text-dark-500" />
             </div>
-            <button
-              v-if="emailVerifyEnabled"
-              type="button"
-              data-testid="send-verify-code"
-              :disabled="sendVerifyCodeDisabled"
-              class="btn btn-secondary h-11 shrink-0 px-3 text-sm"
-              @click="handleSendVerifyCode"
-            >
-              <svg
-                v-if="isSendingVerifyCode"
-                class="-ml-1 mr-2 h-4 w-4 animate-spin"
-                fill="none"
-                viewBox="0 0 24 24"
-              >
-                <circle
-                  class="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  stroke-width="4"
-                ></circle>
-                <path
-                  class="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                ></path>
-              </svg>
-              <Icon v-else name="mail" size="sm" class="mr-1.5" />
-              {{
-                isSendingVerifyCode
-                  ? t('auth.sendingCode')
-                  : verifyCodeCountdown > 0
-                    ? t('auth.sendCodeCountdown', { countdown: verifyCodeCountdown })
-                    : t('auth.sendCode')
-              }}
-            </button>
+            <input
+              id="email"
+              v-model="formData.email"
+              type="email"
+              required
+              autofocus
+              autocomplete="email"
+              :disabled="registrationActionDisabled"
+              class="input pl-11"
+              :class="{ 'input-error': errors.email }"
+              :placeholder="t('auth.emailPlaceholder')"
+            />
           </div>
-          <transition name="fade">
-            <p v-if="verifyCodeSent" class="input-hint text-primary-600 dark:text-primary-400">
-              {{ t('auth.codeSentSuccess') }}
-            </p>
-          </transition>
         </div>
 
         <!-- Password Input -->
@@ -120,7 +76,6 @@
               type="button"
               :disabled="registrationActionDisabled"
               @click="showPassword = !showPassword"
-              :aria-label="showPassword ? t('common.hidePassword') : t('common.showPassword')"
               class="absolute inset-y-0 right-0 flex items-center pr-3.5 text-gray-400 transition-colors hover:text-gray-600 dark:hover:text-dark-300"
             >
               <Icon v-if="showPassword" name="eyeOff" size="md" />
@@ -132,32 +87,36 @@
           </p>
         </div>
 
-        <!-- Verification Code Input -->
-        <div v-if="emailVerifyEnabled">
-          <label for="verify_code" class="input-label">
-            {{ t('auth.verificationCode') }}
+        <!-- Confirm Password Input -->
+        <div>
+          <label for="confirmPassword" class="input-label">
+            {{ t('auth.confirmPassword') }}
           </label>
           <div class="relative">
             <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5">
-              <Icon name="shield" size="md" class="text-gray-400 dark:text-dark-500" />
+              <Icon name="lock" size="md" class="text-gray-400 dark:text-dark-500" />
             </div>
             <input
-              id="verify_code"
-              v-model="formData.verify_code"
-              type="text"
+              id="confirmPassword"
+              v-model="confirmPassword"
+              :type="showConfirmPassword ? 'text' : 'password'"
               required
-              autocomplete="one-time-code"
-              inputmode="numeric"
-              maxlength="6"
+              autocomplete="new-password"
               :disabled="registrationActionDisabled"
-              class="input pl-11 font-mono tracking-[0.35em]"
-              :class="{ 'input-error': errors.verify_code }"
-              placeholder="000000"
+              class="input pl-11 pr-11"
+              :class="{ 'input-error': errors.confirmPassword }"
+              :placeholder="t('auth.confirmPasswordPlaceholder')"
             />
+            <button
+              type="button"
+              :disabled="registrationActionDisabled"
+              @click="showConfirmPassword = !showConfirmPassword"
+              class="absolute inset-y-0 right-0 flex items-center pr-3.5 text-gray-400 transition-colors hover:text-gray-600 dark:hover:text-dark-300"
+            >
+              <Icon v-if="showConfirmPassword" name="eyeOff" size="md" />
+              <Icon v-else name="eye" size="md" />
+            </button>
           </div>
-          <p class="input-hint">
-            {{ t('auth.verificationCodeHint') }}
-          </p>
         </div>
 
         <!-- Invitation Code Input (Required when enabled) -->
@@ -207,24 +166,23 @@
           </transition>
         </div>
 
-        <!-- Affiliate invite code input (optional) -->
-        <div v-if="affiliateCodeFieldVisible" data-testid="affiliate-invitation-field">
-          <label for="aff_code" class="input-label">
-            {{ t('auth.affiliateCodeLabel') }}
+        <!-- Affiliate Invitation Code Input (Optional) -->
+        <div v-else-if="affiliateEnabled" data-testid="affiliate-invitation-field">
+          <label for="affiliate_code" class="input-label">
+            {{ t('auth.invitationCodeLabel') }}
             <span class="ml-1 text-xs font-normal text-gray-400 dark:text-dark-500">({{ t('common.optional') }})</span>
           </label>
           <div class="relative">
             <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5">
-              <Icon name="users" size="md" class="text-gray-400 dark:text-dark-500" />
+              <Icon name="key" size="md" class="text-gray-400 dark:text-dark-500" />
             </div>
             <input
-              id="aff_code"
+              id="affiliate_code"
               v-model="formData.aff_code"
               type="text"
               :disabled="registrationActionDisabled"
               class="input pl-11"
-              :placeholder="t('auth.affiliateCodePlaceholder')"
-              @input="handleAffiliateCodeInput"
+              :placeholder="t('auth.invitationCodePlaceholder')"
             />
           </div>
         </div>
@@ -311,7 +269,7 @@
         <!-- Submit Button -->
         <button
           type="submit"
-          :disabled="registrationActionDisabled || submitTurnstileRequired"
+          :disabled="registrationActionDisabled || (turnstileEnabled && !turnstileToken)"
           class="btn btn-primary w-full"
         >
           <svg
@@ -339,7 +297,7 @@
             isLoading
               ? t('auth.processing')
               : emailVerifyEnabled
-                ? t('auth.verifyAndCreate')
+                ? t('auth.continue')
                 : t('auth.createAccount')
           }}
         </button>
@@ -423,7 +381,6 @@ import {
   buildOAuthLoginStartURL,
   getPublicSettings,
   isWeChatWebOAuthEnabled,
-  sendVerifyCode,
   startOAuthLogin,
   type OAuthLoginStart,
   validatePromoCode,
@@ -438,12 +395,13 @@ import {
 } from '@/utils/registrationEmailPolicy'
 import {
   clearAffiliateReferralCode,
+  loadAffiliateReferralCode,
   resolveAffiliateReferralCode
 } from '@/utils/oauthAffiliate'
 import type { LoginAgreementDocument } from '@/types'
 
 const { t, locale } = useI18n()
-const LOGIN_AGREEMENT_STORAGE_KEY = 'gateway_login_agreement_consent'
+const LOGIN_AGREEMENT_STORAGE_KEY = 'sub2api_login_agreement_consent'
 
 // ==================== Router & Stores ====================
 
@@ -455,20 +413,18 @@ const appStore = useAppStore()
 // ==================== State ====================
 
 const isLoading = ref<boolean>(false)
-const isSendingVerifyCode = ref<boolean>(false)
 const settingsLoaded = ref<boolean>(false)
 const errorMessage = ref<string>('')
 const showPassword = ref<boolean>(false)
-const verifyCodeSent = ref<boolean>(false)
-const verifyCodeCountdown = ref<number>(0)
-let verifyCodeCountdownTimer: ReturnType<typeof setInterval> | null = null
+const showConfirmPassword = ref<boolean>(false)
+const confirmPassword = ref('')
 
 // Public settings
 const registrationEnabled = ref<boolean>(true)
 const emailVerifyEnabled = ref<boolean>(false)
 const promoCodeEnabled = ref<boolean>(true)
 const invitationCodeEnabled = ref<boolean>(false)
-const affiliateEnabled = ref<boolean>(true)
+const affiliateEnabled = ref<boolean>(false)
 const turnstileEnabled = ref<boolean>(false)
 const turnstileSiteKey = ref<string>('')
 const tencentCaptchaEnabled = ref<boolean>(false)
@@ -478,7 +434,7 @@ const aliyunCaptchaEnabled = ref<boolean>(false)
 const aliyunCaptchaSceneId = ref<string>('')
 const aliyunCaptchaPrefix = ref<string>('')
 const aliyunCaptchaRegion = ref<string>('cn')
-const siteName = ref<string>('AI Gateway')
+const siteName = ref<string>('Sub2API')
 const linuxdoOAuthEnabled = ref<boolean>(false)
 const wechatOAuthEnabled = ref<boolean>(false)
 const oidcOAuthEnabled = ref<boolean>(false)
@@ -539,7 +495,6 @@ let invitationValidateTimeout: ReturnType<typeof setTimeout> | null = null
 const formData = reactive({
   email: '',
   password: '',
-  verify_code: '',
   promo_code: '',
   invitation_code: '',
   aff_code: ''
@@ -548,7 +503,7 @@ const formData = reactive({
 const errors = reactive({
   email: '',
   password: '',
-  verify_code: '',
+  confirmPassword: '',
   turnstile: '',
   invitation_code: ''
 })
@@ -556,7 +511,7 @@ const errors = reactive({
 const validationToastMessage = computed(() =>
   errors.email ||
   errors.password ||
-  errors.verify_code ||
+  errors.confirmPassword ||
   (invitationValidation.invalid ? invitationValidation.message : '') ||
   errors.invitation_code ||
   (promoValidation.invalid ? promoValidation.message : '') ||
@@ -577,24 +532,8 @@ const agreementGateActive = computed(
   () => loginAgreementEnabled.value && !agreementAccepted.value
 )
 
-const affiliateCodeFieldVisible = computed(
-  () => affiliateEnabled.value || Boolean(formData.aff_code.trim())
-)
-
 const registrationActionDisabled = computed(
   () => isLoading.value || !settingsLoaded.value || agreementGateActive.value
-)
-
-const sendVerifyCodeDisabled = computed(
-  () =>
-    registrationActionDisabled.value ||
-    isSendingVerifyCode.value ||
-    verifyCodeCountdown.value > 0 ||
-    (turnstileEnabled.value && !turnstileToken.value)
-)
-
-const submitTurnstileRequired = computed(
-  () => turnstileEnabled.value && !emailVerifyEnabled.value && !turnstileToken.value
 )
 
 watch(validationToastMessage, (value, previousValue) => {
@@ -622,7 +561,7 @@ onMounted(async () => {
     emailVerifyEnabled.value = settings.email_verify_enabled
     promoCodeEnabled.value = settings.promo_code_enabled
     invitationCodeEnabled.value = settings.invitation_code_enabled
-    affiliateEnabled.value = settings.affiliate_enabled !== false
+    affiliateEnabled.value = settings.affiliate_enabled
     turnstileEnabled.value = settings.turnstile_enabled
     turnstileSiteKey.value = settings.turnstile_site_key || ''
     tencentCaptchaEnabled.value = settings.tencent_captcha_enabled === true
@@ -632,7 +571,7 @@ onMounted(async () => {
     aliyunCaptchaSceneId.value = settings.aliyun_captcha_scene_id || ''
     aliyunCaptchaPrefix.value = settings.aliyun_captcha_prefix || ''
     aliyunCaptchaRegion.value = settings.aliyun_captcha_region || 'cn'
-    siteName.value = settings.site_name || 'AI Gateway'
+    siteName.value = settings.site_name || 'Sub2API'
     linuxdoOAuthEnabled.value = settings.linuxdo_oauth_enabled
     wechatOAuthEnabled.value = isWeChatWebOAuthEnabled(settings)
     oidcOAuthEnabled.value = settings.oidc_oauth_enabled
@@ -677,10 +616,6 @@ onUnmounted(() => {
   }
   if (invitationValidateTimeout) {
     clearTimeout(invitationValidateTimeout)
-  }
-  if (verifyCodeCountdownTimer) {
-    clearInterval(verifyCodeCountdownTimer)
-    verifyCodeCountdownTimer = null
   }
 })
 
@@ -747,12 +682,6 @@ function rejectLoginAgreement(): void {
 }
 
 // ==================== Promo Code Validation ====================
-
-function handleAffiliateCodeInput(): void {
-  if (!formData.aff_code.trim()) {
-    clearAffiliateReferralCode()
-  }
-}
 
 function handlePromoCodeInput(): void {
   const code = formData.promo_code.trim()
@@ -987,85 +916,11 @@ function buildEmailSuffixNotAllowedMessage(): string {
   })
 }
 
-function validateEmailForVerification(): boolean {
-  errors.email = ''
-  errors.turnstile = ''
-
-  if (!formData.email.trim()) {
-    errors.email = t('auth.emailRequired')
-    return false
-  }
-  if (!validateEmail(formData.email)) {
-    errors.email = t('auth.invalidEmail')
-    return false
-  }
-  if (!isRegistrationEmailSuffixAllowed(formData.email, registrationEmailSuffixWhitelist.value)) {
-    errors.email = buildEmailSuffixNotAllowedMessage()
-    return false
-  }
-  if (turnstileEnabled.value && !turnstileToken.value) {
-    errors.turnstile = t('auth.completeVerification')
-    return false
-  }
-  return true
-}
-
-function startVerifyCodeCountdown(seconds: number): void {
-  verifyCodeCountdown.value = Math.max(1, seconds || 60)
-
-  if (verifyCodeCountdownTimer) {
-    clearInterval(verifyCodeCountdownTimer)
-  }
-
-  verifyCodeCountdownTimer = setInterval(() => {
-    if (verifyCodeCountdown.value > 0) {
-      verifyCodeCountdown.value--
-      return
-    }
-    if (verifyCodeCountdownTimer) {
-      clearInterval(verifyCodeCountdownTimer)
-      verifyCodeCountdownTimer = null
-    }
-  }, 1000)
-}
-
-async function handleSendVerifyCode(): Promise<void> {
-  if (!validateEmailForVerification()) {
-    return
-  }
-
-  isSendingVerifyCode.value = true
-  errorMessage.value = ''
-
-  try {
-    const response = await sendVerifyCode({
-      email: formData.email.trim(),
-      turnstile_token: turnstileEnabled.value ? turnstileToken.value : undefined
-    })
-
-    verifyCodeSent.value = true
-    startVerifyCodeCountdown(response.countdown)
-    appStore.showSuccess(t('auth.codeSentSuccess'))
-
-    if (turnstileRef.value) {
-      turnstileRef.value.reset()
-      turnstileToken.value = ''
-    }
-  } catch (error: unknown) {
-    errorMessage.value = buildAuthErrorMessage(error, {
-      fallback: t('auth.sendCodeFailed')
-    })
-    appStore.showError(errorMessage.value)
-  } finally {
-    isSendingVerifyCode.value = false
-  }
-}
-
 function validateForm(): boolean {
   // Reset errors
   errors.email = ''
   errors.password = ''
-  errors.verify_code = ''
+  errors.confirmPassword = ''
   errors.turnstile = ''
   errors.invitation_code = ''
 
@@ -1104,15 +959,13 @@ function validateForm(): boolean {
     isValid = false
   }
 
-  if (emailVerifyEnabled.value) {
-    const code = formData.verify_code.trim()
-    if (!code) {
-      errors.verify_code = t('auth.codeRequired')
-      isValid = false
-    } else if (!/^\d{6}$/.test(code)) {
-      errors.verify_code = t('auth.invalidCode')
-      isValid = false
-    }
+  // Confirm password validation
+  if (!confirmPassword.value) {
+    errors.confirmPassword = t('auth.confirmPasswordRequired')
+    isValid = false
+  } else if (formData.password !== confirmPassword.value) {
+    errors.confirmPassword = t('auth.passwordsDoNotMatch')
+    isValid = false
   }
 
   // Invitation code validation (required when enabled)
@@ -1123,9 +976,8 @@ function validateForm(): boolean {
     }
   }
 
-  // Turnstile is consumed by sending the verification email. Registration with
-  // a verified code must not require the same one-time token again.
-  if (turnstileEnabled.value && !emailVerifyEnabled.value && !turnstileToken.value) {
+  // Turnstile validation
+  if (turnstileEnabled.value && !turnstileToken.value) {
     errors.turnstile = t('auth.completeVerification')
     isValid = false
   }
@@ -1189,13 +1041,42 @@ async function handleRegister(): Promise<void> {
   isLoading.value = true
 
   try {
-    const affCode = formData.aff_code.trim()
+    const affCode = formData.aff_code.trim() || loadAffiliateReferralCode()
+    if (affCode) {
+      formData.aff_code = affCode
+    }
 
+    // If email verification is enabled, redirect to verification page
+    if (emailVerifyEnabled.value) {
+      // Store registration data in sessionStorage
+      sessionStorage.setItem(
+        'register_data',
+        JSON.stringify({
+          email: formData.email,
+          password: formData.password,
+          turnstile_token:
+            turnstileEnabled.value || aliyunCaptchaEnabled.value ? turnstileToken.value : undefined,
+          tencent_captcha_ticket: tencentCaptchaEnabled.value ? turnstileToken.value : undefined,
+          tencent_captcha_randstr: tencentCaptchaEnabled.value ? tencentCaptchaRandstr.value : undefined,
+          promo_code: formData.promo_code || undefined,
+          invitation_code: formData.invitation_code || undefined,
+          ...(affCode ? { aff_code: affCode } : {})
+        })
+      )
+
+      // Navigate to email verification page
+      await router.push('/email-verify')
+      return
+    }
+
+    // Otherwise, directly register
     await authStore.register({
       email: formData.email,
       password: formData.password,
-      turnstile_token: submitTurnstileRequired.value ? turnstileToken.value : undefined,
-      verify_code: emailVerifyEnabled.value ? formData.verify_code.trim() : undefined,
+      turnstile_token:
+        turnstileEnabled.value || aliyunCaptchaEnabled.value ? turnstileToken.value : undefined,
+      tencent_captcha_ticket: tencentCaptchaEnabled.value ? turnstileToken.value : undefined,
+      tencent_captcha_randstr: tencentCaptchaEnabled.value ? tencentCaptchaRandstr.value : undefined,
       promo_code: formData.promo_code || undefined,
       invitation_code: formData.invitation_code || undefined,
       ...(affCode ? { aff_code: affCode } : {})
