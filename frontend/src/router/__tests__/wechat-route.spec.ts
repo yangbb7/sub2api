@@ -62,3 +62,13 @@ describe('router WeChat OAuth route', () => {
     expect(route?.meta.title).toBe('WeChat Payment Callback')
   })
 })
+
+// Exercise the real route table so legacy registration links cannot silently become 404s.
+describe('legacy registration verification route', () => {
+  it('redirects the removed verification page to the inline registration form', async () => {
+    const { default: router } = await import('@/router')
+    const route = router.resolve('/email-verify')
+    expect(route.name).not.toBe('NotFound')
+    expect(route.matched[0].redirect).toBe('/register')
+  })
+})

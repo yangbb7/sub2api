@@ -1,8 +1,11 @@
-import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import RegisterView from '@/views/auth/RegisterView.vue'
 
-const { getPublicSettingsMock, registerMock, showErrorMock, pushMock, verifyActionMock } = vi.hoisted(() => ({
+enableAutoUnmount(afterEach)
+
+const { sendVerifyCodeMock, getPublicSettingsMock, registerMock, showErrorMock, pushMock, verifyActionMock } = vi.hoisted(() => ({
+  sendVerifyCodeMock: vi.fn(),
   getPublicSettingsMock: vi.fn(),
   registerMock: vi.fn(),
   showErrorMock: vi.fn(),
@@ -60,7 +63,8 @@ vi.mock('@/api/auth', async () => {
   const actual = await vi.importActual<typeof import('@/api/auth')>('@/api/auth')
   return {
     ...actual,
-    getPublicSettings: (...args: unknown[]) => getPublicSettingsMock(...args)
+    getPublicSettings: (...args: unknown[]) => getPublicSettingsMock(...args),
+    sendVerifyCode: (...args: unknown[]) => sendVerifyCodeMock(...args)
   }
 })
 function mountRegister() {
@@ -70,6 +74,7 @@ function mountRegister() {
         AuthLayout: { template: '<div><slot /><slot name="footer" /></div>' },
         Icon: true,
         TurnstileWidget: {
+          name: 'TurnstileWidget',
           template: '<div data-testid="turnstile-widget" />',
           methods: { verifyAction: verifyActionMock, reset: vi.fn() }
         },
@@ -87,6 +92,8 @@ function mountRegister() {
 
 describe('RegisterView', () => {
   beforeEach(() => {
+    sendVerifyCodeMock.mockReset()
+    sendVerifyCodeMock.mockResolvedValue({ countdown: 60 })
     getPublicSettingsMock.mockReset()
     registerMock.mockReset()
     showErrorMock.mockReset()
@@ -141,33 +148,115 @@ describe('RegisterView', () => {
     expect(pushMock).toHaveBeenCalledWith('/dashboard')
   })
 
-  it('requires matching confirmation before storing only the registration fields for email verification', async () => {
+  it('sends and submits the email code inline while enforcing password confirmation', async () => {
     getPublicSettingsMock.mockResolvedValueOnce({
-      ...publicSettings,
-      turnstile_enabled: false,
-      email_verify_enabled: true
+      ...publicSettings, turnstile_enabled: false, email_verify_enabled: true
+    })
+    const wrapper = mountRegister()
+    await flushPromises()
+    await wrapper.get('#email').setValue('user@example.com')
+    await wrapper.get('[data-testid="send-verify-code"]').trigger('click')
+    await flushPromises()
+    expect(sendVerifyCodeMock).toHaveBeenCalledWith(expect.objectContaining({ email: 'user@example.com' }))
+    expect(wrapper.get('[data-testid="send-verify-code"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('#password').setValue('secret-123')
+    await wrapper.get('#verify_code').setValue('123456')
+    await wrapper.get('#affiliate_code').setValue('REF123')
+    await wrapper.get('#confirmPassword').setValue('different-password')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+    expect(registerMock).not.toHaveBeenCalled()
+    await wrapper.get('#confirmPassword').setValue('secret-123')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+    expect(registerMock).toHaveBeenCalledWith(expect.objectContaining({
+      email: 'user@example.com', password: 'secret-123', verify_code: '123456', aff_code: 'REF123'
+    }))
+    expect(sessionStorage.getItem('register_data')).toBeNull()
+    expect(pushMock).toHaveBeenCalledWith('/dashboard')
+    expect(pushMock).not.toHaveBeenCalledWith('/email-verify')
+  })
+
+  it.each(['', '12345', 'abcdef'])('rejects invalid email code %j before registration', async (code) => {
+    getPublicSettingsMock.mockResolvedValueOnce({
+      ...publicSettings, turnstile_enabled: false, email_verify_enabled: true
     })
     const wrapper = mountRegister()
     await flushPromises()
     await wrapper.get('#email').setValue('user@example.com')
     await wrapper.get('#password').setValue('secret-123')
-    await wrapper.get('#confirmPassword').setValue('different-password')
-    await wrapper.get('form').trigger('submit.prevent')
-    await flushPromises()
-
-    expect(sessionStorage.getItem('register_data')).toBeNull()
-    expect(pushMock).not.toHaveBeenCalled()
-
     await wrapper.get('#confirmPassword').setValue('secret-123')
+    await wrapper.get('#verify_code').setValue(code)
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
-
-    expect(JSON.parse(sessionStorage.getItem('register_data')!)).toEqual({
-      email: 'user@example.com',
-      password: 'secret-123'
-    })
-    expect(pushMock).toHaveBeenCalledWith('/email-verify')
     expect(registerMock).not.toHaveBeenCalled()
+    expect(wrapper.get('#verify_code').classes()).toContain('input-error')
+  })
+
+  it.each(['turnstile', 'tencent', 'aliyun'])('consumes %s captcha only on email send', async (provider) => {
+    getPublicSettingsMock.mockResolvedValueOnce({
+      ...publicSettings, email_verify_enabled: true,
+      turnstile_enabled: provider === 'turnstile',
+      tencent_captcha_enabled: provider === 'tencent', tencent_captcha_app_id: 'app-id',
+      aliyun_captcha_enabled: provider === 'aliyun', aliyun_captcha_scene_id: 'scene', aliyun_captcha_prefix: 'prefix'
+    })
+    const wrapper = mountRegister()
+    await flushPromises()
+    await wrapper.get('#email').setValue('user@example.com')
+    if (provider === 'turnstile') {
+      wrapper.findComponent({ name: 'TurnstileWidget' }).vm.$emit('verify', 'ticket')
+      await flushPromises()
+    }
+    await wrapper.get('[data-testid="send-verify-code"]').trigger('click')
+    await flushPromises()
+    expect(sendVerifyCodeMock).toHaveBeenCalledWith(expect.objectContaining(provider === 'tencent'
+      ? { tencent_captcha_ticket: 'ticket', tencent_captcha_randstr: 'randstr' }
+      : { turnstile_token: 'ticket' }))
+    expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('#password').setValue('secret-123')
+    await wrapper.get('#confirmPassword').setValue('secret-123')
+    await wrapper.get('#verify_code').setValue('123456')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+    expect(verifyActionMock).toHaveBeenCalledTimes(provider === 'turnstile' ? 0 : 1)
+    expect(registerMock).toHaveBeenCalledWith(expect.objectContaining({
+      verify_code: '123456', turnstile_token: undefined,
+      tencent_captcha_ticket: undefined, tencent_captcha_randstr: undefined
+    }))
+  })
+
+  it('allows retry after send failure and clears the code when the email changes', async () => {
+    getPublicSettingsMock.mockResolvedValueOnce({
+      ...publicSettings, turnstile_enabled: false, email_verify_enabled: true
+    })
+    sendVerifyCodeMock.mockRejectedValueOnce(new Error('SMTP unavailable'))
+    const wrapper = mountRegister()
+    await flushPromises()
+    await wrapper.get('#email').setValue('user@example.com')
+    await wrapper.get('[data-testid="send-verify-code"]').trigger('click')
+    await flushPromises()
+    expect(showErrorMock).toHaveBeenCalled()
+    expect(wrapper.get('[data-testid="send-verify-code"]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('[data-testid="send-verify-code"]').trigger('click')
+    await flushPromises()
+    expect(sendVerifyCodeMock).toHaveBeenCalledTimes(2)
+    await wrapper.get('#verify_code').setValue('123456')
+    await wrapper.get('#email').setValue('other@example.com')
+    expect((wrapper.get('#verify_code').element as HTMLInputElement).value).toBe('')
+  })
+
+  it.each([false, true])('respects domain quota mode %j when sending email', async (quotaEnabled) => {
+    getPublicSettingsMock.mockResolvedValueOnce({
+      ...publicSettings, turnstile_enabled: false, email_verify_enabled: true,
+      registration_email_suffix_whitelist: ['allowed.com'],
+      registration_email_domain_quota_enabled: quotaEnabled
+    })
+    const wrapper = mountRegister()
+    await flushPromises()
+    await wrapper.get('#email').setValue('user@custom.example')
+    await wrapper.get('[data-testid="send-verify-code"]').trigger('click')
+    await flushPromises()
+    expect(sendVerifyCodeMock).toHaveBeenCalledTimes(quotaEnabled ? 1 : 0)
   })
 
   it('keeps the optional affiliate invitation field before Turnstile', async () => {

@@ -60,6 +60,11 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    // Keep stale registration links usable after moving verification into the form.
+    path: '/email-verify',
+    redirect: '/register'
+  },
+  {
     path: '/auth/callback',
     name: 'OAuthCallback',
     alias: '/auth/oauth/callback',
