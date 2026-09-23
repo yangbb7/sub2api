@@ -416,9 +416,8 @@ describe('UseKeyModal', () => {
     const configToml = codeBlocks.find((content) => content.includes('model_provider = "OpenAI"'))
 
     expect(configToml).toBeDefined()
-    expect(configToml).toContain('model = "gpt-6-astra"')
-    expect(configToml).toContain('review_model = "gpt-6-astra"')
-    expect(configToml).toContain('model_reasoning_effort = "high"')
+    expect(configToml).toContain('model = "gpt-6-sol"')
+    expect(configToml).toContain('review_model = "gpt-6-sol"')
     expect(configToml).not.toContain('model_catalog_json')
     expect(configToml).not.toContain('service_tier')
     expect(configToml).not.toContain('network_access')
@@ -561,9 +560,8 @@ describe('UseKeyModal', () => {
     const configToml = codeBlocks.find((content) => content.includes('supports_websockets = true'))
 
     expect(configToml).toBeDefined()
-    expect(configToml).toContain('model = "gpt-6-astra"')
-    expect(configToml).toContain('review_model = "gpt-6-astra"')
-    expect(configToml).toContain('model_reasoning_effort = "high"')
+    expect(configToml).toContain('model = "gpt-6-sol"')
+    expect(configToml).toContain('review_model = "gpt-6-sol"')
     expect(configToml).not.toContain('model_catalog_json')
     expect(configToml).not.toContain('service_tier')
     expect(configToml).not.toContain('network_access')
@@ -788,6 +786,11 @@ describe('UseKeyModal', () => {
       options: { store: false },
       variants: { low: {}, medium: {}, high: {}, xhigh: {}, max: {} }
     })
+    for (const model of ['gpt-6-sol', 'gpt-6-luna']) {
+      expect(models[model].limit).toEqual({ context: 1050000, output: 128000 })
+      expect(models[model].variants).toHaveProperty('none')
+      expect(models[model].variants).toHaveProperty('max')
+    }
   })
 
   it('renders Claude Fable 5 OpenCode config with adaptive thinking', async () => {
@@ -1061,7 +1064,7 @@ describe('UseKeyModal', () => {
 
     await wrapper.setProps({ apiKey: 'sk-another-key' })
     expect(config()).not.toContain('model_catalog_json')
-    expect(config()).toContain('model = "gpt-6-astra"')
+    expect(config()).toContain('model = "gpt-6-sol"')
     expect(wrapper.find('[data-testid="codex-model-catalog-enable"]').exists()).toBe(false)
   })
 

@@ -117,6 +117,30 @@ func TestGetModelPricing_FallbackMatchesByFamily(t *testing.T) {
 	}
 }
 
+func TestGetModelPricing_GPT6SolLuna(t *testing.T) {
+	svc := newTestBillingService()
+	for _, tt := range []struct {
+		model, alias                         string
+		input, output, cacheRead, cacheWrite float64
+	}{
+		{"gpt-6-sol", "openai/gpt-6-sol-2026-09-22", 2e-6, 10e-6, 0.2e-6, 2.5e-6},
+		{"gpt-6-luna", "openai/gpt-6-luna-2026-09-22", 0.1e-6, 0.5e-6, 0.01e-6, 0.125e-6},
+	} {
+		for _, model := range []string{tt.model, tt.alias} {
+			pricing, err := svc.GetModelPricing(model)
+			require.NoError(t, err)
+			require.InDelta(t, tt.input, pricing.InputPricePerToken, 1e-14)
+			require.InDelta(t, tt.output, pricing.OutputPricePerToken, 1e-14)
+			require.InDelta(t, tt.cacheRead, pricing.CacheReadPricePerToken, 1e-14)
+			require.InDelta(t, tt.cacheWrite, pricing.CacheCreationPricePerToken, 1e-14)
+			require.InDelta(t, tt.input*2, pricing.InputPricePerTokenPriority, 1e-14)
+			require.Equal(t, int64(272_000), pricing.LongContextInputThreshold)
+			require.Equal(t, 2.0, pricing.LongContextInputMultiplier)
+			require.Equal(t, 1.5, pricing.LongContextOutputMultiplier)
+		}
+	}
+}
+
 func TestGetModelPricing_CaseInsensitive(t *testing.T) {
 	svc := newTestBillingService()
 

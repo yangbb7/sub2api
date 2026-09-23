@@ -434,6 +434,24 @@ func TestBuildCodexModelsManifestUsesGPT6AstraInstructions(t *testing.T) {
 	))
 }
 
+func TestBuildCodexModelsManifestGPT6SolLunaMetadata(t *testing.T) {
+	body, err := BuildCodexModelsManifest([]string{"gpt-6-sol", "gpt-6-luna"})
+	require.NoError(t, err)
+	models := decodeCodexManifestModels(t, body)
+	require.Len(t, models, 2)
+	for _, model := range models {
+		require.Equal(t, "medium", model["default_reasoning_level"])
+		require.Equal(t, float64(1_050_000), model["context_window"])
+		require.Equal(t, float64(1_050_000), model["max_context_window"])
+		levels, ok := model["supported_reasoning_levels"].([]any)
+		require.True(t, ok)
+		require.Len(t, levels, 6)
+		require.Equal(t, "none", levels[0].(map[string]any)["effort"])
+		messages := model["model_messages"].(map[string]any)
+		require.Contains(t, messages["instructions_template"], "You are Codex, an agent based on GPT-6.")
+	}
+}
+
 func effortsFromConfiguredCodexLevels(levels []configuredCodexReasoningLevel) []string {
 	efforts := make([]string, 0, len(levels))
 	for _, level := range levels {

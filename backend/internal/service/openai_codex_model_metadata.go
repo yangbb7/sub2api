@@ -63,7 +63,8 @@ func accountCodexToolCapabilities(account *Account, modelID string) map[string]j
 	parsed, err := url.Parse(baseURL)
 	official := err == nil && (strings.EqualFold(parsed.Hostname(), "api.openai.com") ||
 		(account.IsOpenAIOAuth() && strings.EqualFold(parsed.Hostname(), "chatgpt.com")))
-	if account.IsOpenAI() && isOpenAIGPT6AstraModel(modelID) && official {
+	modelFamily := normalizeKnownOpenAICodexModel(modelID)
+	if account.IsOpenAI() && official && (isOpenAIGPT6AstraModel(modelID) || modelFamily == "gpt-6-sol" || modelFamily == "gpt-6-luna") {
 		defaults := map[string]json.RawMessage{
 			"supports_search_tool":  json.RawMessage("true"),
 			"apply_patch_tool_type": json.RawMessage(`"freeform"`),
@@ -71,7 +72,7 @@ func accountCodexToolCapabilities(account *Account, modelID string) map[string]j
 			"tool_mode":             json.RawMessage("null"),
 			"use_responses_lite":    json.RawMessage("false"),
 		}
-		if account.IsOpenAIOAuth() {
+		if account.IsOpenAIOAuth() && isOpenAIGPT6AstraModel(modelID) {
 			defaults["tool_mode"] = json.RawMessage(`"code_mode_only"`)
 			defaults["use_responses_lite"] = json.RawMessage("true")
 		}

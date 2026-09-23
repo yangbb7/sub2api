@@ -12,6 +12,17 @@ func TestNormalizeKnownOpenAICodexModelGPT6Astra(t *testing.T) {
 	}
 }
 
+func TestNormalizeKnownOpenAICodexModelGPT6SolLuna(t *testing.T) {
+	for input, want := range map[string]string{
+		"gpt-6-sol":                   "gpt-6-sol",
+		"openai/gpt-6-sol-2026-09-22": "gpt-6-sol",
+		"gpt-6-luna":                  "gpt-6-luna",
+		"OPENAI/GPT-6_LUNA":           "gpt-6-luna",
+	} {
+		require.Equal(t, want, normalizeKnownOpenAICodexModel(input))
+	}
+}
+
 func TestNormalizeKnownOpenAICodexModel_BareGPT56RoutesToSol(t *testing.T) {
 	tests := map[string]string{
 		"gpt-5.6":            "gpt-5.6-sol",

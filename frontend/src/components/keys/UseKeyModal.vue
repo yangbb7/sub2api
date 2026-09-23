@@ -664,7 +664,7 @@ async function loadCodexModelManifest() {
     const result = await fetchCodexModelsManifest(props.baseUrl, props.apiKey, controller.signal)
     if (requestID !== codexModelManifestRequestID) return
     codexModelManifestContent.value = result.content
-    selectedCodexModel.value = selectCodexCatalogModel('gpt-6-astra')
+    selectedCodexModel.value = selectCodexCatalogModel('gpt-6-sol')
     codexModelManifestModelCount.value = result.modelCount
     codexModelManifestState.value = 'ready'
   } catch (error) {
@@ -979,7 +979,7 @@ function generateOpenAIFiles(baseUrl: string, apiKey: string): FileConfig[] {
   const isWindows = activeTab.value === 'windows'
   const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
 
-  const model = selectCodexCatalogModel('gpt-6-astra')
+  const model = selectCodexCatalogModel('gpt-6-sol')
   const reasoningEffortLine = codexReasoningEffortTomlLine(model)
 
   // config.toml content
@@ -1322,7 +1322,7 @@ supports_websockets = false`
 function generateOpenAIWsFiles(baseUrl: string, apiKey: string): FileConfig[] {
   const isWindows = activeTab.value === 'windows'
   const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
-  const model = selectCodexCatalogModel('gpt-6-astra')
+  const model = selectCodexCatalogModel('gpt-6-sol')
   const reasoningEffortLine = codexReasoningEffortTomlLine(model)
 
   // config.toml content with WebSocket v2
@@ -1387,6 +1387,18 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
         xhigh: {},
         max: {}
       }
+    },
+    'gpt-6-sol': {
+      name: 'GPT-6 Sol',
+      limit: { context: 1050000, output: 128000 },
+      options: { store: false },
+      variants: { none: {}, low: {}, medium: {}, high: {}, xhigh: {}, max: {} }
+    },
+    'gpt-6-luna': {
+      name: 'GPT-6 Luna',
+      limit: { context: 1050000, output: 128000 },
+      options: { store: false },
+      variants: { none: {}, low: {}, medium: {}, high: {}, xhigh: {}, max: {} }
     },
     'gpt-5.2': {
       name: 'GPT-5.2',
