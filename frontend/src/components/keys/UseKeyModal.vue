@@ -771,11 +771,13 @@ const currentFiles = computed((): FileConfig[] => {
   switch (props.platform) {
     case 'openai':
       if (activeClientTab.value === 'claude') {
-        return generateAnthropicFiles(baseUrl, apiKey)
+        // Anthropic clients append /v1/messages themselves.
+        return generateAnthropicFiles(baseRoot, apiKey)
       }
       if (activeClientTab.value === 'codex-ws') {
         return generateOpenAIWsFiles(apiBase, apiKey)
       }
+      // Codex appends /responses directly and does not add /v1.
       return generateOpenAIFiles(apiBase, apiKey)
     case 'gemini':
       if (activeClientTab.value === 'codex') {

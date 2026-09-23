@@ -6,6 +6,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Prevalidated JSON must retain semantic reminder filtering, while keyword
+// checks still inspect reminder blocks supplied by the client.
+func TestExtractContentModerationInputFromValidJSON_ReminderPolicies(t *testing.T) {
+	for _, protocol := range []string{
+		ContentModerationProtocolAnthropicMessages,
+		ContentModerationProtocolOpenAIChat,
+		ContentModerationProtocolOpenAIResponses,
+		ContentModerationProtocolGemini,
+	} {
+		t.Run(protocol, func(t *testing.T) {
+			body := reminderTestBody(t, protocol, []string{
+				"<system-reminder>blocked keyword</system-reminder>",
+				"current user prompt",
+			})
+			input := ExtractContentModerationInputFromValidJSON(protocol, body)
+			require.Equal(t, "current user prompt", input.Text)
+			require.Equal(t, ExtractContentModerationInput(protocol, body), input)
+			require.Contains(t, extractContentModerationKeywordText(protocol, body), "blocked keyword")
+		})
+	}
+}
+
 // 当数组末尾不是用户消息时（典型场景：Agent 工具循环结束于 tool/assistant），
 // 应直接跳过审计——不再回溯查找历史中的某条用户消息。
 
@@ -42,6 +64,21 @@ func TestExtractContentModerationInput_AnthropicMultiTurnExtractsLatestUser(t *t
 			{"role":"user","content":"Q1"},
 			{"role":"assistant","content":"A1"},
 			{"role":"user","content":"Q2"}
+		]
+	}`)
+
+	input := ExtractContentModerationInput(ContentModerationProtocolAnthropicMessages, body)
+
+	require.Equal(t, "Q2", input.Text)
+}
+
+func TestExtractContentModerationInput_AnthropicTrailingSystemExtractsLatestUser(t *testing.T) {
+	body := []byte(`{
+		"messages": [
+			{"role":"user","content":"Q1"},
+			{"role":"assistant","content":"A1"},
+			{"role":"user","content":"Q2"},
+			{"role":"system","content":"request metadata"}
 		]
 	}`)
 
