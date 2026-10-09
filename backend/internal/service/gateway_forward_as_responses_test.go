@@ -5,8 +5,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"github.com/Wei-Shaw/sub2api/internal/config"
-	"github.com/tidwall/gjson"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestAdaptResponsesClientToolsForAnthropic_FlattensNamespace(t *testing.T) {

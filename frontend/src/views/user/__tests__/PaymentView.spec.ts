@@ -820,7 +820,7 @@ describe('PaymentView WeChat JSAPI flow', () => {
     expect(window.localStorage.getItem(PAYMENT_RECOVERY_STORAGE_KEY)).toContain('weixin://wxpay/bizpayurl?pr=fallback-native')
   })
 
-  it('previews credited USD with the selected payment method credit rate', async () => {
+  it('previews bonus credit using the selected payment method credit rate', async () => {
     routeState.query = {}
     getCheckoutInfo.mockResolvedValue({
       data: {
@@ -839,6 +839,7 @@ describe('PaymentView WeChat JSAPI flow', () => {
           },
         },
         balance_recharge_multiplier: 0.14,
+        recharge_bonus_tiers: [{ min_amount: 100, bonus_percent: 20 }],
       },
     })
 
@@ -865,7 +866,8 @@ describe('PaymentView WeChat JSAPI flow', () => {
     await nextTick()
 
     expect(wrapper.text()).toContain('payment.creditedBalance')
-    expect(wrapper.text()).toContain('$100.00')
+    expect(wrapper.text()).toContain('$120.00')
+    expect(wrapper.get('[data-testid="recharge-bonus-row"]').text()).toContain('$20.00')
   })
 })
 

@@ -133,8 +133,8 @@ const BaseDialogStub = {
   template: '<div v-if="show"><h2>{{ title }}</h2><slot /><slot name="footer" /></div>',
 }
 const UsageTableStub = {
-  emits: ['row-click'],
-  props: ['data'],
+  emits: ['row-click', 'sort'],
+  props: ['data', 'columns'],
   template: `
     <div>
       <button
@@ -253,9 +253,10 @@ describe('user UsageView', () => {
   })
 
   it('loads logs, stats, model stats, and snapshot on first render', async () => {
-    mountUsageView()
+    const wrapper = mountUsageView()
     await flushPromises()
 
+    expect(wrapper.findComponent(UsageTable).props('columns').map((column: { key: string }) => column.key)).toContain('latency')
     expect(query).toHaveBeenCalled()
     expect(getStats).toHaveBeenCalled()
     expect(getDashboardModels).toHaveBeenCalled()
