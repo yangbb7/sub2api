@@ -33,6 +33,28 @@ func TestSettingService_ParseSettingsMasksTencentCaptchaCredentials(t *testing.T
 	require.Equal(t, "cloud-secret-key", settings.TencentCaptchaCloudSecretKey)
 }
 
+func TestSettingService_ParseSettingsPreservesRegistrationQuotaAndAliyunCaptcha(t *testing.T) {
+	svc := NewSettingService(&settingGetAllRepoStub{values: map[string]string{
+		SettingKeyRegistrationEmailDomainQuotaEnabled: "true",
+		SettingKeyAliyunCaptchaEnabled:                "true",
+		SettingKeyAliyunCaptchaAccessKeyID:            "access-key-id",
+		SettingKeyAliyunCaptchaAccessKeySecret:        "access-key-secret",
+		SettingKeyAliyunCaptchaSceneID:                "scene",
+		SettingKeyAliyunCaptchaPrefix:                 "prefix",
+		SettingKeyAliyunCaptchaRegion:                 AliyunCaptchaRegionSGP,
+	}}, &config.Config{})
+
+	settings, err := svc.GetAllSettings(context.Background())
+	require.NoError(t, err)
+	require.True(t, settings.RegistrationEmailDomainQuotaEnabled)
+	require.True(t, settings.AliyunCaptchaEnabled)
+	require.Equal(t, "access-key-id", settings.AliyunCaptchaAccessKeyID)
+	require.True(t, settings.AliyunCaptchaAccessKeySecretConfigured)
+	require.Equal(t, "scene", settings.AliyunCaptchaSceneID)
+	require.Equal(t, "prefix", settings.AliyunCaptchaPrefix)
+	require.Equal(t, AliyunCaptchaRegionSGP, settings.AliyunCaptchaRegion)
+}
+
 func TestSettingService_GetPublicSettingsExposesOnlyTencentCaptchaAppID(t *testing.T) {
 	svc := NewSettingService(&settingPublicRepoStub{values: map[string]string{
 		SettingKeyTencentCaptchaEnabled:        "true",

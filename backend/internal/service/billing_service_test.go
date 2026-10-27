@@ -135,7 +135,7 @@ func TestGetModelPricing_GPT6SolLuna(t *testing.T) {
 			require.InDelta(t, tt.cacheRead, pricing.CacheReadPricePerToken, 1e-14)
 			require.InDelta(t, tt.cacheWrite, pricing.CacheCreationPricePerToken, 1e-14)
 			require.InDelta(t, tt.input*2, pricing.InputPricePerTokenPriority, 1e-14)
-			require.Equal(t, int64(272_000), pricing.LongContextInputThreshold)
+			require.Equal(t, 272_000, pricing.LongContextInputThreshold)
 			require.Equal(t, 2.0, pricing.LongContextInputMultiplier)
 			require.Equal(t, 1.5, pricing.LongContextOutputMultiplier)
 		}

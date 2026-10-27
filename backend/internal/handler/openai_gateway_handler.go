@@ -965,7 +965,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					// proves the rejected credential cannot have accepted the request.
 					safePoolAuthFailover := !reqStream &&
 						(failoverErr.StatusCode == http.StatusUnauthorized || failoverErr.StatusCode == http.StatusForbidden)
-					if !safePoolAuthFailover && !openAIResponsesSafePreOutputReplay(c, sessionHashBody) {
+					// Grok uses its own bounded credential/rate-limit failover policy.
+					// The OpenAI Responses replay restriction must not suppress it.
+					if account.Platform != service.PlatformGrok && !safePoolAuthFailover && !openAIResponsesSafePreOutputReplay(c, sessionHashBody) {
 						service.StreamAttemptMarkOutcome(c, "retry_blocked_unsafe")
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return

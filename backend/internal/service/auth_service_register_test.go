@@ -450,9 +450,10 @@ func TestAuthService_Register_ReservedEmail(t *testing.T) {
 func TestAuthService_Register_EmailSuffixNotAllowed(t *testing.T) {
 	repo := &userRepoStub{domainCounts: map[string]int{"other.com": 1}}
 	service := newAuthService(repo, map[string]string{
-		SettingKeyRegistrationEnabled:              "true",
-		SettingKeyEmailVerifyEnabled:               "true",
-		SettingKeyRegistrationEmailSuffixWhitelist: `["@example.com","@company.com"]`,
+		SettingKeyRegistrationEmailDomainQuotaEnabled: "true",
+		SettingKeyRegistrationEnabled:                 "true",
+		SettingKeyEmailVerifyEnabled:                  "false",
+		SettingKeyRegistrationEmailSuffixWhitelist:    `["@example.com","@company.com"]`,
 	}, nil, nil)
 
 	_, _, err := service.Register(context.Background(), "user@other.com", "password")
@@ -534,6 +535,7 @@ func TestAuthService_Register_WhitelistDomainAllowedWhenQuotaDisabled(t *testing
 func TestAuthService_SendVerifyCode_NonWhitelistDomainRejectedWhenQuotaDisabled(t *testing.T) {
 	repo := &userRepoStub{domainCounts: map[string]int{"custom.example": 0}}
 	svc := newAuthService(repo, map[string]string{
+		SettingKeyEmailVerifyEnabled:               "true",
 		SettingKeyRegistrationEnabled:              "true",
 		SettingKeyRegistrationEmailSuffixWhitelist: `["@example.com"]`,
 	}, nil, nil)
@@ -545,6 +547,7 @@ func TestAuthService_SendVerifyCode_NonWhitelistDomainRejectedWhenQuotaDisabled(
 func TestAuthService_SendVerifyCodeAsync_NonWhitelistDomainRejectedWhenQuotaDisabled(t *testing.T) {
 	repo := &userRepoStub{domainCounts: map[string]int{"custom.example": 0}}
 	svc := newAuthService(repo, map[string]string{
+		SettingKeyEmailVerifyEnabled:               "true",
 		SettingKeyRegistrationEnabled:              "true",
 		SettingKeyRegistrationEmailSuffixWhitelist: `["@example.com"]`,
 	}, nil, nil)
@@ -580,9 +583,10 @@ func TestAuthService_Register_EmailSuffixAllowed(t *testing.T) {
 func TestAuthService_SendVerifyCode_EmailSuffixNotAllowed(t *testing.T) {
 	repo := &userRepoStub{domainCounts: map[string]int{"other.com": 1}}
 	service := newAuthService(repo, map[string]string{
-		SettingKeyRegistrationEnabled:              "true",
-		SettingKeyEmailVerifyEnabled:               "true",
-		SettingKeyRegistrationEmailSuffixWhitelist: `["@example.com","@company.com"]`,
+		SettingKeyRegistrationEmailDomainQuotaEnabled: "true",
+		SettingKeyRegistrationEnabled:                 "true",
+		SettingKeyEmailVerifyEnabled:                  "true",
+		SettingKeyRegistrationEmailSuffixWhitelist:    `["@example.com","@company.com"]`,
 	}, nil, nil)
 
 	err := service.SendVerifyCode(context.Background(), "user@other.com")
@@ -594,6 +598,7 @@ func TestAuthService_SendVerifyCode_EmailSuffixNotAllowed(t *testing.T) {
 func TestAuthService_SendVerifyCode_NonWhitelistDomainLimit(t *testing.T) {
 	repo := &userRepoStub{domainCounts: map[string]int{"custom.example": 1}}
 	svc := newAuthService(repo, map[string]string{
+		SettingKeyEmailVerifyEnabled:                  "true",
 		SettingKeyRegistrationEnabled:                 "true",
 		SettingKeyRegistrationEmailSuffixWhitelist:    `["@example.com"]`,
 		SettingKeyRegistrationEmailDomainQuotaEnabled: "true",
@@ -606,6 +611,7 @@ func TestAuthService_SendVerifyCode_NonWhitelistDomainLimit(t *testing.T) {
 func TestAuthService_SendVerifyCodeAsync_NonWhitelistDomainLimit(t *testing.T) {
 	repo := &userRepoStub{domainCounts: map[string]int{"custom.example": 1}}
 	svc := newAuthService(repo, map[string]string{
+		SettingKeyEmailVerifyEnabled:                  "true",
 		SettingKeyRegistrationEnabled:                 "true",
 		SettingKeyRegistrationEmailSuffixWhitelist:    `["@example.com"]`,
 		SettingKeyRegistrationEmailDomainQuotaEnabled: "true",
