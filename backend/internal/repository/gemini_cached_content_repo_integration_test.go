@@ -118,3 +118,70 @@ func TestGeminiCachedContentRepository_Lifecycle(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, list, 1)
 }
+
+func TestGeminiCachedContentRepository_PurgeInactive(t *testing.T) {
+	ctx := context.Background()
+	tx := testTx(t)
+	// Isolate the global cleanup query from other integration fixtures.
+	_, err := tx.ExecContext(ctx, `CREATE TEMP TABLE gemini_cached_contents (LIKE public.gemini_cached_contents INCLUDING ALL) ON COMMIT DROP`)
+	require.NoError(t, err)
+	repo := &geminiCachedContentRepository{sql: tx}
+	_, err = tx.ExecContext(ctx, `INSERT INTO gemini_cached_contents
+ (public_id, user_id, api_key_id, group_id, account_id, upstream_name, model, upstream_model, expire_time, deleted_at, mutation_token, mutation_lease_until)
+VALUES
+ ('expired', 1, 1, 1, 1, 'a', 'm', 'm', NOW() - INTERVAL '1 hour', NULL, NULL, NULL),
+ ('deleted', 1, 1, 1, 1, 'b', 'm', 'm', NOW() + INTERVAL '1 hour', NOW() - INTERVAL '2 hours', NULL, NULL),
+ ('active', 1, 1, 1, 1, 'c', 'm', 'm', NOW() + INTERVAL '1 hour', NULL, NULL, NULL),
+ ('pending', 1, 1, 1, 1, 'd', 'm', 'm', NOW() - INTERVAL '1 hour', NULL, 'pending', NOW() + INTERVAL '1 minute'),
+ ('stale', 1, 1, 1, 1, 'e', 'm', 'm', NOW() - INTERVAL '1 hour', NULL, 'stale', NOW() - INTERVAL '1 minute'),
+ ('deleted_pending', 1, 1, 1, 1, 'f', 'm', 'm', NOW() - INTERVAL '1 hour', NOW(), 'deleted_pending', NOW() - INTERVAL '1 minute')`)
+	require.NoError(t, err)
+	count, err := repo.PurgeInactive(ctx, 1)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, count)
+	var exists bool
+	require.NoError(t, tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM gemini_cached_contents WHERE public_id = 'expired')`).Scan(&exists))
+	require.True(t, exists, "remaining eligible rows wait for the next batch")
+	count, err = repo.PurgeInactive(ctx, 1)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, count)
+	count, err = repo.PurgeInactive(ctx, 1000)
+	require.NoError(t, err)
+	require.Zero(t, count, "repeat cleanup is idempotent and preserves every mutation token")
+	var remaining int
+	require.NoError(t, tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM gemini_cached_contents`).Scan(&remaining))
+	require.Equal(t, 4, remaining)
+	active, err := repo.GetForOwner(ctx, 1, "active")
+	require.NoError(t, err)
+	require.Equal(t, "active", active.PublicID)
+	listed, err := repo.ListForOwner(ctx, 1, 1, time.Now(), 0, 10)
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	var staleID int64
+	require.NoError(t, tx.QueryRowContext(ctx, `SELECT id FROM gemini_cached_contents WHERE public_id = 'stale'`).Scan(&staleID))
+	taken, err := repo.TakeOverStaleMutation(ctx, staleID, "recovery", time.Minute)
+	require.NoError(t, err)
+	require.NotNil(t, taken, "cleanup must leave stale mutations recoverable")
+	require.NoError(t, repo.ReleaseMutation(ctx, staleID, "recovery"))
+	count, err = repo.PurgeInactive(ctx, 1000)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, count, "reconciled expired records become eligible")
+}
+
+func TestGeminiCachedContentRepository_PurgeInactiveCapsBatch(t *testing.T) {
+	ctx := context.Background()
+	tx := testTx(t)
+	_, err := tx.ExecContext(ctx, `CREATE TEMP TABLE gemini_cached_contents (LIKE public.gemini_cached_contents INCLUDING ALL) ON COMMIT DROP`)
+	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx, `INSERT INTO gemini_cached_contents
+ (public_id, user_id, api_key_id, group_id, account_id, upstream_name, model, upstream_model, expire_time)
+ SELECT 'expired-' || n, 1, 1, 1, 1, 'a', 'm', 'm', NOW() - INTERVAL '1 hour' FROM generate_series(1, 1001) AS n`)
+	require.NoError(t, err)
+	repo := &geminiCachedContentRepository{sql: tx}
+	count, err := repo.PurgeInactive(ctx, 1000000)
+	require.NoError(t, err)
+	require.EqualValues(t, 1000, count)
+	count, err = repo.PurgeInactive(ctx, 0)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, count)
+}

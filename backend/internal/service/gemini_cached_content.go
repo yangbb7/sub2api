@@ -635,7 +635,7 @@ func NewGeminiCachedContentService(repo GeminiCachedContentRepository, compat *G
 	return &GeminiCachedContentService{repo: repo, compat: compat, cfg: cfg, now: time.Now, stopCh: make(chan struct{})}
 }
 
-// Start 启动后台回滚恢复：定期处理租约已过期仍未清除的修改意图。
+// Start 启动后台回滚恢复与有界过期元数据清理。
 func (s *GeminiCachedContentService) Start() {
 	if s == nil || s.repo == nil {
 		return
@@ -659,6 +659,11 @@ func (s *GeminiCachedContentService) runMutationRecovery() {
 		case <-s.stopCh:
 			return
 		case <-ticker.C:
+			// Cleanup runs even when mutation recovery fails. The repository excludes
+			// all pending tokens, including expired leases, from deletion.
+			if _, err := s.purgeInactive(context.Background()); err != nil {
+				logger.LegacyPrintf("service.gemini_cached_content", "Warning: gemini cached content retention cleanup failed: %v", err)
+			}
 			recovered, err := s.RecoverStaleMutations(context.Background())
 			if err != nil {
 				logger.LegacyPrintf("service.gemini_cached_content", "Warning: gemini cached content mutation recovery failed (recovered=%d): %v", recovered, err)
@@ -667,6 +672,20 @@ func (s *GeminiCachedContentService) runMutationRecovery() {
 			}
 		}
 	}
+}
+
+// Retention is a persistence maintenance capability, separate from the resource
+// API contract. The SQL repository implements it; alternate repositories may not.
+func (s *GeminiCachedContentService) purgeInactive(ctx context.Context) (int64, error) {
+	repo, ok := s.repo.(interface {
+		PurgeInactive(context.Context, int) (int64, error)
+	})
+	if !ok {
+		return 0, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	return repo.PurgeInactive(ctx, 1000)
 }
 
 // Now 返回服务时钟。

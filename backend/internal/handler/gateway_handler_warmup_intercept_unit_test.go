@@ -199,11 +199,16 @@ func newTestGatewayHandler(t *testing.T, group *service.Group, accounts []*servi
 
 func newTestGatewayHandlerWithCache(t *testing.T, group *service.Group, accounts []*service.Account, cache service.GatewayCache) (*GatewayHandler, func()) {
 	t.Helper()
-	return newTestGatewayHandlerWithSchedulerCache(t, group, &fakeSchedulerCache{accounts: accounts})
+	return newTestGatewayHandlerWithSchedulerCache(t, group, &fakeSchedulerCache{accounts: accounts}, cache)
 }
 
-func newTestGatewayHandlerWithSchedulerCache(t *testing.T, group *service.Group, schedulerCache service.SchedulerCache) (*GatewayHandler, func()) {
+func newTestGatewayHandlerWithSchedulerCache(t *testing.T, group *service.Group, schedulerCache service.SchedulerCache, gatewayCaches ...service.GatewayCache) (*GatewayHandler, func()) {
 	t.Helper()
+
+	var cache service.GatewayCache
+	if len(gatewayCaches) > 0 {
+		cache = gatewayCaches[0]
+	}
 
 	schedulerSnapshot := service.NewSchedulerSnapshotService(schedulerCache, nil, nil, nil, nil)
 

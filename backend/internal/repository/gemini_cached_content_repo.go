@@ -170,6 +170,28 @@ func (r *geminiCachedContentRepository) SoftDelete(ctx context.Context, id int64
 	return err
 }
 
+// PurgeInactive removes one bounded batch of unusable metadata. Row locks serialize
+// selection with BeginMutation/CommitMutation; locked rows are left for a later tick.
+// Even expired mutation leases remain protected until recovery clears their token.
+func (r *geminiCachedContentRepository) PurgeInactive(ctx context.Context, limit int) (int64, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 1000
+	}
+	result, err := r.sql.ExecContext(ctx, `WITH candidates AS (
+ SELECT id FROM gemini_cached_contents
+ WHERE mutation_token IS NULL AND LEAST(expire_time, deleted_at) <= NOW()
+ ORDER BY LEAST(expire_time, deleted_at), id
+ LIMIT $1
+ FOR UPDATE SKIP LOCKED
+)
+DELETE FROM gemini_cached_contents AS content USING candidates
+ WHERE content.id = candidates.id AND content.mutation_token IS NULL`, limit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 type geminiCachedContentScanner interface {
 	Scan(dest ...any) error
 }
