@@ -2084,14 +2084,14 @@ func TestFetchCodexModelsManifestAPIKeyCompleteBodyWithoutUpstreamETagUsesFinalB
 
 	first, err := svc.FetchCodexModelsManifest(context.Background(), account, "0.150.0", "")
 	require.NoError(t, err)
-	require.NoError(t, svc.CompleteAPIKeyCodexModelsManifestForClient(first, account))
+	require.NoError(t, svc.CompleteCodexModelsManifestForClient(first, account))
 	require.NoError(t, svc.MergeGroupConfiguredCodexModels(context.Background(), group, first, ""))
 	require.Equal(t, codexModelsManifestBodyETag(first.Body), first.ETag)
 	require.NotEmpty(t, first.ETag)
 
 	second, err := svc.FetchCodexModelsManifest(context.Background(), account, "0.150.0", "")
 	require.NoError(t, err)
-	require.NoError(t, svc.CompleteAPIKeyCodexModelsManifestForClient(second, account))
+	require.NoError(t, svc.CompleteCodexModelsManifestForClient(second, account))
 	require.NoError(t, svc.MergeGroupConfiguredCodexModels(context.Background(), group, second, first.ETag))
 	require.True(t, second.NotModified)
 	require.Empty(t, second.Body)
@@ -2143,7 +2143,20 @@ func TestConvertOpenAIModelListToCodexManifestUsesCompleteDescriptors(t *testing
 	require.Len(t, models[0]["supported_reasoning_levels"], 4)
 }
 
-func TestCompleteAPIKeyCodexModelsManifestForClientPreservesProviderMetadata(t *testing.T) {
+func TestCompleteCodexModelsManifestForClientNormalizesOAuthWithoutLosingNativeMetadata(t *testing.T) {
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	const native = `{"models":[{"slug":"gpt-6.1-terra","visibility":"list","priority":3,"input_modalities":["text","image"],"supported_reasoning_levels":[{"effort":"max"}],"use_responses_lite":true,"new_field":{"supported":true}},{"slug":"future-model","visibility":"hide","new_field":42}]}`
+	manifest := &OpenAIModelsResponse{Body: []byte(native), ETag: `"upstream"`}
+	svc := &OpenAIGatewayService{}
+	require.NoError(t, svc.CompleteCodexModelsManifestForClient(manifest, account))
+	require.JSONEq(t, strings.Replace(native, `"use_responses_lite":true`, `"use_responses_lite":false`, 1), string(manifest.Body))
+	require.Equal(t, codexModelsManifestBodyETag(manifest.Body), manifest.ETag)
+	before := append([]byte(nil), manifest.Body...)
+	require.NoError(t, svc.CompleteCodexModelsManifestForClient(manifest, account))
+	require.Equal(t, before, manifest.Body)
+}
+
+func TestCompleteCodexModelsManifestForClientPreservesProviderMetadata(t *testing.T) {
 	t.Parallel()
 
 	svc := &OpenAIGatewayService{}
@@ -2152,7 +2165,7 @@ func TestCompleteAPIKeyCodexModelsManifestForClientPreservesProviderMetadata(t *
 	}
 	account := newCodexModelsAPIKeyTestAccount("https://upstream.example/v1")
 
-	require.NoError(t, svc.CompleteAPIKeyCodexModelsManifestForClient(manifest, account))
+	require.NoError(t, svc.CompleteCodexModelsManifestForClient(manifest, account))
 	models := decodeCodexManifestModels(t, manifest.Body)
 	require.Len(t, models, 1)
 	requireCompleteConfiguredCodexModel(t, models[0], "grok-4.6")
@@ -2179,7 +2192,7 @@ func TestCompleteAPIKeyCodexModelsManifestForClientPreservesProviderMetadata(t *
 	require.Equal(t, map[string]any{"source": "upstream"}, envelope["metadata"])
 }
 
-func TestCompleteAPIKeyCodexModelsManifestForClientUsesKnownGPTImageFallback(t *testing.T) {
+func TestCompleteCodexModelsManifestForClientUsesKnownGPTImageFallback(t *testing.T) {
 	t.Parallel()
 
 	svc := &OpenAIGatewayService{}
@@ -2190,7 +2203,7 @@ func TestCompleteAPIKeyCodexModelsManifestForClientUsesKnownGPTImageFallback(t *
 	]}`)}
 	account := newCodexModelsAPIKeyTestAccount("https://openai-compatible.example.test/v1")
 
-	require.NoError(t, svc.CompleteAPIKeyCodexModelsManifestForClient(manifest, account))
+	require.NoError(t, svc.CompleteCodexModelsManifestForClient(manifest, account))
 	models := decodeCodexManifestModels(t, manifest.Body)
 	require.Len(t, models, 3)
 
@@ -2206,7 +2219,7 @@ func TestCompleteAPIKeyCodexModelsManifestForClientUsesKnownGPTImageFallback(t *
 }
 
 // Scenario: 标准 /models 型号列表优先使用已同步账号能力，再使用本地 descriptor 兜底。
-func TestCompleteAPIKeyCodexModelsManifestForClientUsesSyncedMetadataForConvertedModelList(t *testing.T) {
+func TestCompleteCodexModelsManifestForClientUsesSyncedMetadataForConvertedModelList(t *testing.T) {
 	t.Parallel()
 
 	reasoning := true
@@ -2231,7 +2244,7 @@ func TestCompleteAPIKeyCodexModelsManifestForClientUsesSyncedMetadataForConverte
 
 	manifest, err := svc.FetchCodexModelsManifest(context.Background(), account, "0.150.0", "")
 	require.NoError(t, err)
-	require.NoError(t, svc.CompleteAPIKeyCodexModelsManifestForClient(manifest, account))
+	require.NoError(t, svc.CompleteCodexModelsManifestForClient(manifest, account))
 
 	models := decodeCodexManifestModels(t, manifest.Body)
 	require.Len(t, models, 1)
@@ -2244,7 +2257,7 @@ func TestCompleteAPIKeyCodexModelsManifestForClientUsesSyncedMetadataForConverte
 	require.EqualValues(t, 999_000, models[0]["max_context_window"])
 }
 
-func TestCompleteAPIKeyCodexModelsManifestForClientFillsMissingProviderFieldsWithoutOverwritingExplicitMetadata(t *testing.T) {
+func TestCompleteCodexModelsManifestForClientFillsMissingProviderFieldsWithoutOverwritingExplicitMetadata(t *testing.T) {
 	t.Parallel()
 
 	reasoning := true
@@ -2266,7 +2279,7 @@ func TestCompleteAPIKeyCodexModelsManifestForClientFillsMissingProviderFieldsWit
 	}]}`)}
 	svc := &OpenAIGatewayService{}
 
-	require.NoError(t, svc.CompleteAPIKeyCodexModelsManifestForClient(manifest, account))
+	require.NoError(t, svc.CompleteCodexModelsManifestForClient(manifest, account))
 	models := decodeCodexManifestModels(t, manifest.Body)
 	require.Len(t, models, 1)
 	require.Equal(t, "Synced Display", models[0]["display_name"])
@@ -2279,7 +2292,7 @@ func TestCompleteAPIKeyCodexModelsManifestForClientFillsMissingProviderFieldsWit
 }
 
 // Scenario: 原生 manifest 的缺失字段在命中缓存后仍使用账号当前同步快照，而不是缓存中的本地默认值。
-func TestCompleteAPIKeyCodexModelsManifestForClientUsesCurrentSnapshotForCachedNativeManifest(t *testing.T) {
+func TestCompleteCodexModelsManifestForClientUsesCurrentSnapshotForCachedNativeManifest(t *testing.T) {
 	t.Parallel()
 
 	reasoning := true
@@ -2313,7 +2326,7 @@ func TestCompleteAPIKeyCodexModelsManifestForClientUsesCurrentSnapshotForCachedN
 
 	first, err := svc.FetchCodexModelsManifest(context.Background(), account, "0.150.0", "")
 	require.NoError(t, err)
-	require.NoError(t, svc.CompleteAPIKeyCodexModelsManifestForClient(first, account))
+	require.NoError(t, svc.CompleteCodexModelsManifestForClient(first, account))
 	firstModel := decodeCodexManifestModels(t, first.Body)[0]
 	require.Equal(t, "Synced DeepSeek", firstModel["display_name"])
 	require.Equal(t, "Provider supplied", firstModel["description"])
@@ -2325,7 +2338,7 @@ func TestCompleteAPIKeyCodexModelsManifestForClientUsesCurrentSnapshotForCachedN
 	setSnapshot("Refreshed DeepSeek", 512_000)
 	second, err := svc.FetchCodexModelsManifest(context.Background(), account, "0.150.0", "")
 	require.NoError(t, err)
-	require.NoError(t, svc.CompleteAPIKeyCodexModelsManifestForClient(second, account))
+	require.NoError(t, svc.CompleteCodexModelsManifestForClient(second, account))
 	secondModel := decodeCodexManifestModels(t, second.Body)[0]
 	require.Equal(t, "Refreshed DeepSeek", secondModel["display_name"])
 	require.Equal(t, "Provider supplied", secondModel["description"])
@@ -2333,14 +2346,14 @@ func TestCompleteAPIKeyCodexModelsManifestForClientUsesCurrentSnapshotForCachedN
 	require.Equal(t, int32(1), calls.Load(), "second response should use the cached upstream source body")
 }
 
-func TestCompleteAPIKeyCodexModelsManifestForClientMarksOnlyOfficialVisionGPTImageInput(t *testing.T) {
+func TestCompleteCodexModelsManifestForClientMarksOnlyOfficialVisionGPTImageInput(t *testing.T) {
 	t.Parallel()
 
 	svc := &OpenAIGatewayService{}
 	manifest := &OpenAIModelsResponse{Body: []byte(`{"models":[{"slug":"gpt-6-astra"},{"slug":"gpt-5.6-sol"},{"slug":"gpt-4o"},{"slug":"gpt-3.5-turbo"},{"slug":"gpt-4"}]}`)}
 	account := newCodexModelsAPIKeyTestAccount("")
 
-	require.NoError(t, svc.CompleteAPIKeyCodexModelsManifestForClient(manifest, account))
+	require.NoError(t, svc.CompleteCodexModelsManifestForClient(manifest, account))
 	models := decodeCodexManifestModels(t, manifest.Body)
 	require.Len(t, models, 5)
 
@@ -2361,14 +2374,14 @@ func TestCompleteAPIKeyCodexModelsManifestForClientMarksOnlyOfficialVisionGPTIma
 	require.Equal(t, codexModelsManifestBodyETag(manifest.Body), manifest.ETag)
 }
 
-func TestCompleteAPIKeyCodexModelsManifestForClientFiltersOfficialNonAgentModels(t *testing.T) {
+func TestCompleteCodexModelsManifestForClientFiltersOfficialNonAgentModels(t *testing.T) {
 	t.Parallel()
 
 	svc := &OpenAIGatewayService{}
 	manifest := &OpenAIModelsResponse{Body: []byte(`{"models":[{"slug":"gpt-5.6-sol"},{"slug":"gpt-4o-realtime-preview"},{"slug":"gpt-4o-mini-tts"},{"slug":"text-embedding-3-large"},{"slug":"omni-moderation-latest"},{"slug":"o4-mini"},{"slug":"codex-mini-latest"}]}`)}
 	account := newCodexModelsAPIKeyTestAccount("")
 
-	require.NoError(t, svc.CompleteAPIKeyCodexModelsManifestForClient(manifest, account))
+	require.NoError(t, svc.CompleteCodexModelsManifestForClient(manifest, account))
 	require.Equal(t, []string{"gpt-5.6-sol", "o4-mini", "codex-mini-latest"}, codexManifestModelSlugs(t, manifest.Body))
 	require.Equal(t, codexModelsManifestBodyETag(manifest.Body), manifest.ETag)
 }
@@ -2816,7 +2829,7 @@ func TestFetchCodexModelsManifestAPIKeyCacheSurvivesClientMutation(t *testing.T)
 	require.Contains(t, string(first.Body), "model-a")
 	require.Contains(t, string(first.Body), "model-b")
 
-	require.NoError(t, s.CompleteAPIKeyCodexModelsManifestForClient(first, account))
+	require.NoError(t, s.CompleteCodexModelsManifestForClient(first, account))
 	require.NoError(t, s.MergeGroupConfiguredCodexModels(
 		context.Background(),
 		&Group{
@@ -3798,7 +3811,7 @@ func TestGPT6SolLunaCatalogKeepsAuthoritativeCapabilities(t *testing.T) {
 		svc := &OpenAIGatewayService{}
 		manifest := &OpenAIModelsResponse{Body: []byte(`{"models":[{"slug":"` + id + `","supported_reasoning_levels":[{"effort":"ultra"}],"default_reasoning_level":"ultra","multi_agent_reasoning_effort":"xhigh","service_tiers":[{"id":"ultrafast"}],"context_window":300000,"max_context_window":900000,"supports_search_tool":false,"apply_patch_tool_type":null}]}`)}
 		account := newCodexModelsAPIKeyTestAccount("https://api.openai.com/v1")
-		require.NoError(t, svc.CompleteAPIKeyCodexModelsManifestForClient(manifest, account))
+		require.NoError(t, svc.CompleteCodexModelsManifestForClient(manifest, account))
 		models := decodeCodexManifestModels(t, manifest.Body)
 		require.Len(t, models, 1)
 		require.Equal(t, []string{"ultra"}, effortsFromManifestModel(t, models[0]))

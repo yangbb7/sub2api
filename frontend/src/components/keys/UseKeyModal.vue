@@ -197,6 +197,9 @@
                 <option value="remote" :disabled="codexModelCatalogOversized">{{ t('keys.useKeyModal.codexModelCatalog.remote') }}</option>
                 <option value="file">{{ t('keys.useKeyModal.codexModelCatalog.local') }}</option>
               </select>
+              <p v-if="codexModelCatalogMode === 'remote'" class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('keys.useKeyModal.codexModelCatalog.remoteDescription') }}
+              </p>
               <p v-if="codexModelCatalogOversized" class="mt-2 text-xs text-amber-700 dark:text-amber-300">
                 {{ t('keys.useKeyModal.codexModelCatalog.oversized') }}
               </p>

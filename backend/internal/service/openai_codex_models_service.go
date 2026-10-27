@@ -2088,6 +2088,7 @@ func CodexModelsManifestETag(body []byte) string {
 
 var apiKeyCodexModelsWithoutResponsesLite = map[string]struct{}{
 	"gpt-6.1-sol":   {},
+	"gpt-6.1-terra": {},
 	"gpt-6-astra":   {},
 	"gpt-6-sol":     {},
 	"gpt-6-luna":    {},
@@ -2230,14 +2231,25 @@ func convertOpenAIModelListToCodexManifestForAccount(body []byte, account *Accou
 	return converted
 }
 
-// completeAPIKeyCodexModelsManifestMetadata fills fields omitted by standard
-// OpenAI-compatible /models endpoints. Existing provider metadata always wins;
-// only absent or null values are synthesized.
-// CompleteAPIKeyCodexModelsManifestForClient fills the complete ModelInfo
-// contract immediately before a group-specific API key manifest is returned.
-// The shared upstream cache remains independent from local group policy.
-func (s *OpenAIGatewayService) CompleteAPIKeyCodexModelsManifestForClient(manifest *OpenAIModelsResponse, account *Account) error {
-	if manifest == nil || account == nil || !account.IsOpenAIApiKey() || manifest.NotModified || len(manifest.Body) == 0 {
+// CompleteCodexModelsManifestForClient preserves native OAuth metadata and
+// fills missing API-key provider fields before applying downstream gateway
+// compatibility. Shared upstream caches remain independent of these edits.
+func (s *OpenAIGatewayService) CompleteCodexModelsManifestForClient(manifest *OpenAIModelsResponse, account *Account) error {
+	if manifest == nil || account == nil || manifest.NotModified || len(manifest.Body) == 0 {
+		return nil
+	}
+	// Downstream clients authenticate with gateway API keys even when the
+	// source account uses ChatGPT OAuth. Keep native metadata intact, but
+	// apply the same Responses compatibility policy to both source types.
+	if !account.IsOpenAIApiKey() {
+		body, err := adjustAPIKeyCodexModelsManifest(manifest.Body, nil)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(body, manifest.Body) {
+			manifest.Body = body
+			manifest.ETag = codexModelsManifestBodyETag(body)
+		}
 		return nil
 	}
 	body := manifest.Body

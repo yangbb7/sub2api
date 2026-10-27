@@ -131,7 +131,7 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 			h.errorResponse(c, infraerrors.Code(err), "upstream_error", infraerrors.Message(err))
 			return
 		}
-		if err := h.gatewayService.CompleteAPIKeyCodexModelsManifestForClient(manifest, account); err != nil {
+		if err := h.gatewayService.CompleteCodexModelsManifestForClient(manifest, account); err != nil {
 			h.errorResponse(c, http.StatusInternalServerError, "api_error", "Failed to complete Codex models manifest")
 			return
 		}

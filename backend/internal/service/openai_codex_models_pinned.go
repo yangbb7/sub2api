@@ -128,7 +128,7 @@ func (s *OpenAIGatewayService) FetchPinnedCodexModelsManifest(ctx context.Contex
 		if err != nil {
 			return nil, err
 		}
-		if err := s.CompleteAPIKeyCodexModelsManifestForClient(manifest, account); err != nil {
+		if err := s.CompleteCodexModelsManifestForClient(manifest, account); err != nil {
 			return nil, err
 		}
 		if err := ApplyPinnedCodexModelsMapping(manifest, account, group); err != nil {

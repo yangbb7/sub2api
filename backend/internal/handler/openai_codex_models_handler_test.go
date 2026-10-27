@@ -799,6 +799,50 @@ func TestCodexModelsPinnedAccountsMergeUnionWithoutScheduler(t *testing.T) {
 	require.Equal(t, []int64{2, 3}, upstream.accountIDs(), "固定账号模式不得调用调度器或非固定账号")
 }
 
+// New upstream models must retain their complete native capabilities without
+// requiring a gateway release or a model_catalog_json file on each client.
+func TestCodexModelsPinnedPreservesNativeCapabilities(t *testing.T) {
+	account := newPinnedCodexAccount(35, service.StatusActive, true, false)
+	account.Credentials = map[string]any{
+		"api_key":  "test-api-key",
+		"base_url": "https://upstream.example/v1",
+		"model_mapping": map[string]any{
+			"gpt-6.1-terra":        "gpt-6.1-terra",
+			"future-coder":         "future-coder",
+			"gpt-4o-audio-preview": "gpt-4o-audio-preview",
+		},
+	}
+	upstream := &codexModelsPinnedHTTPUpstream{bodies: map[int64]string{
+		35: `{"models":[{"slug":"gpt-6.1-terra","display_name":"GPT-6.1 Terra","visibility":"list","priority":3,"default_reasoning_level":"low","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}],"input_modalities":["text","image"],"context_window":500000,"max_context_window":872000,"use_responses_lite":true,"new_capability":{"supported":true}},{"slug":"future-coder","visibility":"list","input_modalities":["text","image"],"future_field":"preserved"}]}`,
+	}}
+	handler := newPinnedCodexTestHandler([]service.Account{account}, upstream, 3)
+	group := &service.Group{ID: 85, Platform: service.PlatformOpenAI,
+		CodexModelsManifestConfig: service.GroupCodexModelsManifestConfig{Enabled: true, AccountIDs: []int64{35}},
+	}
+	first := performPinnedCodexModelsRequest(t, handler, group, "")
+	require.Equal(t, http.StatusOK, first.Code, first.Body.String())
+	require.Equal(t, []string{"gpt-6.1-terra", "future-coder"}, codexHandlerManifestSlugs(t, first))
+	var body struct {
+		Models []map[string]any `json:"models"`
+	}
+	require.NoError(t, json.Unmarshal(first.Body.Bytes(), &body))
+	terra := body.Models[0]
+	require.Equal(t, "GPT-6.1 Terra", terra["display_name"])
+	require.Equal(t, "low", terra["default_reasoning_level"])
+	require.Len(t, terra["supported_reasoning_levels"], 6)
+	require.Equal(t, []any{"text", "image"}, terra["input_modalities"])
+	require.EqualValues(t, 500000, terra["context_window"])
+	require.EqualValues(t, 872000, terra["max_context_window"])
+	require.Equal(t, false, terra["use_responses_lite"])
+	require.Equal(t, map[string]any{"supported": true}, terra["new_capability"])
+	require.Equal(t, "preserved", body.Models[1]["future_field"])
+	require.NotContains(t, first.Body.String(), "gpt-4o-audio-preview")
+	require.Equal(t, service.CodexModelsManifestETag(first.Body.Bytes()), first.Header().Get("ETag"))
+	second := performPinnedCodexModelsRequest(t, handler, group, first.Header().Get("ETag"))
+	require.Equal(t, http.StatusNotModified, second.Code)
+	require.Empty(t, second.Body.Bytes())
+}
+
 func TestCodexModelsPinnedAccountsUseRateLimitedAccountAndSkipUnavailable(t *testing.T) {
 	accounts := []service.Account{
 		newPinnedCodexAccount(2, service.StatusActive, true, true),    // 限流中：仍被使用
