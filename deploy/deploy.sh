@@ -19,6 +19,7 @@ HEALTH_REQUIRED_STREAK="${HEALTH_REQUIRED_STREAK:-5}"
 # Cloudflare and Caddy, so it does not bypass public-route verification.
 PUBLIC_VERIFICATION_SOURCE="${PUBLIC_VERIFICATION_SOURCE:-local}"
 KEEP_ROLLBACKS="${KEEP_ROLLBACKS:-1}"
+PRESERVE_GATEWAY_HISTORY="${PRESERVE_GATEWAY_HISTORY:-0}"
 DEPLOY_STRATEGY="${DEPLOY_STRATEGY:-auto}"
 # A 2GiB host cannot retain two full 896MiB gateways during a blue-green
 # cutover. The serial strategy briefly overlaps the active gateway with a
@@ -57,6 +58,8 @@ Required:
 
 Emergency rollback:
   deploy/rollback.sh
+
+Set PRESERVE_GATEWAY_HISTORY=1 to skip pruning historical gateway containers.
 EOF
 }
 
@@ -225,6 +228,10 @@ validate_runtime_overrides() {
   case "${DEPLOY_STRATEGY}" in
     auto|bluegreen|serial) ;;
     *) die "DEPLOY_STRATEGY must be auto, bluegreen, or serial." ;;
+  esac
+  case "${PRESERVE_GATEWAY_HISTORY}" in
+    0|1) ;;
+    *) die "PRESERVE_GATEWAY_HISTORY must be 0 or 1." ;;
   esac
   case "${PUBLIC_VERIFICATION_SOURCE}" in
     local|remote) ;;
@@ -874,6 +881,14 @@ REMOTE
   rm -f "${tmp}"
 }
 
+maybe_cleanup_old_gateways() {
+  if [ "${PRESERVE_GATEWAY_HISTORY}" = 1 ]; then
+    echo "Preserving historical gateway containers."
+    return 0
+  fi
+  cleanup_old_gateways "$@"
+}
+
 main() {
   if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
     usage
@@ -935,7 +950,7 @@ main() {
   # Caddy, the new gateway and public probes are verified, an inability to
   # remove an already-stopped historical container must not report the whole
   # deploy as failed or trigger an unnecessary recovery action.
-  if ! cleanup_old_gateways "${deployed_gateway}" "${active_gateway}" "${KEEP_ROLLBACKS}"; then
+  if ! maybe_cleanup_old_gateways "${deployed_gateway}" "${active_gateway}" "${KEEP_ROLLBACKS}"; then
     echo "WARN: deployment is healthy, but stale gateway cleanup did not complete." >&2
   fi
 

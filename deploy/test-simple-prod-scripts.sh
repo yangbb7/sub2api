@@ -213,6 +213,23 @@ assert_contains "${DEPLOY_SCRIPT}" 'cleanup_old_gateways' \
   "deploy.sh must prune old blue/green gateway containers after a verified deploy"
 assert_contains "${DEPLOY_SCRIPT}" 'KEEP_ROLLBACKS' \
   "deploy.sh must keep a bounded number of rollback gateway containers"
+ENV_FILE="${runtime_env}" bash -s "${testable_deploy_script}" <<'BASH'
+source "$1"
+cleanup_calls=0
+cleanup_old_gateways() { cleanup_calls=$((cleanup_calls + 1)); }
+PRESERVE_GATEWAY_HISTORY=1
+maybe_cleanup_old_gateways new-gateway old-gateway 1
+[ "${cleanup_calls}" -eq 0 ] || {
+  echo "deploy.sh removed history despite PRESERVE_GATEWAY_HISTORY=1" >&2
+  exit 1
+}
+PRESERVE_GATEWAY_HISTORY=0
+maybe_cleanup_old_gateways new-gateway old-gateway 1
+[ "${cleanup_calls}" -eq 1 ] || {
+  echo "deploy.sh did not run ordinary gateway cleanup" >&2
+  exit 1
+}
+BASH
 assert_contains "${DEPLOY_SCRIPT}" 'DEPLOY_STRATEGY=.*auto' \
   "deploy.sh must automatically use serial deployment on memory-constrained hosts"
 assert_contains "${DEPLOY_SCRIPT}" 'stop_inactive_gateways' \
