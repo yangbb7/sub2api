@@ -46,16 +46,22 @@ type anthropicNativeLinePump struct {
 	timer    *time.Timer
 	interval time.Duration
 	// Optional downstream heartbeat, serviced by the same goroutine that reads lines.
-	tick   <-chan time.Time
-	onTick func()
+	tick        <-chan time.Time
+	onTick      func()
+	queueBudget *sseQueueBudget
 }
 
 // newAnthropicNativeLinePump 启动泵 goroutine；调用方 defer pump.stop()。
-func newAnthropicNativeLinePump(scanner *bufio.Scanner, interval time.Duration) *anthropicNativeLinePump {
+func newAnthropicNativeLinePump(scanner *bufio.Scanner, interval time.Duration, configs ...*config.Config) *anthropicNativeLinePump {
+	var cfg *config.Config
+	if len(configs) > 0 {
+		cfg = configs[0]
+	}
 	p := &anthropicNativeLinePump{
-		events:   make(chan anthropicNativeLineEvent, 16),
-		done:     make(chan struct{}),
-		interval: interval,
+		events:      make(chan anthropicNativeLineEvent, 16),
+		done:        make(chan struct{}),
+		interval:    interval,
+		queueBudget: newSSEQueueBudget(cfg),
 	}
 	if interval > 0 {
 		p.timer = time.NewTimer(interval)
@@ -63,9 +69,13 @@ func newAnthropicNativeLinePump(scanner *bufio.Scanner, interval time.Duration) 
 	go func() {
 		defer close(p.events)
 		for scanner.Scan() {
+			if !p.queueBudget.acquire(len(scanner.Bytes()), p.done) {
+				return
+			}
 			select {
 			case p.events <- anthropicNativeLineEvent{line: scanner.Text()}:
 			case <-p.done:
+				p.queueBudget.release(len(scanner.Bytes()))
 				return
 			}
 		}
@@ -118,6 +128,9 @@ func (p *anthropicNativeLinePump) nextOrClientGone(clientGone <-chan struct{}) (
 func (p *anthropicNativeLinePump) deliver(ev anthropicNativeLineEvent, ok bool) (string, error) {
 	if !ok {
 		return "", io.EOF
+	}
+	if p.queueBudget != nil {
+		p.queueBudget.release(len(ev.line))
 	}
 	p.resetTimer()
 	return ev.line, ev.err

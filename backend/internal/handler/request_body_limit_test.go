@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -104,4 +105,40 @@ func TestResponsesRequestBodyLimitBoundsDecompressedBodies(t *testing.T) {
 func TestResponsesBodyLimitFallsBackToGeneralGatewayLimitWhenDisabled(t *testing.T) {
 	cfg := &config.Config{Gateway: config.GatewayConfig{MaxBodySize: 64}}
 	require.Equal(t, int64(64), responsesMaxBodySize(cfg))
+}
+
+func TestHandleRequestBodyReadErrorCancellation(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		cancelled bool
+		committed bool
+	}{
+		{name: "cancelled", cancelled: true},
+		{name: "cancelled_after_commit", cancelled: true, committed: true},
+		{name: "ordinary_read_error"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tc.cancelled {
+				cancel()
+			}
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
+			if tc.committed {
+				_, err := c.Writer.WriteString("already committed")
+				require.NoError(t, err)
+			}
+			bodyBefore := recorder.Body.String()
+			require.Equal(t, tc.cancelled, handleRequestBodyReadError(c, io.ErrUnexpectedEOF))
+			require.Equal(t, tc.cancelled, c.IsAborted())
+			status := http.StatusOK
+			if tc.cancelled && !tc.committed {
+				status = statusClientClosedRequest
+			}
+			require.Equal(t, status, c.Writer.Status())
+			require.Equal(t, bodyBefore, recorder.Body.String(), "cancelled clients must not receive an error body")
+		})
+	}
 }
